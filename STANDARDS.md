@@ -7,7 +7,13 @@ to evolve as our needs change.
 
 # Changelog
 
+## 17/01/2025
+
+* Changed 'signposting' and 'telegraphing' to 'self-indicating' for clarity
+
 ## 18/12/2024
+
+* First draft
 
 ### Added
 
@@ -43,8 +49,7 @@ and we forget things or make decisions that, perhaps, may not be ideal at the
 time. Therefore, limiting cognitive load is good for us, as it reduces the
 amount of trouble we can inflict due to said skull limitations. One of the worst
 contributors to cognitive load (after inconsistency) is _non-local information_
-
-* the requirement to have some understanding beyond the scope of the current
+- the requirement to have some understanding beyond the scope of the current
 unit of work. That unit of work can be a data type, a module, or even a whole
 project; in all cases, the more non-local information we require ourselves to
 hold in our minds, the less space that leaves for actually doing the task at
@@ -65,7 +70,7 @@ would be difficult for other Haskellers to follow, regardless of skill level.
 ## Minimize impact of legacy
 
 Haskell is a language that is older than some of the people currently writing
-it; parts of its ecosystem are not exempt from it. With age comes legacy, and
+it; parts of its ecosystem are not exempt from this. With age comes legacy, and
 much of it is based on historical decisions which we now know to be problematic
 or wrong. We can't avoid our history, but we can minimize its impact on our
 current work.
@@ -174,7 +179,7 @@ be placed everywhere.
 
 It benefits everyone if tests run as fast as possible: since parallel
 capabilities are available (and can be used automatically with Tasty), we should
-do that. The flags specified guarantee that parallelism is automatically used;
+use them. The flags specified guarantee that parallelism is automatically used;
 furthermore, we use ``-O2`` to make sure we get the benefit of most
 optimizations. We do something similar for benchmarks, but because parallelism
 can interfere with benchmark measurements, we don't require the same flag set.
@@ -302,7 +307,9 @@ specific developer’s machine. Having the CI not only build the project, but
 also run its tests, can help ensure that we don’t accidentally create
 regressions, and also reduces reviewer cognitive load.
 
-We can also use CI to ensure that 
+We can also use CI to ensure that our code formatting standards are maintained,
+and any mistakes or omissions caught quickly. This also reduces the work of
+reviewers, as formatting requirements can be quite tedious to check.
 
 # Code practices
 
@@ -603,12 +610,14 @@ Our choice of default extensions is driven by the following considerations:
   language in new (or surprising) ways?
 * Does it make GHC Haskell behave similarly to other languages, particularly in
   smaller and narrower-context issues of syntax?
-* Is this extension something that needs ‘signposting’, in that it involves
-  additional thought or context that wouldn’t be needed otherwise?
+* Is this extension something that needs 'indicating', in that it involves
+  additional thought or context which is not conveyed by the use site
+  explicitly?
 
 Extensions that are widely-used or highly useful, iron out bad legacy,
 increase similarity in certain syntactical features common to many languages,
-and that don’t require signposting are the primary candidates for inclusion by
+and that don’t require 'indicating' by way of comments or implicit context, 
+are the primary candidates for inclusion by
 default. Additionally, some other standards defined in this document mandate
 certain extensions anyway: in this case, having them on by default saves us
 having to enable them per-module, which we would have to do otherwise. Lastly,
@@ -620,8 +629,8 @@ always-on doesn’t really do anything other than save us needless typing.
 repeatedly using ``seq``. They are not confusing, and are considered
 ubiquitous enough for inclusion into the ``GHC2021`` and ``GHC2024``
 standards. Having this
-extension on by default simplifies a lot of performance tuning work, and
-doesn’t really require signposting.
+extension on by default simplifies a lot of performance tuning work, and it
+doesn't require 'indicating'.
 
 ``BinaryLiterals``, ``HexFloatLiterals`` and ``NumericUnderscores`` all
 simulate syntactic features that are found in many (or even most) other
@@ -642,8 +651,9 @@ amount of non-local information about derivation priorities. Secondly,
 ``DerivingVia`` enables considerable savings in boilerplate in combination
 with other extensions that we enable either directly or by implication. While
 technically, only ``DerivingStrategies`` would be sufficient for our
-requirements, since ``DerivingVia`` is not mandatory and is clearly
-signposted, while having no effects beyond its use sites, we enable it
+requirements, since ``DerivingVia`` is not required to use named derivations as
+such, and `DerivingVia` doesn't require 'indicating', while having no effects 
+beyond its use sites, we enable it
 globally for its usefulness.
 
 ``DeriveTraversable``, together with ``GeneralizedNewtypeDeriving``, allows us
@@ -684,7 +694,9 @@ least means such derivations can be done at all. Having this globally enabled
 makes this inconsistency slightly less visible, and due to ``Traversable``’s
 lawfulness, is completely safe. While this merely provides _a_ derivation for a
 lawful ``Traversable``, rather than _the_ lawful ``Traversable``, this is
-still useful and requires no signposting.
+still useful, and doesn't require 'indicating': if you don't derive
+`Traversable`, it doesn't matter, and if you do, it only matters for the type
+in question, and won't break any laws anyway.
 
 ``DuplicateRecordFields`` and ``NoFieldSelectors`` is part of the constellation
 of extensions designed to address the deficiencies of Haskell2010 records. In
@@ -715,8 +727,10 @@ general (via optics).
 
 ``EmptyCase`` resolves an inconsistency in Haskell2010, as the report allows
 us to _define_ an empty data type (that is, one with no constructors), but not
-pattern match on it. This should really be in the language, and enabling this
-globally resolves a strange inconsistency in the language at no real cost.
+[exhaustively match on
+it](https://ghc.gitlab.haskell.org/ghc/doc/users_guide/exts/empty_case.html).
+This is a strange inconsistency, and should really be part of the language;
+enabling it everywhere has no real cost.
 
 ``FlexibleContexts`` and ``FlexibleInstances`` paper over a major deficiency in
 Haskell2010, which isn’t well-motivated in general. There is no real reason to
@@ -770,9 +784,7 @@ libraries, including ``mtl`` and ``vector``, and in many situations. Almost
 any project of non-trivial size must have this extension enabled somewhere,
 and if the code makes significant use of ``mtl``-style monad transformers, or
 defines anything non-trivial for ``vector``, ``MultiParamTypeClasses`` must be
-enabled. Furthermore, Plutus makes use of several multi-parameter type classes
-(such as ``FromBuiltin`` and ``ToBuiltin``), which also need
-``MultiParamTypeClasses`` on to even make use of. Additionally, the original
+enabled. Additionally, the original
 restriction in Haskell2010 solved by this extension is, much like
 ``FlexibleInstances`` and ``FlexibleContexts``, put in place for no reason
 other than the convenience of compiler writers. Lastly, although having this
@@ -785,7 +797,8 @@ applies in one of two situations:
   dependencies, which we can't do much about anyway.
 
 Enabling ``MultiParamTypeClasses`` globally is practically a necessity given
-all of these, and is clear enough that it doesn’t need signposting.
+all of these, and is clear enough that it doesn’t need 'indicating' in almost
+any case.
 
 ``NoStarIsType`` is a perfect example of a GHC extension covering a legacy
 choice, and a questionable one even then. ``*`` being used to refer to ‘the
@@ -893,9 +906,9 @@ default inevitable, and arguably even the right thing to do.
 using ``via``-derivations with complex constraints, such as those driven by
 type families, or for GADTs. This can pose some syntactic difficulties
 (especially with ``via`` derivations), but the extension is not problematic in
-and of itself, as it doesn’t really change how the language works, and is
-self-signposting. Having ``StandaloneDeriving`` enabled by default is thus
-not problematic.
+and of itself, as it doesn’t really change how the language works, and does not
+require 'indicating', due to looking different from non-standalone derivations. 
+Having ``StandaloneDeriving`` enabled by default is thus not problematic.
 
 ``TupleSections`` smooths out an oddity in the syntax of Haskell2010 regarding
 partial application of tuple constructors. Given a data type like this:
@@ -914,22 +927,26 @@ also smooths out an inconsistency that doesn’t apply to anything else.
 ``TypeApplications`` is so widely used that it would likely be enabled everywhere
 anyway. Modern Haskell APIs now prefer to
 take type arguments directly, rather than passing a ``Proxy`` or an
-``undefined`` (as was done before). Furthermore, ``TypeApplications`` is
-self-telegraphing, and poses no problems for us, as we consider type arguments
-and their order to be part of the API, and require explicit ``foralls`` and
+``undefined`` (as was done before). Furthermore, ``TypeApplications`` does not
+require 'indicating' (as type arguments look different to value arguments).
+While `TypeApplications` can pose some problems by making the order of type
+variables part of an API, this does not pose any problems for us, as we consder
+type arguments part of the API anyway, requiring explicit ``forall``s and
 signatures.
 
 ``TypeFamilies`` and ``UndecidableInstances`` are enabled as part of our records
-solution. These are enabled globally for the same reason
-``DuplicateRecordFields`` is: we'd need them almost everywhere anyway.
+solution. `TypeFamilies` is needed to declare an associated optic type for any
+field which has an instance (as those can be different depending on the field),
+while `UndecidableInstances` is required because the field optic type class is
+multi-parameter. Thus, we enable these extensions globally for the same reason
+as ``DuplicateRecordFields``: we'd need them almost everywhere anyway.
 
 We exclude ``DeriveDataTypeable``, as ``Data`` is a strictly-worse legacy
 version of ``Generic``, while ``Typeable`` derivations are not needed anymore.
 The only reason to enable this extension, and indeed, use either derivation,
 is for compatibility with legacy libraries, which we don’t need any of, and
-the number of which shrinks every year. Furthermore, ``Data`` is conflictingly
-named with the ``Data`` from Plutus Core, which we use at least some of the
-time. If we’re using this extension at all, it’s probably a mistake.
+the number of which shrinks every year. If we’re using this extension at all, 
+it’s probably a mistake.
 
 ``PartialTypeSignatures`` is a misfeature. Allowing leaving in type holes
 (to be filled by GHC’s inference algorithm) in finished code is an
@@ -1022,12 +1039,15 @@ limited to:
 
 * Two records with the same field name can’t be used or defined at the same
   time, even if they come from different modules and their use would not be
-  ambiguous. Confusingly, they can be in scope if not used or defined!
+  ambiguous. Confusingly, they can be in scope via imports, but _not_ if you use
+  them as part of another definition!
 * Field selectors for _reads_ behave like functions, but for _writes_ are
   awkward, especially for nested use.
 * Field selector syntax is different to basically any other language.
 * Field selector use is technically optional: records are syntactic sugar over
   ordinary ADTs, and can still be used as ordinary ADTs via pattern matching.
+  Field order is thus part of the representation, and fields cannot be reordered
+  without potentially breaking something.
 * Field selectors 'clash' with local bindings of the same name. This is even
   worse when you deal with module re-exports or qualified imports; this
   problem can even arise within a module which imports no clashes, even if the
@@ -1159,11 +1179,11 @@ also the expected behaviour of its instances.
 
 ## `let` versus `where`
 
-For function-local definitions, if we require re-use of bindings outside of the
-function's arguments, or, in the case of type class methods, type class instance
-type variable bindings, `let` MUST be used. Otherwise, if the definition needs
-to be used in other `where`-bindings, or if the definition is a function,
-`where` MUST be used. Otherwise, `let` MUST be used.
+For local bindings of non-function values, `let` MUST be used, unless the binding is
+needed for multiple `where` bindings to compile, in which case, `where` MUST be
+used instead. For local bindings of function values, `where` MUST be used,
+unless the binding needs one or more `let`-bound definitions from its scope to compile, 
+in which case, `let` MUST be used instead.
 
 ### Justification
 
@@ -1180,21 +1200,49 @@ only differences between them are as follows:
   `where` bindings are put at the bottom of the function scoping them.
 
 In many, if not most, cases, which to use is a matter of taste: both can serve
-the purpose of introducing most function-local binds. However, in some cases, we
-really have to use one or the other: `let` for cases where we need to re-use
-bindings that aren't function arguments, `where` for cases where we need to
-share among multiple `where`s. At the same time, their _syntactic_ differences
-provide the biggest difference in their use: as `let`s must be 'inline' before
-their first use, they become unsuitable when the binding is complex, as they end
-up 'cluttering' the definition amid the rest of the function's logic. On the
-other hand, a `where` gets its own section, similarly to a footnote in text.
-Ideally, we should specify a 'complexity boundary' for when a `where` would be
-more appropriate.
+the purpose of introducing most local bindings:
+
+```
+-- Either of these will work
+foo x = let f y = doSomething x y
+   in f someOtherThing
+
+foo x = f someOtherThing
+   where
+      f :: ...
+      f y = doSomething x y
+```
+
+
+However, in some cases, we really have to use one or the other: 
+
+```
+-- this works
+foo x = let y = doSomething x
+            f z = doSomeOtherThing y z
+         in f aRandomOtherThing
+         
+-- but this doesn't, because the where can't 'see' y
+foo x = let y = doSomething x 
+          in f aRandomOtherThing
+   where
+      f :: ... 
+      f z = doSomeOtherThing y z -- y is free here
+```
+
+Specifically, `let` is required if we need to re-use `let` bindings in the same
+scope, but earlier, whereas `where` is required if we need to share a definition
+among multiple other `where`s. At the same time, their _syntactic_ differences
+are much more significant: `let`s must be placed 'inline' before
+their first use, while `where`s get their own section, similar to a footnote in
+text. Thus, complex `let`s tend to clutter definitions amid the rest of a
+function's logic, while `where`s 'stand apart'. On that basis, ideally we would
+specify a 'complexity boundary' for when a `where` would be better than a `let`.
 
 While exactly what qualifies as 'too complicated for a `let`' is also a matter
 of some debate, we choose 'function versus non-function' as a boundary. This
 works in most cases, as this leaves `let`-bindings for function call results and
-constants, while `where`s contain anything more complex, like a helper function.
+constants, while `where`s contain anything more complex, like helper functions.
 At the same time, we don't want to force the use of either in cases where it
 would be more convoluted or longer: on that basis, we allow use of `let` or
 `where` in cases they're absolutely required, regardless of what they define.
@@ -1309,8 +1357,7 @@ and is almost never particularly verbose anyway.
 
 Lists SHOULD NOT be field values of types; this extends
 to ``String``s. Instead, ``Vector``s (``Text``s) SHOULD be used, unless a more
-appropriate structure exists. We allow exceptions for `newtype`s over lists or
-``String``s.
+appropriate structure exists. 
 
 Partial functions MUST NOT be defined, and SHOULD NOT be
 used, except to ensure that another function is total (and the type system
