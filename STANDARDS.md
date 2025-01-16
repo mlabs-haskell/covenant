@@ -10,6 +10,8 @@ to evolve as our needs change.
 ## 17/01/2025
 
 * Changed 'signposting' and 'telegraphing' to 'self-indicating' for clarity
+* Removed some references to Plutus that weren't needed any longer
+* Inserted clarifying examples for `let` versus `where`
 
 ## 18/12/2024
 
