@@ -12,6 +12,10 @@ to evolve as our needs change.
 * Changed 'signposting' and 'telegraphing' to 'self-indicating' for clarity
 * Removed some references to Plutus that weren't needed any longer
 * Inserted clarifying examples for `let` versus `where`
+* Add `-Wmissing-export-lists` and `-Wmissing-import-lists` to the mandatory
+  warnings
+* Removed `-Wmissing-kind-signatures` from mandatory warnings
+* Added `TypeOperators` to always-enabled extensions, with justification
 
 ## 18/12/2024
 
@@ -125,9 +129,10 @@ of the Cabal file:
 * ``-Wredundant-strictness-flags``
 * ``-Wmissing-deriving-strategies``
 * ``-Woperator-whitespace``
-* ``-Wmissing-kind-signatures``
 * ``-Wambiguous-fields``
 * ``-Wmisplaced-pragmas``
+* ``-Wmissing-export-lists``
+* ``-Wmissing-import-lists``
 
 Additionally, ``-Wredundant-constraints`` SHOULD be enabled for all stanzas, in
 the `ghc-options` section. Exceptions are allowed when the additional
@@ -588,6 +593,7 @@ The following pragmata MUST be enabled for all stanzas:
 * ``TupleSections``
 * ``TypeApplications``
 * ``TypeFamilies``
+* ``TypeOperators``
 * ``UndecidableInstances``
 
 Any other LANGUAGE pragmata MUST be enabled per-file. All language pragmata MUST
