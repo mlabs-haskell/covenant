@@ -73,7 +73,8 @@ library
   import:          lang
   exposed-modules: Covenant.Expr
   build-depends:
-    , base        >=4.19.0.0 && <4.22.0.0
+    , algebraic-graphs  ==0.7
+    , base              >=4.19.0.0 && <4.22.0.0
     , bimap
     , containers
     , mtl
