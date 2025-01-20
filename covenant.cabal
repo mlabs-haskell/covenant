@@ -73,11 +73,15 @@ library
   import:          lang
   exposed-modules: Covenant.Expr
   build-depends:
-    , algebraic-graphs  ==0.7
-    , base              >=4.19.0.0 && <4.22.0.0
+    , algebraic-graphs        ==0.7
+    , base                    >=4.19.0.0 && <4.22.0.0
     , bimap
     , containers
     , mtl
+    , optics-core
+    , QuickCheck
+    , quickcheck-instances
+    , quickcheck-transformer
 
   hs-source-dirs:  src
 
