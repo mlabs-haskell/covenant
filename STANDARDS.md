@@ -7,6 +7,10 @@ to evolve as our needs change.
 
 # Changelog
 
+## 22/01/2025
+
+* Change `cabal-fmt` requirement to `cabal-gild`
+
 ## 17/01/2025
 
 * Changed 'signposting' and 'telegraphing' to 'self-indicating' for clarity
@@ -225,7 +229,7 @@ Every source file must be formatted according to [ormolu][ormolu]. Each source
 code line MUST be at most 100 characters wide, and SHOULD be at most 80
 characters wide.
 
-The project's Cabal file MUST be formatted with `cabal-fmt`.
+The project's Cabal file MUST be formatted with `cabal-gild`.
 
 Exported identifiers MUST be placed above non-exported identifiers in every
 source file. Non-exported identifiers MUST be put under the heading "Helpers",

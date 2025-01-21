@@ -1,34 +1,37 @@
-cabal-version:      3.0
-name:               covenant
-version:            1.0.0
-synopsis:           Someday something will go here.
-description:        Someday something will go here.
-homepage:           https://github.com/mlabs-haskell/covenant
-license:            Apache-2.0
-license-file:       LICENSE
-author:             Koz Ross, Farseen, Sean Hunter
-maintainer:         koz@mlabs.city, farseen@mlabs.city, sean@mlabs.city
-bug-reports:        https://github.com/mlabs-haskell/covenant/issues
-copyright:          (C) MLabs 2024
-category:           Covenant
-tested-with:        GHC ==9.8.4 || ==9.10.1 || ==9.12.1
-build-type:         Simple
+cabal-version: 3.0
+name: covenant
+version: 1.0.0
+synopsis: Someday something will go here.
+description: Someday something will go here.
+homepage: https://github.com/mlabs-haskell/covenant
+license: Apache-2.0
+license-file: LICENSE
+author: Koz Ross, Farseen, Sean Hunter
+maintainer: koz@mlabs.city, farseen@mlabs.city, sean@mlabs.city
+bug-reports: https://github.com/mlabs-haskell/covenant/issues
+copyright: (C) MLabs 2024
+category: Covenant
+tested-with: ghc ==9.8.4 || ==9.10.1 || ==9.12.1
+build-type: Simple
 extra-source-files:
   CHANGELOG.md
   README.md
 
 -- Common sections
-
 common lang
   ghc-options:
-    -Wall -Wcompat -Wredundant-bang-patterns
-    -Wredundant-strictness-flags -Wmissing-deriving-strategies
-    -Woperator-whitespace -Wambiguous-fields -Wmisplaced-pragmas
-    -Wmissing-export-lists -Wmissing-import-lists
+    -Wall
+    -Wcompat
+    -Wredundant-bang-patterns
+    -Wredundant-strictness-flags
+    -Wmissing-deriving-strategies
+    -Woperator-whitespace
+    -Wambiguous-fields
+    -Wmisplaced-pragmas
+    -Wmissing-export-lists
+    -Wmissing-import-lists
 
   default-extensions:
-    NoFieldSelectors
-    NoStarIsType
     BangPatterns
     BinaryLiterals
     DataKinds
@@ -45,6 +48,8 @@ common lang
     KindSignatures
     LambdaCase
     MultiParamTypeClasses
+    NoFieldSelectors
+    NoStarIsType
     NumericUnderscores
     OverloadedLabels
     OverloadedStrings
@@ -57,34 +62,36 @@ common lang
     TypeOperators
     UndecidableInstances
 
-  default-language:   Haskell2010
+  default-language: Haskell2010
 
 common test-lang
-  import:      lang
-  ghc-options: -O2 -threaded -rtsopts -with-rtsopts=-N
+  import: lang
+  ghc-options:
+    -O2
+    -threaded
+    -rtsopts
+    -with-rtsopts=-N
 
 common bench-lang
-  import:      lang
+  import: lang
   ghc-options: -O2
 
 -- Library
-
 library
-  import:          lang
+  import: lang
   exposed-modules: Covenant.Expr
   build-depends:
-    , algebraic-graphs        ==0.7
-    , base                    >=4.19.0.0 && <4.22.0.0
-    , bimap
-    , containers
-    , mtl
-    , optics-core
-    , QuickCheck
-    , quickcheck-instances
-    , quickcheck-transformer
+    QuickCheck,
+    algebraic-graphs ==0.7,
+    base >=4.19.0.0 && <4.22.0.0,
+    bimap,
+    containers,
+    mtl,
+    optics-core,
+    quickcheck-instances,
+    quickcheck-transformer,
 
-  hs-source-dirs:  src
+  hs-source-dirs: src
 
 -- Tests
-
 -- Benchmarks
