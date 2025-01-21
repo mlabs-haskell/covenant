@@ -21,7 +21,7 @@ jobs:
           windows-version: "latest"
           version: 0.1.7.1
   ormolu:
-    name: "Checks formatting with Ormolu"
+    name: "Check formatting with Ormolu"
     runs-on: ubuntu-latest
     steps:
       - name: Checkout base repo
@@ -30,9 +30,22 @@ jobs:
         uses: haskell-actions/run-ormolu@v16
         with:
           mode: "check"
+  hlint:
+    name: "Check with HLint"
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout base repo
+        uses: actions/checkout@v3
+      - name: Set up HLint
+        uses: haskell-actions/hlint-setup@v2
+      - name: Run HLint
+        uses: haskell-actions/hlint-run@v2
+        with:
+          path: src/
+          fail-on: warning
   tests:
     name: ${{ matrix.ghc }} on ${{ matrix.os }}
-    needs: [generate-matrix, ormolu]
+    needs: [generate-matrix, ormolu, hlint]
     runs-on: ${{ matrix.os }}
     strategy:
       matrix: ${{ fromJSON(needs.generate-matrix.outputs.matrix) }}
