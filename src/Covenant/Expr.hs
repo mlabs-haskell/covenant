@@ -1,6 +1,15 @@
 {-# LANGUAGE AllowAmbiguousTypes #-}
 
--- | @since 1.0.0
+-- |
+-- Module: Covenant.Expr
+-- Copyright: (C) MLabs 2025
+-- License: Apache 2.0
+-- Maintainer: koz@mlabs.city, farseen@mlabs.city, sean@mlabs.city
+--
+-- Contains the basic functionality to build up Covenant expressions
+-- programmatically.
+--
+-- @since 1.0.0
 module Covenant.Expr
   ( -- * Types
     Id,
