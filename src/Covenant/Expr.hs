@@ -15,6 +15,7 @@ module Covenant.Expr
     Id,
     Arg,
     Ref (..),
+    PrimCall (..),
     Expr,
     ExprBuilder,
     Scope,
@@ -25,9 +26,8 @@ module Covenant.Expr
 
     -- ** Build up expressions
     lit,
+    prim,
     arg,
-    add,
-    mul,
     app,
     lam,
 
@@ -44,9 +44,11 @@ import Algebra.Graph.Acyclic.AdjacencyMap
 import Algebra.Graph.AdjacencyMap qualified as Cyclic
 import Control.Monad.Reader (Reader, ask, lift, local, runReader)
 import Control.Monad.State.Strict (State, get, put, runState)
+import Covenant.Prim (OneArgFunc, SixArgFunc, ThreeArgFunc, TwoArgFunc)
 import Data.Bimap (Bimap)
 import Data.Bimap qualified as Bimap
 import Data.Kind (Type)
+import Data.Maybe (mapMaybe)
 import Data.Proxy (Proxy (Proxy))
 import Data.Word (Word64)
 import GHC.TypeNats (CmpNat, KnownNat, natVal, type (+))
@@ -109,13 +111,29 @@ data Ref = AnArg Arg | AnId Id
       Show
     )
 
+-- | A call to a Plutus primitive.
+--
+-- @since 1.0.0
+data PrimCall
+  = PrimCallOne OneArgFunc Ref
+  | PrimCallTwo TwoArgFunc Ref Ref
+  | PrimCallThree ThreeArgFunc Ref Ref Ref
+  | PrimCallSix SixArgFunc Ref Ref Ref Ref Ref Ref
+  deriving stock
+    ( -- | @since 1.0.0
+      Eq,
+      -- | @since 1.0.0
+      Ord,
+      -- | @since 1.0.0
+      Show
+    )
+
 -- | A node in a Covenant program.
 --
 -- @since 1.0.0
 data Expr
   = Lit Natural
-  | Add Ref Ref
-  | Mul Ref Ref
+  | Prim PrimCall
   | Lam Ref
   | App Ref Ref
   deriving stock
@@ -154,19 +172,54 @@ instance Arbitrary (ExprBuilder Id) where
       go :: Int -> GenT (Reader Word64) (ExprBuilder Id)
       go size
         | size <= 0 = aLiteral
-        | otherwise = oneof [aLiteral, anAdd size, aMul size, aLam size, anApp size]
+        | otherwise = oneof [aLiteral, aPrim size, aLam size, anApp size]
       aLiteral :: GenT (Reader Word64) (ExprBuilder Id)
       aLiteral = liftGen arbitrary >>= \n -> pure . lit $ n
-      anAdd :: Int -> GenT (Reader Word64) (ExprBuilder Id)
-      anAdd size = do
-        lhs <- argOrId size
-        rhs <- argOrId size
-        pure $ lhs >>= \lhsRef -> rhs >>= \rhsRef -> add lhsRef rhsRef
-      aMul :: Int -> GenT (Reader Word64) (ExprBuilder Id)
-      aMul size = do
-        lhs <- argOrId size
-        rhs <- argOrId size
-        pure $ lhs >>= \lhsRef -> rhs >>= \rhsRef -> mul lhsRef rhsRef
+      -- Note (Koz, 22/01/25): This technically can generate nonsensical
+      -- expressions, but we can already do this anyway, as we can generate
+      -- `App`s which would never work due to argument unsuitability. It should
+      -- be fixed, though.
+      aPrim :: Int -> GenT (Reader Word64) (ExprBuilder Id)
+      aPrim size =
+        frequency
+          [ (34, oneArg size),
+            (40, twoArg size),
+            (12, threeArg size),
+            (2, sixArg size)
+          ]
+      oneArg :: Int -> GenT (Reader Word64) (ExprBuilder Id)
+      oneArg size = do
+        r1 <- argOrId size
+        f <- liftGen arbitrary
+        pure $ r1 >>= \r1' -> prim (PrimCallOne f r1')
+      twoArg :: Int -> GenT (Reader Word64) (ExprBuilder Id)
+      twoArg size = do
+        r1 <- argOrId size
+        r2 <- argOrId size
+        f <- liftGen arbitrary
+        pure $ r1 >>= \r1' -> r2 >>= \r2' -> prim (PrimCallTwo f r1' r2')
+      threeArg :: Int -> GenT (Reader Word64) (ExprBuilder Id)
+      threeArg size = do
+        r1 <- argOrId size
+        r2 <- argOrId size
+        r3 <- argOrId size
+        f <- liftGen arbitrary
+        pure $ r1 >>= \r1' -> r2 >>= \r2' -> r3 >>= \r3' -> prim (PrimCallThree f r1' r2' r3')
+      sixArg :: Int -> GenT (Reader Word64) (ExprBuilder Id)
+      sixArg size = do
+        r1 <- argOrId size
+        r2 <- argOrId size
+        r3 <- argOrId size
+        r4 <- argOrId size
+        r5 <- argOrId size
+        r6 <- argOrId size
+        f <- liftGen arbitrary
+        pure $
+          r1 >>= \r1' ->
+            r2 >>= \r2' ->
+              r3 >>= \r3' ->
+                r4 >>= \r4' ->
+                  r5 >>= \r5' -> r6 >>= \r6' -> prim (PrimCallSix f r1' r2' r3' r4' r5' r6')
       aLam :: Int -> GenT (Reader Word64) (ExprBuilder Id)
       aLam size = do
         body <- expand (argOrId size)
@@ -244,40 +297,13 @@ toExprGraph (ExprBuilder comp) = do
       Id ->
       [((Id, Expr), (Id, Expr))]
     go binds curr = case Bimap.lookup curr binds of
-      Nothing -> [] -- technically impossible
-      Just e -> foldIds [] (handleOne binds curr e) (handleTwo binds curr e) . idsFrom $ e
-    idsFrom :: Expr -> Ids
-    idsFrom = \case
-      Lit _ -> NoId
-      Add r1 r2 -> toIds r1 r2
-      Mul r1 r2 -> toIds r1 r2
-      Lam body -> case body of
-        AnId i -> OneId i
-        AnArg _ -> NoId
-      App f x -> toIds f x
-    handleOne ::
-      Bimap Id Expr ->
-      Id ->
-      Expr ->
-      Id ->
-      [((Id, Expr), (Id, Expr))]
-    handleOne binds curr e i = case Bimap.lookup i binds of
-      Nothing -> [] -- technically impossible
-      Just e' -> ((curr, e), (i, e')) : go binds i
-    handleTwo ::
-      Bimap Id Expr ->
-      Id ->
-      Expr ->
-      Id ->
-      Id ->
-      [((Id, Expr), (Id, Expr))]
-    handleTwo binds curr e i1 i2 = case Bimap.lookup i1 binds of
-      Nothing -> [] -- technically impossible
-      Just e1 -> case Bimap.lookup i2 binds of
-        Nothing -> [] -- see above
-        Just e2 ->
-          let rest = go binds i1 <> go binds i2
-           in ((curr, e), (i1, e1)) : ((curr, e), (i2, e2)) : rest
+      Nothing -> []
+      Just e ->
+        let idList = toIdList e
+            stepdown i = case Bimap.lookup i binds of
+              Nothing -> []
+              Just e' -> ((curr, e), (i, e')) : go binds i
+         in concatMap stepdown idList
 
 -- | Construct a literal (constant) value.
 --
@@ -285,17 +311,11 @@ toExprGraph (ExprBuilder comp) = do
 lit :: Natural -> ExprBuilder Id
 lit = idOf . Lit
 
--- | Construct an addition.
+-- | Construct a primitive function call.
 --
 -- @since 1.0.0
-add :: Ref -> Ref -> ExprBuilder Id
-add x y = idOf (Add x y)
-
--- | Construct a multiplication.
---
--- @since 1.0.0
-mul :: Ref -> Ref -> ExprBuilder Id
-mul x y = idOf (Mul x y)
+prim :: PrimCall -> ExprBuilder Id
+prim = idOf . Prim
 
 -- | Construct a function application. The first argument is (an expression
 -- evaluating to) a function, the second argument is (an expression evaluating
@@ -379,25 +399,18 @@ idOf e = ExprBuilder $ do
 nextId :: Id -> Id
 nextId (Id w) = Id $ w + 1
 
-data Ids = NoId | OneId Id | TwoIds Id Id
+toIdList :: Expr -> [Id]
+toIdList = \case
+  Lit _ -> []
+  Prim p -> mapMaybe refToId $ case p of
+    PrimCallOne _ r -> [r]
+    PrimCallTwo _ r1 r2 -> [r1, r2]
+    PrimCallThree _ r1 r2 r3 -> [r1, r2, r3]
+    PrimCallSix _ r1 r2 r3 r4 r5 r6 -> [r1, r2, r3, r4, r5, r6]
+  Lam body -> mapMaybe refToId [body]
+  App f x -> mapMaybe refToId [f, x]
 
-toIds :: Ref -> Ref -> Ids
-toIds r1 r2 = case r1 of
-  AnArg _ -> case r2 of
-    AnArg _ -> NoId
-    AnId i2 -> OneId i2
-  AnId i1 -> case r2 of
-    AnArg _ -> OneId i1
-    AnId i2 -> TwoIds i1 i2
-
-foldIds ::
-  forall (r :: Type).
-  r ->
-  (Id -> r) ->
-  (Id -> Id -> r) ->
-  Ids ->
-  r
-foldIds none one two = \case
-  NoId -> none
-  OneId i -> one i
-  TwoIds i1 i2 -> two i1 i2
+refToId :: Ref -> Maybe Id
+refToId = \case
+  AnArg _ -> Nothing
+  AnId i -> Just i

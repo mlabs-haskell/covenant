@@ -79,7 +79,10 @@ common bench-lang
 -- Library
 library
   import: lang
-  exposed-modules: Covenant.Expr
+  exposed-modules:
+    Covenant.Expr
+    Covenant.Prim
+
   build-depends:
     QuickCheck,
     algebraic-graphs ==0.7,
