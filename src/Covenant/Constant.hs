@@ -13,8 +13,10 @@ module Covenant.Constant
 where
 
 import Data.ByteString (ByteString)
+import Data.Text (Text)
 import Test.QuickCheck (Arbitrary (arbitrary, shrink), oneof)
 import Test.QuickCheck.Instances.ByteString ()
+import Test.QuickCheck.Instances.Text ()
 
 -- | A Plutus constant term.
 --
@@ -24,6 +26,7 @@ data AConstant
   | ABoolean Bool
   | AnInteger Integer
   | AByteString ByteString
+  | AString Text
   deriving stock
     ( -- | @since 1.0.0
       Eq,
@@ -41,7 +44,8 @@ instance Arbitrary AConstant where
       [ pure AUnit,
         ABoolean <$> arbitrary,
         AnInteger <$> arbitrary,
-        AByteString <$> arbitrary
+        AByteString <$> arbitrary,
+        AString <$> arbitrary
       ]
   {-# INLINEABLE shrink #-}
   shrink = \case
@@ -49,3 +53,4 @@ instance Arbitrary AConstant where
     ABoolean b -> ABoolean <$> shrink b
     AnInteger i -> AnInteger <$> shrink i
     AByteString bs -> AByteString <$> shrink bs
+    AString t -> AString <$> shrink t

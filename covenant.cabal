@@ -95,6 +95,7 @@ library
     optics-core,
     quickcheck-instances,
     quickcheck-transformer,
+    text,
 
   hs-source-dirs: src
 
