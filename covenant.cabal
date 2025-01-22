@@ -96,6 +96,7 @@ library
     quickcheck-instances,
     quickcheck-transformer,
     text,
+    vector,
 
   hs-source-dirs: src
 
