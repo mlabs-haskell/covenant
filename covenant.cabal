@@ -80,6 +80,7 @@ common bench-lang
 library
   import: lang
   exposed-modules:
+    Covenant.Constant
     Covenant.Expr
     Covenant.Prim
 
@@ -88,6 +89,7 @@ library
     algebraic-graphs ==0.7,
     base >=4.19.0.0 && <4.22.0.0,
     bimap,
+    bytestring,
     containers,
     mtl,
     optics-core,
