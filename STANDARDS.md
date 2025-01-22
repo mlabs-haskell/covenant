@@ -7,11 +7,19 @@ to evolve as our needs change.
 
 # Changelog
 
+## 22/01/2025
+
+* Change `cabal-fmt` requirement to `cabal-gild`
+
 ## 17/01/2025
 
 * Changed 'signposting' and 'telegraphing' to 'self-indicating' for clarity
 * Removed some references to Plutus that weren't needed any longer
 * Inserted clarifying examples for `let` versus `where`
+* Add `-Wmissing-export-lists` and `-Wmissing-import-lists` to the mandatory
+  warnings
+* Removed `-Wmissing-kind-signatures` from mandatory warnings
+* Added `TypeOperators` to always-enabled extensions, with justification
 
 ## 18/12/2024
 
@@ -125,9 +133,10 @@ of the Cabal file:
 * ``-Wredundant-strictness-flags``
 * ``-Wmissing-deriving-strategies``
 * ``-Woperator-whitespace``
-* ``-Wmissing-kind-signatures``
 * ``-Wambiguous-fields``
 * ``-Wmisplaced-pragmas``
+* ``-Wmissing-export-lists``
+* ``-Wmissing-import-lists``
 
 Additionally, ``-Wredundant-constraints`` SHOULD be enabled for all stanzas, in
 the `ghc-options` section. Exceptions are allowed when the additional
@@ -220,7 +229,7 @@ Every source file must be formatted according to [ormolu][ormolu]. Each source
 code line MUST be at most 100 characters wide, and SHOULD be at most 80
 characters wide.
 
-The project's Cabal file MUST be formatted with `cabal-fmt`.
+The project's Cabal file MUST be formatted with `cabal-gild`.
 
 Exported identifiers MUST be placed above non-exported identifiers in every
 source file. Non-exported identifiers MUST be put under the heading "Helpers",
@@ -588,6 +597,7 @@ The following pragmata MUST be enabled for all stanzas:
 * ``TupleSections``
 * ``TypeApplications``
 * ``TypeFamilies``
+* ``TypeOperators``
 * ``UndecidableInstances``
 
 Any other LANGUAGE pragmata MUST be enabled per-file. All language pragmata MUST
