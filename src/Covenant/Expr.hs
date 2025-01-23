@@ -45,6 +45,7 @@ import Algebra.Graph.AdjacencyMap qualified as Cyclic
 import Control.Monad.Reader (Reader, ask, lift, local, runReader)
 import Control.Monad.State.Strict (State, get, put, runState)
 import Covenant.Constant (AConstant)
+import Covenant.Internal.Arg (Arg (Arg))
 import Covenant.Prim (OneArgFunc, SixArgFunc, ThreeArgFunc, TwoArgFunc)
 import Data.Bimap (Bimap)
 import Data.Bimap qualified as Bimap
@@ -68,22 +69,6 @@ import Test.QuickCheck.GenT
 --
 -- @since 1.0.0
 newtype Id = Id Word64
-  deriving
-    ( -- | @since 1.0.0
-      Eq,
-      -- | @since 1.0.0
-      Ord
-    )
-    via Word64
-  deriving stock
-    ( -- | @since 1.0.0
-      Show
-    )
-
--- | An argument passed to a function in a Covenant program.
---
--- @since 1.0.0
-newtype Arg = Arg Word64
   deriving
     ( -- | @since 1.0.0
       Eq,

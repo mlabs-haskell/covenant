@@ -6,3 +6,5 @@ test-show-details: direct
 
 package covenant
   ghc-options: -Werror
+
+allow-newer: optics-th:template-haskell
