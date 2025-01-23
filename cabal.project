@@ -7,4 +7,7 @@ test-show-details: direct
 package covenant
   ghc-options: -Werror
 
+-- Note (Koz, 24/01/2025): `optics-th` doesn't support the `template-haskell`
+-- version bundled with GHC 9.10. Until this gets resolved, we have this
+-- workaround.
 allow-newer: optics-th:template-haskell
