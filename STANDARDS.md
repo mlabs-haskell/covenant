@@ -7,6 +7,10 @@ to evolve as our needs change.
 
 # Changelog
 
+## 23/01/2025
+
+* Add section on dependencies
+
 ## 22/01/2025
 
 * Change `cabal-fmt` requirement to `cabal-gild`
@@ -296,6 +300,49 @@ changes can 'throw out' their order and confuse `git`. Blank-line-separating
 imports is especially bad, as it also confuses `ormolu`, which instead of
 sorting them all alphabetically, now only does this per block. To avoid these
 issues, we insist that imports form a single block, which `ormolu` will sort.
+
+## Dependencies
+
+`base` MUST be pinned to a range, with an inclusive lower bound and an exclusive
+upper bound. Boot libraries MUST be pinned to a range, with an inclusive lower
+bound and an exclusive upper bound. Other libraries MUST be pinned to a single
+version.
+
+The range for `base` MUST begin with the version of `base` compatible with the
+oldest supported GHC version, and MUST end with `5`. The range for any boot
+library SHOULD begin with the version shipped with the oldest supported GHC
+version, and SHOULD end with the next hypothetical major version; that is, the
+version whose version number is the least upper bound of the current version.
+
+### Justification
+
+Dependency pinning is important to ensure that packages continue to build, in
+spite of changes to their dependencies. With GHC, there are additional
+considerations:
+
+* Only specific `base` versions work with any given GHC version
+* [Boot
+  libraries](https://gitlab.haskell.org/ghc/ghc/-/wikis/commentary/libraries/version-history)
+  ship together with GHC, with specific versions for each GHC version, but
+  unlike `base`, do not force a specific version
+
+Given the above, the choice of which version(s) of GHC to support will determine
+what `base` version is available, thus forcing the lower bound of its range. The
+upper bound is chosen as historically, GHC has not bumped its highest version
+number for a long time, and it will minimize the amount of changes required to
+upper bounds in case of minor bumps.
+
+For boot libraries, we want to enable as much as possible for users to make use
+of pre-packaged boot library versions, but not block the use of more recent
+versions. At the same time, in some cases, features available in a version
+bundled with older GHCs may be limited; thus, we do not force the lower bound to
+track whatever ships with GHC. Likewise, the upper bound is designed to limit
+future breakages, but could be set lower if certain features are removed or
+broken in more recent versions.
+
+For all other libraries, there are few, if any, guarantees of stability. Thus,
+they should be 'locked' to a specific version, to ensure that behaviour
+continues to make sense.
 
 ## CI
 
