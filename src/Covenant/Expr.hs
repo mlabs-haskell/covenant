@@ -44,6 +44,7 @@ import Algebra.Graph.Acyclic.AdjacencyMap
 import Algebra.Graph.AdjacencyMap qualified as Cyclic
 import Control.Monad.Reader (Reader, ask, lift, local, runReader)
 import Control.Monad.State.Strict (State, get, put, runState)
+import Covenant.Constant (AConstant)
 import Covenant.Prim (OneArgFunc, SixArgFunc, ThreeArgFunc, TwoArgFunc)
 import Data.Bimap (Bimap)
 import Data.Bimap qualified as Bimap
@@ -62,7 +63,6 @@ import Test.QuickCheck.GenT
     runGenT,
     sized,
   )
-import Test.QuickCheck.Instances.Natural ()
 
 -- | A unique identifier for a node in a Covenant program.
 --
@@ -132,7 +132,7 @@ data PrimCall
 --
 -- @since 1.0.0
 data Expr
-  = Lit Natural
+  = Lit AConstant
   | Prim PrimCall
   | Lam Ref
   | App Ref Ref
@@ -308,7 +308,7 @@ toExprGraph (ExprBuilder comp) = do
 -- | Construct a literal (constant) value.
 --
 -- @since 1.0.0
-lit :: Natural -> ExprBuilder Id
+lit :: AConstant -> ExprBuilder Id
 lit = idOf . Lit
 
 -- | Construct a primitive function call.
