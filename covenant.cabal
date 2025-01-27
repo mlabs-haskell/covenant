@@ -83,6 +83,7 @@ library
   exposed-modules:
     Covenant.Constant
     Covenant.Expr
+    Covenant.Ledger
     Covenant.Prim
 
   build-depends:
