@@ -46,7 +46,7 @@ import Algebra.Graph.AdjacencyMap qualified as Cyclic
 import Control.Monad.Reader (Reader, ask, lift, local, runReader)
 import Control.Monad.State.Strict (State, get, put, runState)
 import Covenant.Constant (AConstant)
-import Covenant.Ledger (LedgerAccessor)
+import Covenant.Ledger (LedgerAccessor, LedgerDestructor)
 import Covenant.Prim (OneArgFunc, SixArgFunc, ThreeArgFunc, TwoArgFunc)
 import Data.Bimap (Bimap)
 import Data.Bimap qualified as Bimap
@@ -137,6 +137,9 @@ data Expr
   = Lit AConstant
   | Prim PrimCall
   | Access LedgerAccessor Ref
+  | -- First `Ref` is a Boehm-Berrarducci-style eliminator, second `Ref` is the
+    -- value to be eliminated.
+    Destroy LedgerDestructor Ref Ref
   | Lam Ref
   | App Ref Ref
   deriving stock
@@ -417,6 +420,7 @@ toIdList = \case
     PrimCallThree _ r1 r2 r3 -> [r1, r2, r3]
     PrimCallSix _ r1 r2 r3 r4 r5 r6 -> [r1, r2, r3, r4, r5, r6]
   Access _ p -> mapMaybe refToId [p]
+  Destroy _ f x -> mapMaybe refToId [f, x]
   Lam body -> mapMaybe refToId [body]
   App f x -> mapMaybe refToId [f, x]
 

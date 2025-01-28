@@ -1,5 +1,6 @@
 module Covenant.Ledger
   ( LedgerAccessor (..),
+    LedgerDestructor (..),
     LedgerUnwrapAccessor (..),
     LedgerFieldAccessor (..),
   )
@@ -71,6 +72,27 @@ data LedgerFieldAccessor
   | FieldScriptContextTxInfo
   | FieldScriptContextRedeemer
   | FieldScriptContextScriptInfo
+  deriving stock
+    ( -- | @since 1.0.0
+      Eq,
+      -- | @since 1.0.0
+      Ord,
+      -- | @since 1.0.0
+      Show
+    )
+
+-- | A destructor for a sum type from the ledger.
+--
+-- @since 1.0.0
+data LedgerDestructor
+  = DestructorDRep
+  | DestructorDelegatee
+  | DestructorTxCert
+  | DestructorVoter
+  | DestructorVote
+  | DestructorGovernanceAction
+  | DestructorScriptPurpose
+  | DestructorScriptInfo
   deriving stock
     ( -- | @since 1.0.0
       Eq,
