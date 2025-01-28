@@ -27,6 +27,7 @@ module Covenant.Expr
     -- ** Build up expressions
     lit,
     prim,
+    accessor,
     arg,
     app,
     lam,
@@ -45,6 +46,7 @@ import Algebra.Graph.AdjacencyMap qualified as Cyclic
 import Control.Monad.Reader (Reader, ask, lift, local, runReader)
 import Control.Monad.State.Strict (State, get, put, runState)
 import Covenant.Constant (AConstant)
+import Covenant.Ledger (LedgerAccessor)
 import Covenant.Prim (OneArgFunc, SixArgFunc, ThreeArgFunc, TwoArgFunc)
 import Data.Bimap (Bimap)
 import Data.Bimap qualified as Bimap
@@ -134,6 +136,7 @@ data PrimCall
 data Expr
   = Lit AConstant
   | Prim PrimCall
+  | Access LedgerAccessor Ref
   | Lam Ref
   | App Ref Ref
   deriving stock
@@ -317,6 +320,12 @@ lit = idOf . Lit
 prim :: PrimCall -> ExprBuilder Id
 prim = idOf . Prim
 
+-- | Construct an accessor call for a primitive ledger type.
+--
+-- @since 1.0.0
+accessor :: LedgerAccessor -> Ref -> ExprBuilder Id
+accessor x = idOf . Access x
+
 -- | Construct a function application. The first argument is (an expression
 -- evaluating to) a function, the second argument is (an expression evaluating
 -- to) an argument.
@@ -407,6 +416,7 @@ toIdList = \case
     PrimCallTwo _ r1 r2 -> [r1, r2]
     PrimCallThree _ r1 r2 r3 -> [r1, r2, r3]
     PrimCallSix _ r1 r2 r3 r4 r5 r6 -> [r1, r2, r3, r4, r5, r6]
+  Access _ p -> mapMaybe refToId [p]
   Lam body -> mapMaybe refToId [body]
   App f x -> mapMaybe refToId [f, x]
 
