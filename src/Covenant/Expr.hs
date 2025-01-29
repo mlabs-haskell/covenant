@@ -46,10 +46,12 @@ import Control.Monad.State.Strict (runState)
 import Covenant.Internal.Expr
   ( Arg (Arg),
     Expr (App, Lam, Lit, Prim),
-    ExprBuilder (ExprBuilder),
     Id,
     PrimCall (PrimCallOne, PrimCallSix, PrimCallThree, PrimCallTwo),
     Ref (AnArg, AnId),
+  )
+import Covenant.Internal.ExprBuilder
+  ( ExprBuilder (ExprBuilder),
     app,
     idOf,
     lit,

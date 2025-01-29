@@ -87,6 +87,7 @@ library
 
   other-modules:
     Covenant.Internal.Expr
+    Covenant.Internal.ExprBuilder
 
   build-depends:
     QuickCheck ==2.15.0.1,
