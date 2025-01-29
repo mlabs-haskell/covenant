@@ -1,5 +1,8 @@
+{-# LANGUAGE TemplateHaskell #-}
+
 module Covenant.Internal.ExprBuilder
-  ( ExprBuilder (..),
+  ( ExprBuilderState (..),
+    ExprBuilder (..),
     idOf,
     lit,
     prim,
@@ -8,7 +11,7 @@ module Covenant.Internal.ExprBuilder
 where
 
 import Control.Monad.Reader (Reader, ask, local, runReader)
-import Control.Monad.State.Strict (State, get, put)
+import Control.Monad.State.Strict (State, gets, modify')
 import Control.Monad.Trans (lift)
 import Covenant.Constant (AConstant)
 import Covenant.Internal.Expr
@@ -27,6 +30,9 @@ import Data.Bimap (Bimap)
 import Data.Bimap qualified as Bimap
 import Data.Kind (Type)
 import Data.Word (Word64)
+import Optics.Getter (view)
+import Optics.Setter (over)
+import Optics.TH (makeFieldLabelsNoPrefix)
 import Test.QuickCheck (Arbitrary (arbitrary), chooseEnum)
 import Test.QuickCheck.GenT
   ( GenT (GenT),
@@ -37,11 +43,17 @@ import Test.QuickCheck.GenT
     sized,
   )
 
+newtype ExprBuilderState = ExprBuilderState {binds :: Bimap Id Expr}
+  deriving (Eq, Ord) via Bimap Id Expr
+  deriving stock (Show)
+
+makeFieldLabelsNoPrefix ''ExprBuilderState
+
 -- | A helper monad for building up Covenant programs. In particular, this
 -- enables hash consing.
 --
 -- @since 1.0.0
-newtype ExprBuilder (a :: Type) = ExprBuilder (State (Bimap Id Expr) a)
+newtype ExprBuilder (a :: Type) = ExprBuilder (State ExprBuilderState a)
   deriving
     ( -- | @since 1.0.0
       Functor,
@@ -50,7 +62,7 @@ newtype ExprBuilder (a :: Type) = ExprBuilder (State (Bimap Id Expr) a)
       -- | @since 1.0.0
       Monad
     )
-    via (State (Bimap Id Expr))
+    via (State ExprBuilderState)
 
 -- | Does not shrink.
 --
@@ -178,16 +190,13 @@ app f x = idOf (App f x)
 
 idOf :: Expr -> ExprBuilder Id
 idOf e = ExprBuilder $ do
-  binds <- get
-  -- We have nothing in the graph, so we can freely build the first node
-  if Bimap.null binds
-    then do
-      let first = Id 0
-      first <$ (put . Bimap.insert first e $ binds)
-    else case Bimap.lookupR e binds of
-      -- This cannot 'miss' because of the previous check
-      Nothing -> do
-        let (Id highestId, _) = Bimap.findMax binds
-        let next = Id $ highestId + 1
-        next <$ (put . Bimap.insert next e $ binds)
-      Just nodeId -> pure nodeId
+  existingId <- gets (Bimap.lookupR e . view #binds)
+  case existingId of
+    Nothing -> do
+      hasAnyBindings <- gets (Bimap.null . view #binds)
+      newId <-
+        if hasAnyBindings
+          then (\(Id highest) -> Id (highest + 1)) <$> gets (fst . Bimap.findMax . view #binds)
+          else pure . Id $ 0
+      newId <$ modify' (over #binds (Bimap.insert newId e))
+    Just nodeId -> pure nodeId

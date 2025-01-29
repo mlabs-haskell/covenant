@@ -52,6 +52,7 @@ import Covenant.Internal.Expr
   )
 import Covenant.Internal.ExprBuilder
   ( ExprBuilder (ExprBuilder),
+    ExprBuilderState (ExprBuilderState),
     app,
     idOf,
     lit,
@@ -81,7 +82,7 @@ data ExprGraph = ExprGraph (Id, Expr) (AdjacencyMap (Id, Expr))
 -- @since 1.0.0
 toExprGraph :: ExprBuilder Id -> Maybe ExprGraph
 toExprGraph (ExprBuilder comp) = do
-  let (start, binds) = runState comp Bimap.empty
+  let (start, ExprBuilderState binds) = runState comp (ExprBuilderState Bimap.empty)
   if Bimap.size binds == 1
     then do
       -- This cannot fail, but the type system can't show it
