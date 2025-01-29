@@ -149,7 +149,7 @@ data Expr
 -- enables hash consing.
 --
 -- @since 1.0.0
-newtype ExprBuilder (a :: Type) = ExprBuilder (State (Id, Bimap Id Expr) a)
+newtype ExprBuilder (a :: Type) = ExprBuilder (State (Bimap Id Expr) a)
   deriving
     ( -- | @since 1.0.0
       Functor,
@@ -158,7 +158,7 @@ newtype ExprBuilder (a :: Type) = ExprBuilder (State (Id, Bimap Id Expr) a)
       -- | @since 1.0.0
       Monad
     )
-    via (State (Id, Bimap Id Expr))
+    via (State (Bimap Id Expr))
 
 -- | Does not shrink.
 --
@@ -278,7 +278,7 @@ data ExprGraph = ExprGraph (Id, Expr) (AdjacencyMap (Id, Expr))
 -- @since 1.0.0
 toExprGraph :: ExprBuilder Id -> Maybe ExprGraph
 toExprGraph (ExprBuilder comp) = do
-  let (start, (_, binds)) = runState comp (Id 0, Bimap.empty)
+  let (start, binds) = runState comp Bimap.empty
   if Bimap.size binds == 1
     then do
       -- This cannot fail, but the type system can't show it
@@ -388,16 +388,19 @@ lam Scope f = do
 
 idOf :: Expr -> ExprBuilder Id
 idOf e = ExprBuilder $ do
-  (fresh, binds) <- get
-  case Bimap.lookupR e binds of
-    Nothing -> do
-      let newBinds = Bimap.insert fresh e binds
-      let newFresh = nextId fresh
-      fresh <$ put (newFresh, newBinds)
-    Just nodeId -> pure nodeId
-
-nextId :: Id -> Id
-nextId (Id w) = Id $ w + 1
+  binds <- get
+  -- We have nothing in the graph, so we can freely build the first node
+  if Bimap.null binds
+    then do
+      let first = Id 0
+      first <$ (put . Bimap.insert first e $ binds)
+    else case Bimap.lookupR e binds of
+      -- This cannot 'miss' because of the previous check
+      Nothing -> do
+        let (Id highestId, _) = Bimap.findMax binds
+        let next = Id $ highestId + 1
+        next <$ (put . Bimap.insert next e $ binds)
+      Just nodeId -> pure nodeId
 
 toIdList :: Expr -> [Id]
 toIdList = \case
