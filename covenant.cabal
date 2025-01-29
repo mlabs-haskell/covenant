@@ -85,6 +85,9 @@ library
     Covenant.Expr
     Covenant.Prim
 
+  other-modules:
+    Covenant.Internal.Expr
+
   build-depends:
     QuickCheck ==2.15.0.1,
     algebraic-graphs ==0.7,
