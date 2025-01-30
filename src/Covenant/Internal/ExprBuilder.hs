@@ -188,6 +188,10 @@ prim = idOf . Prim
 app :: Ref -> Ref -> ExprBuilder Id
 app f x = idOf (App f x)
 
+-- Given a node, return its unique `Id`. If this is a node we've seen before in
+-- the current `ExprBuilder` context, this `Id` will be looked up and reused;
+-- otherwise, a fresh `Id` will be assigned, and the node cached to ensure we
+-- have a reference to it henceforth.
 idOf :: Expr -> ExprBuilder Id
 idOf e = ExprBuilder $ do
   existingId <- gets (Bimap.lookupR e . view #binds)
