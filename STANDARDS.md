@@ -7,6 +7,10 @@ to evolve as our needs change.
 
 # Changelog
 
+## 31/01/2025
+
+* Add note about supporting the latest three GHCs
+
 ## 23/01/2025
 
 * Add section on dependencies
@@ -343,6 +347,25 @@ broken in more recent versions.
 For all other libraries, there are few, if any, guarantees of stability. Thus,
 they should be 'locked' to a specific version, to ensure that behaviour
 continues to make sense.
+
+## GHC
+
+The latest three versions of GHC MUST be supported; this MUST be noted in the
+`tested-with` field of the Cabal file for the project. 
+
+### Justification
+
+GHC as a tool changes a lot from release to release. This isn't just true of the
+compiler itself (as we often gain new features which are rarely, if ever,
+backported), but of the libraries it ships with (`base` and boot libraries),
+which are often incompatibly different with previous versions. Thus, _some_ kind
+of support window is essential, or it becomes difficult to maintain, or even
+make any decisions about what to support.
+
+The latest three GHC versions provide a good balance between allowing the most
+current features of the language, while also providing an older fallback for
+those who might need an older release due to dependencies not having migrated
+yet.
 
 ## CI
 

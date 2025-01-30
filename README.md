@@ -6,16 +6,12 @@
 
 # What do I need?
 
-Our policy is to support the latest three GHC versions. At this time, they are:
+Our policy is to support the latest three GHC versions; see the Cabal file's
+`tested-with` field to see which exact versions are supported. This is enforced
+using `get-tested` in our CI.
 
-* 9.6.6
-* 9.8.4
-* 9.10.1
-
-Covenant is developed using the lowest version listed exclusively, but
-compatibility with higher versions listed above is assured by our CI. We support
-only [Tier 1
-platforms](https://gitlab.haskell.org/ghc/ghc/-/wikis/platforms#tier-1-platforms).
+We support only [Tier 1 platforms](https://gitlab.haskell.org/ghc/ghc/-/wikis/platforms#tier-1-platforms). 
+Covenant is developed using the lowest supported version.
 
 # License
 
