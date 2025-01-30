@@ -1,7 +1,7 @@
 {-# LANGUAGE AllowAmbiguousTypes #-}
 
 -- |
--- Module: Covenant.Expr
+-- Module: Covenant.ASG
 -- Copyright: (C) MLabs 2025
 -- License: Apache 2.0
 -- Maintainer: koz@mlabs.city, farseen@mlabs.city, sean@mlabs.city
@@ -10,17 +10,17 @@
 -- programmatically.
 --
 -- @since 1.0.0
-module Covenant.Expr
+module Covenant.ASG
   ( -- * Types
     Id,
     Arg,
     Bound,
     Ref (..),
     PrimCall (..),
-    Expr,
-    ExprBuilder,
+    ASGNode,
+    ASGBuilder,
     Scope,
-    ExprGraph,
+    ASG,
 
     -- * Functions
     emptyScope,
@@ -35,7 +35,7 @@ module Covenant.Expr
     letBind,
 
     -- ** Compile an expression
-    toExprGraph,
+    toASG,
   )
 where
 
@@ -46,21 +46,21 @@ import Algebra.Graph.Acyclic.AdjacencyMap
   )
 import Algebra.Graph.AdjacencyMap qualified as Cyclic
 import Control.Monad.State.Strict (runState)
-import Covenant.Internal.Expr
-  ( Arg (Arg),
-    Bound (Bound),
-    Expr (App, Lam, Let, Lit, Prim),
-    Id,
-    PrimCall (PrimCallOne, PrimCallSix, PrimCallThree, PrimCallTwo),
-    Ref (ABound, AnArg, AnId),
-  )
-import Covenant.Internal.ExprBuilder
-  ( ExprBuilder (ExprBuilder),
-    ExprBuilderState (ExprBuilderState),
+import Covenant.Internal.ASGBuilder
+  ( ASGBuilder (ASGBuilder),
+    ASGBuilderState (ASGBuilderState),
     app,
     idOf,
     lit,
     prim,
+  )
+import Covenant.Internal.ASGNode
+  ( ASGNode (App, Lam, Let, Lit, Prim),
+    Arg (Arg),
+    Bound (Bound),
+    Id,
+    PrimCall (PrimCallOne, PrimCallSix, PrimCallThree, PrimCallTwo),
+    Ref (ABound, AnArg, AnId),
   )
 import Data.Bimap (Bimap)
 import Data.Bimap qualified as Bimap
@@ -72,7 +72,7 @@ import Numeric.Natural (Natural)
 -- | A Covenant program, represented as an acyclic graph.
 --
 -- @since 1.0.0
-data ExprGraph = ExprGraph (Id, Expr) (AdjacencyMap (Id, Expr))
+data ASG = ASG (Id, ASGNode) (AdjacencyMap (Id, ASGNode))
   deriving stock
     ( -- | @since 1.0.0
       Eq,
@@ -84,26 +84,26 @@ data ExprGraph = ExprGraph (Id, Expr) (AdjacencyMap (Id, Expr))
 -- refers to into a call graph. This is guaranteed to be acyclic.
 --
 -- @since 1.0.0
-toExprGraph :: ExprBuilder Id -> Maybe ExprGraph
-toExprGraph (ExprBuilder comp) = do
-  let (start, ExprBuilderState binds) = runState comp (ExprBuilderState Bimap.empty)
+toASG :: ASGBuilder Id -> Maybe ASG
+toASG (ASGBuilder comp) = do
+  let (start, ASGBuilderState binds) = runState comp (ASGBuilderState Bimap.empty)
   if Bimap.size binds == 1
     then do
       -- This cannot fail, but the type system can't show it
       initial <- (start,) <$> Bimap.lookup start binds
-      pure . ExprGraph initial . vertex $ initial
+      pure . ASG initial . vertex $ initial
     else do
       let asGraph = Cyclic.edges . go binds $ start
       -- This cannot fail, but the type system can't show it
       acyclic <- toAcyclic asGraph
       -- Same as above
       initial <- (start,) <$> Bimap.lookup start binds
-      pure . ExprGraph initial $ acyclic
+      pure . ASG initial $ acyclic
   where
     go ::
-      Bimap Id Expr ->
+      Bimap Id ASGNode ->
       Id ->
-      [((Id, Expr), (Id, Expr))]
+      [((Id, ASGNode), (Id, ASGNode))]
     go binds curr = case Bimap.lookup curr binds of
       Nothing -> []
       Just e ->
@@ -180,8 +180,8 @@ bound Scope = Bound . fromIntegral . natVal $ Proxy @n
 lam ::
   forall (n :: Natural) (m :: Natural).
   Scope n m ->
-  (Scope (n + 1) m -> ExprBuilder Ref) ->
-  ExprBuilder Id
+  (Scope (n + 1) m -> ASGBuilder Ref) ->
+  ASGBuilder Id
 lam Scope f = do
   res <- f Scope
   idOf . Lam $ res
@@ -205,15 +205,15 @@ letBind ::
   forall (n :: Natural) (m :: Natural).
   Scope n m ->
   Ref ->
-  (Scope n (m + 1) -> ExprBuilder Ref) ->
-  ExprBuilder Id
+  (Scope n (m + 1) -> ASGBuilder Ref) ->
+  ASGBuilder Id
 letBind Scope r f = do
   res <- f Scope
   idOf . Let r $ res
 
 -- Helpers
 
-toIdList :: Expr -> [Id]
+toIdList :: ASGNode -> [Id]
 toIdList = \case
   Lit _ -> []
   Prim p -> mapMaybe refToId $ case p of

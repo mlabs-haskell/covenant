@@ -1,10 +1,10 @@
-module Covenant.Internal.Expr
+module Covenant.Internal.ASGNode
   ( Id (..),
     Arg (..),
     Bound (..),
     Ref (..),
     PrimCall (..),
-    Expr (..),
+    ASGNode (..),
   )
 where
 
@@ -94,10 +94,11 @@ data PrimCall
       Show
     )
 
--- | A node in a Covenant program.
+-- | A node in a Covenant program. Since Covenant programs are hash consed, they
+-- form a graph, hence \'ASG\' - \'abstract syntax graph\'.
 --
 -- @since 1.0.0
-data Expr
+data ASGNode
   = Lit AConstant
   | Prim PrimCall
   | Lam Ref

@@ -81,13 +81,13 @@ common bench-lang
 library
   import: lang
   exposed-modules:
+    Covenant.ASG
     Covenant.Constant
-    Covenant.Expr
     Covenant.Prim
 
   other-modules:
-    Covenant.Internal.Expr
-    Covenant.Internal.ExprBuilder
+    Covenant.Internal.ASGBuilder
+    Covenant.Internal.ASGNode
 
   build-depends:
     QuickCheck ==2.15.0.1,

@@ -1,8 +1,8 @@
 {-# LANGUAGE TemplateHaskell #-}
 
-module Covenant.Internal.ExprBuilder
-  ( ExprBuilderState (..),
-    ExprBuilder (..),
+module Covenant.Internal.ASGBuilder
+  ( ASGBuilderState (..),
+    ASGBuilder (..),
     idOf,
     lit,
     prim,
@@ -14,9 +14,9 @@ import Control.Monad.Reader (Reader, ask, local, runReader)
 import Control.Monad.State.Strict (State, gets, modify')
 import Control.Monad.Trans (lift)
 import Covenant.Constant (AConstant)
-import Covenant.Internal.Expr
-  ( Arg (Arg),
-    Expr (App, Lam, Lit, Prim),
+import Covenant.Internal.ASGNode
+  ( ASGNode (App, Lam, Lit, Prim),
+    Arg (Arg),
     Id (Id),
     PrimCall
       ( PrimCallOne,
@@ -43,17 +43,17 @@ import Test.QuickCheck.GenT
     sized,
   )
 
-newtype ExprBuilderState = ExprBuilderState {binds :: Bimap Id Expr}
-  deriving (Eq, Ord) via Bimap Id Expr
+newtype ASGBuilderState = ASGBuilderState {binds :: Bimap Id ASGNode}
+  deriving (Eq, Ord) via Bimap Id ASGNode
   deriving stock (Show)
 
-makeFieldLabelsNoPrefix ''ExprBuilderState
+makeFieldLabelsNoPrefix ''ASGBuilderState
 
 -- | A helper monad for building up Covenant programs. In particular, this
 -- enables hash consing.
 --
 -- @since 1.0.0
-newtype ExprBuilder (a :: Type) = ExprBuilder (State ExprBuilderState a)
+newtype ASGBuilder (a :: Type) = ASGBuilder (State ASGBuilderState a)
   deriving
     ( -- | @since 1.0.0
       Functor,
@@ -62,28 +62,28 @@ newtype ExprBuilder (a :: Type) = ExprBuilder (State ExprBuilderState a)
       -- | @since 1.0.0
       Monad
     )
-    via (State ExprBuilderState)
+    via (State ASGBuilderState)
 
 -- | Does not shrink.
 --
 -- @since 1.0.0
-instance Arbitrary (ExprBuilder Id) where
+instance Arbitrary (ASGBuilder Id) where
   {-# INLINEABLE arbitrary #-}
   arbitrary = do
     generated <- runGenT (sized go)
     pure $ runReader generated 0
     where
-      go :: Int -> GenT (Reader Word64) (ExprBuilder Id)
+      go :: Int -> GenT (Reader Word64) (ASGBuilder Id)
       go size
         | size <= 0 = aLiteral
         | otherwise = oneof [aLiteral, aPrim size, aLam size, anApp size]
-      aLiteral :: GenT (Reader Word64) (ExprBuilder Id)
+      aLiteral :: GenT (Reader Word64) (ASGBuilder Id)
       aLiteral = liftGen arbitrary >>= \n -> pure . lit $ n
       -- Note (Koz, 22/01/25): This technically can generate nonsensical
       -- expressions, but we can already do this anyway, as we can generate
       -- `App`s which would never work due to argument unsuitability. It should
       -- be fixed, though.
-      aPrim :: Int -> GenT (Reader Word64) (ExprBuilder Id)
+      aPrim :: Int -> GenT (Reader Word64) (ASGBuilder Id)
       aPrim size =
         frequency
           [ (34, oneArg size),
@@ -91,25 +91,25 @@ instance Arbitrary (ExprBuilder Id) where
             (12, threeArg size),
             (2, sixArg size)
           ]
-      oneArg :: Int -> GenT (Reader Word64) (ExprBuilder Id)
+      oneArg :: Int -> GenT (Reader Word64) (ASGBuilder Id)
       oneArg size = do
         r1 <- argOrId size
         f <- liftGen arbitrary
         pure $ r1 >>= \r1' -> prim (PrimCallOne f r1')
-      twoArg :: Int -> GenT (Reader Word64) (ExprBuilder Id)
+      twoArg :: Int -> GenT (Reader Word64) (ASGBuilder Id)
       twoArg size = do
         r1 <- argOrId size
         r2 <- argOrId size
         f <- liftGen arbitrary
         pure $ r1 >>= \r1' -> r2 >>= \r2' -> prim (PrimCallTwo f r1' r2')
-      threeArg :: Int -> GenT (Reader Word64) (ExprBuilder Id)
+      threeArg :: Int -> GenT (Reader Word64) (ASGBuilder Id)
       threeArg size = do
         r1 <- argOrId size
         r2 <- argOrId size
         r3 <- argOrId size
         f <- liftGen arbitrary
         pure $ r1 >>= \r1' -> r2 >>= \r2' -> r3 >>= \r3' -> prim (PrimCallThree f r1' r2' r3')
-      sixArg :: Int -> GenT (Reader Word64) (ExprBuilder Id)
+      sixArg :: Int -> GenT (Reader Word64) (ASGBuilder Id)
       sixArg size = do
         r1 <- argOrId size
         r2 <- argOrId size
@@ -124,7 +124,7 @@ instance Arbitrary (ExprBuilder Id) where
               r3 >>= \r3' ->
                 r4 >>= \r4' ->
                   r5 >>= \r5' -> r6 >>= \r6' -> prim (PrimCallSix f r1' r2' r3' r4' r5' r6')
-      aLam :: Int -> GenT (Reader Word64) (ExprBuilder Id)
+      aLam :: Int -> GenT (Reader Word64) (ASGBuilder Id)
       aLam size = do
         body <- expand (argOrId size)
         -- Note (Koz, 21/01/25): We 'bypass' our protections on construction of
@@ -140,9 +140,9 @@ instance Arbitrary (ExprBuilder Id) where
       -- not to.
       expand ::
         forall (a :: Type).
-        GenT (Reader Word64) (ExprBuilder a) -> GenT (Reader Word64) (ExprBuilder a)
+        GenT (Reader Word64) (ASGBuilder a) -> GenT (Reader Word64) (ASGBuilder a)
       expand (GenT f) = GenT $ \qcgen size -> local (+ 1) (f qcgen size)
-      anApp :: Int -> GenT (Reader Word64) (ExprBuilder Id)
+      anApp :: Int -> GenT (Reader Word64) (ASGBuilder Id)
       anApp size = do
         lhs <- aLam size
         rhs <- argOrId size
@@ -152,7 +152,7 @@ instance Arbitrary (ExprBuilder Id) where
         -- not really practical to track at the moment, though once we have
         -- types, it could be done. For now, this works well enough.
         pure $ lhs >>= \lhsRef -> rhs >>= \rhsRef -> app (AnId lhsRef) rhsRef
-      argOrId :: Int -> GenT (Reader Word64) (ExprBuilder Ref)
+      argOrId :: Int -> GenT (Reader Word64) (ASGBuilder Ref)
       argOrId originalSize = do
         availableArgs <- lift ask
         if availableArgs == 0
@@ -168,13 +168,13 @@ instance Arbitrary (ExprBuilder Id) where
 -- | Construct a literal (constant) value.
 --
 -- @since 1.0.0
-lit :: AConstant -> ExprBuilder Id
+lit :: AConstant -> ASGBuilder Id
 lit = idOf . Lit
 
 -- | Construct a primitive function call.
 --
 -- @since 1.0.0
-prim :: PrimCall -> ExprBuilder Id
+prim :: PrimCall -> ASGBuilder Id
 prim = idOf . Prim
 
 -- | Construct a function application. The first argument is (an expression
@@ -185,15 +185,15 @@ prim = idOf . Prim
 --
 -- Currently, this does not verify that the first argument is indeed a function,
 -- nor that the second argument is appropriate.
-app :: Ref -> Ref -> ExprBuilder Id
+app :: Ref -> Ref -> ASGBuilder Id
 app f x = idOf (App f x)
 
 -- Given a node, return its unique `Id`. If this is a node we've seen before in
 -- the current `ExprBuilder` context, this `Id` will be looked up and reused;
 -- otherwise, a fresh `Id` will be assigned, and the node cached to ensure we
 -- have a reference to it henceforth.
-idOf :: Expr -> ExprBuilder Id
-idOf e = ExprBuilder $ do
+idOf :: ASGNode -> ASGBuilder Id
+idOf e = ASGBuilder $ do
   existingId <- gets (Bimap.lookupR e . view #binds)
   case existingId of
     Nothing -> do
