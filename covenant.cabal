@@ -62,7 +62,7 @@ common lang
     TypeOperators
     UndecidableInstances
 
-  build-depends: base >=4.19.0.0 && <5
+  build-depends: base >=4.18.2.1 && <5
   default-language: Haskell2010
 
 common test-lang
