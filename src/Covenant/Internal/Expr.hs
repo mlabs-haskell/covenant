@@ -1,6 +1,7 @@
 module Covenant.Internal.Expr
   ( Id (..),
     Arg (..),
+    Bound (..),
     Ref (..),
     PrimCall (..),
     Expr (..),
@@ -43,12 +44,30 @@ newtype Arg = Arg Word64
       Show
     )
 
--- | A general reference in a Covenant program. This is either a computation
--- (represented by its unique 'Id') or a function argument (represented by an
--- 'Arg').
+-- | A @let@-bound variable in a Covenant program.
 --
 -- @since 1.0.0
-data Ref = AnArg Arg | AnId Id
+newtype Bound = Bound Word64
+  deriving
+    ( -- | @since 1.0.0
+      Eq,
+      -- | @since 1.0.0
+      Ord
+    )
+    via Word64
+  deriving stock
+    ( -- | @since 1.0.0
+      Show
+    )
+
+-- | A general reference in a Covenant program. This is one of the following:
+--
+-- * A computation, represented by its unique 'Id';
+-- * A function argument, represented by an 'Arg'; or
+-- * A @let@-bound variable, represented by a 'Bound'.
+--
+-- @since 1.0.0
+data Ref = AnArg Arg | AnId Id | ABound Bound
   deriving stock
     ( -- | @since 1.0.0
       Eq,
@@ -82,6 +101,7 @@ data Expr
   = Lit AConstant
   | Prim PrimCall
   | Lam Ref
+  | Let Ref Ref
   | App Ref Ref
   deriving stock
     ( -- | @since 1.0.0
