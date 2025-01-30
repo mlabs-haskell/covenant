@@ -14,6 +14,7 @@ module Covenant.Expr
   ( -- * Types
     Id,
     Arg,
+    Bound,
     Ref (..),
     PrimCall (..),
     Expr,
@@ -28,8 +29,10 @@ module Covenant.Expr
     lit,
     prim,
     arg,
+    bound,
     app,
     lam,
+    letBind,
 
     -- ** Compile an expression
     toExprGraph,
@@ -96,12 +99,30 @@ newtype Arg = Arg Word64
       Show
     )
 
--- | A general reference in a Covenant program. This is either a computation
--- (represented by its unique 'Id') or a function argument (represented by an
--- 'Arg').
+-- | A @let@-bound variable in a Covenant program.
 --
 -- @since 1.0.0
-data Ref = AnArg Arg | AnId Id
+newtype Bound = Bound Word64
+  deriving
+    ( -- | @since 1.0.0
+      Eq,
+      -- | @since 1.0.0
+      Ord
+    )
+    via Word64
+  deriving stock
+    ( -- | @since 1.0.0
+      Show
+    )
+
+-- | A general reference in a Covenant program. This is one of the following:
+--
+-- * A computation, represented by its unique 'Id';
+-- * A function argument, represented by an 'Arg'; or
+-- * A @let@-bound variable, represented by a 'Bound'.
+--
+-- @since 1.0.0
+data Ref = AnArg Arg | AnId Id | ABound Bound
   deriving stock
     ( -- | @since 1.0.0
       Eq,
@@ -135,6 +156,7 @@ data Expr
   = Lit AConstant
   | Prim PrimCall
   | Lam Ref
+  | Let Ref Ref
   | App Ref Ref
   deriving stock
     ( -- | @since 1.0.0
@@ -328,12 +350,13 @@ prim = idOf . Prim
 app :: Ref -> Ref -> ExprBuilder Id
 app f x = idOf (App f x)
 
--- | A proof of how many arguments are available to a Covenant program. Put
--- another way, a value of type @'Scope' n@ means that we are under @n@ lambdas,
--- each with an argument we can refer to.
+-- | A proof of how many arguments and @let@-binds are available to a Covenant
+-- program. Put another way, a value of type @'Scope' n m@ means that we are
+-- under @n@ lambdas (each with an argument we can refer to) and @m@ @let@
+-- bindings (each with a bound variable we can refer to.
 --
 -- @since 1.0.0
-data Scope (n :: Natural) = Scope
+data Scope (args :: Natural) (lets :: Natural) = Scope
   deriving stock
     ( -- | @since 1.0.0
       Eq,
@@ -341,10 +364,10 @@ data Scope (n :: Natural) = Scope
       Show
     )
 
--- | Constructs the scopes that proves nothing.
+-- | Constructs the 'Scope' that proves nothing.
 --
 -- @since 1.0.0
-emptyScope :: Scope 0
+emptyScope :: Scope 0 0
 emptyScope = Scope
 
 -- | Given a proof of scope, construct one of the arguments in that scope. This
@@ -357,32 +380,73 @@ emptyScope = Scope
 --
 -- @since 1.0.0
 arg ::
-  forall (n :: Natural) (m :: Natural).
+  forall (n :: Natural) (m :: Natural) (lets :: Natural).
   (KnownNat n, CmpNat n m ~ LT) =>
-  Scope m ->
+  Scope m lets ->
   Arg
 arg Scope = Arg . fromIntegral . natVal $ Proxy @n
 
--- | Given a scope, and a function to construct a lambda body using a \'larger\'
--- scope, construct a lambda with that body.
+-- | Given a proof of scope, construct one of the @let@-bound variables in that
+-- scope. This requires use of @TypeApplications@ to select which bound variable
+-- you are interested in: bound variable @0@ is the one from the nearest @let@,
+-- bound variable @1@ is the one from the next enclosing @let@, and so on.
+--
+-- See the documentation for 'letBind' for an example of how this function
+-- should be used.
+--
+-- @since 1.0.0
+bound ::
+  forall (n :: Natural) (args :: Natural) (m :: Natural).
+  (KnownNat n, CmpNat n m ~ LT) =>
+  Scope args m ->
+  Bound
+bound Scope = Bound . fromIntegral . natVal $ Proxy @n
+
+-- | Given a proof of scope, and a function to construct a lambda body using a
+-- \'larger\' proof of scope, construct a lambda with that body.
 --
 -- For example, this is how you define @id@:
 --
--- > lam emptyScope $ \s1 -> pure . AnArg $ arg @0 s1
+-- > lam emptyScope $ \s10 -> pure . AnArg $ arg @0 s10
 --
 -- This is @const@:
 --
--- > lam emptyScope $ \s1 -> lam s1 $ \s2 -> pure . AnArg $ arg @1 s2
+-- > lam emptyScope $ \s10 -> lam s10 $ \s20 -> pure . AnArg $ arg @1 s20
 --
 -- @since 1.0.0
 lam ::
-  forall (n :: Natural).
-  Scope n ->
-  (Scope (n + 1) -> ExprBuilder Ref) ->
+  forall (n :: Natural) (m :: Natural).
+  Scope n m ->
+  (Scope (n + 1) m -> ExprBuilder Ref) ->
   ExprBuilder Id
 lam Scope f = do
   res <- f Scope
   idOf . Lam $ res
+
+-- | Given a proof of scope, a 'Ref' to an expression to bind to, and a function
+-- to construct a @let@-binding body using a \'larger\' proof of scope, construct
+-- a @let@ binding with that body.
+--
+-- For example, if you wanted a local variable binding the result of multiplying
+-- 5 by 4, which then gets squared, you would do this:
+--
+-- > do
+-- >     five <- lit 5
+-- >     four <- lit 4
+-- >     prod <- mul five four
+-- >     letBind emptyScope prod $ \s01 ->
+-- >          mul (ABound . bound @0 $ s01) (ABound . bound @0 $ s01)
+--
+-- @since 1.0.0
+letBind ::
+  forall (n :: Natural) (m :: Natural).
+  Scope n m ->
+  Ref ->
+  (Scope n (m + 1) -> ExprBuilder Ref) ->
+  ExprBuilder Id
+letBind Scope r f = do
+  res <- f Scope
+  idOf . Let r $ res
 
 -- Helpers
 
@@ -408,9 +472,11 @@ toIdList = \case
     PrimCallThree _ r1 r2 r3 -> [r1, r2, r3]
     PrimCallSix _ r1 r2 r3 r4 r5 r6 -> [r1, r2, r3, r4, r5, r6]
   Lam body -> mapMaybe refToId [body]
+  Let x body -> mapMaybe refToId [x, body]
   App f x -> mapMaybe refToId [f, x]
 
 refToId :: Ref -> Maybe Id
 refToId = \case
   AnArg _ -> Nothing
   AnId i -> Just i
+  ABound _ -> Nothing
