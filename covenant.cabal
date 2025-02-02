@@ -82,6 +82,7 @@ library
   import: lang
   exposed-modules:
     Covenant.Expr
+    Covenant.ExprType
     Covenant.Prim
 
   build-depends:

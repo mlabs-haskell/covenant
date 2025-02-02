@@ -44,6 +44,7 @@ import Algebra.Graph.Acyclic.AdjacencyMap
 import Algebra.Graph.AdjacencyMap qualified as Cyclic
 import Control.Monad.Reader (Reader, ask, lift, local, runReader)
 import Control.Monad.State.Strict (State, get, put, runState)
+import Covenant.ExprType (ExprType (ExprTypeLam, ExprTypeNat), HasType (typeOf))
 import Covenant.Prim (OneArgFunc, SixArgFunc, ThreeArgFunc, TwoArgFunc)
 import Data.Bimap (Bimap)
 import Data.Bimap qualified as Bimap
@@ -80,28 +81,7 @@ newtype Id = Id Word64
       Show
     )
 
--- | An argument passed to a function in a Covenant program.
---
--- @since 1.0.0
-newtype Arg = Arg Word64
-  deriving
-    ( -- | @since 1.0.0
-      Eq,
-      -- | @since 1.0.0
-      Ord
-    )
-    via Word64
-  deriving stock
-    ( -- | @since 1.0.0
-      Show
-    )
-
--- | A general reference in a Covenant program. This is either a computation
--- (represented by its unique 'Id') or a function argument (represented by an
--- 'Arg').
---
--- @since 1.0.0
-data Ref = AnArg Arg | AnId Id
+data TypedId = TypedId Id ExprType
   deriving stock
     ( -- | @since 1.0.0
       Eq,
@@ -110,6 +90,48 @@ data Ref = AnArg Arg | AnId Id
       -- | @since 1.0.0
       Show
     )
+
+instance HasType TypedId where
+  typeOf (TypedId _ ty) = ty
+
+-- | An argument passed to a function in a Covenant program.
+--
+-- @since 1.0.0
+data Arg = Arg Word64 ExprType
+  deriving
+    ( -- | @since 1.0.0
+      Eq,
+      -- | @since 1.0.0
+      Ord
+    )
+    via (Word64, ExprType)
+  deriving stock
+    ( -- | @since 1.0.0
+      Show
+    )
+
+instance HasType Arg where
+  typeOf (Arg _ ty) = ty
+
+-- | A general reference in a Covenant program. This is either a computation
+-- (represented by its unique 'Id') or a function argument (represented by an
+-- 'Arg').
+--
+-- @since 1.0.0
+data Ref = AnArg Arg | AnId TypedId
+  deriving stock
+    ( -- | @since 1.0.0
+      Eq,
+      -- | @since 1.0.0
+      Ord,
+      -- | @since 1.0.0
+      Show
+    )
+
+instance HasType Ref where
+  typeOf = \case
+    AnId anId -> typeOf anId
+    AnArg anArg -> typeOf anArg
 
 -- | A call to a Plutus primitive.
 --
@@ -127,6 +149,9 @@ data PrimCall
       -- | @since 1.0.0
       Show
     )
+
+instance HasType PrimCall where
+  typeOf = undefined
 
 -- | A node in a Covenant program.
 --
@@ -163,23 +188,23 @@ newtype ExprBuilder (a :: Type) = ExprBuilder (State (Id, Bimap Id Expr) a)
 -- | Does not shrink.
 --
 -- @since 1.0.0
-instance Arbitrary (ExprBuilder Id) where
+instance Arbitrary (ExprBuilder TypedId) where
   {-# INLINEABLE arbitrary #-}
   arbitrary = do
     generated <- runGenT (sized go)
     pure $ runReader generated 0
     where
-      go :: Int -> GenT (Reader Word64) (ExprBuilder Id)
+      go :: Int -> GenT (Reader Word64) (ExprBuilder TypedId)
       go size
         | size <= 0 = aLiteral
         | otherwise = oneof [aLiteral, aPrim size, aLam size, anApp size]
-      aLiteral :: GenT (Reader Word64) (ExprBuilder Id)
+      aLiteral :: GenT (Reader Word64) (ExprBuilder TypedId)
       aLiteral = liftGen arbitrary >>= \n -> pure . lit $ n
       -- Note (Koz, 22/01/25): This technically can generate nonsensical
       -- expressions, but we can already do this anyway, as we can generate
       -- `App`s which would never work due to argument unsuitability. It should
       -- be fixed, though.
-      aPrim :: Int -> GenT (Reader Word64) (ExprBuilder Id)
+      aPrim :: Int -> GenT (Reader Word64) (ExprBuilder TypedId)
       aPrim size =
         frequency
           [ (34, oneArg size),
@@ -187,25 +212,25 @@ instance Arbitrary (ExprBuilder Id) where
             (12, threeArg size),
             (2, sixArg size)
           ]
-      oneArg :: Int -> GenT (Reader Word64) (ExprBuilder Id)
+      oneArg :: Int -> GenT (Reader Word64) (ExprBuilder TypedId)
       oneArg size = do
         r1 <- argOrId size
         f <- liftGen arbitrary
         pure $ r1 >>= \r1' -> prim (PrimCallOne f r1')
-      twoArg :: Int -> GenT (Reader Word64) (ExprBuilder Id)
+      twoArg :: Int -> GenT (Reader Word64) (ExprBuilder TypedId)
       twoArg size = do
         r1 <- argOrId size
         r2 <- argOrId size
         f <- liftGen arbitrary
         pure $ r1 >>= \r1' -> r2 >>= \r2' -> prim (PrimCallTwo f r1' r2')
-      threeArg :: Int -> GenT (Reader Word64) (ExprBuilder Id)
+      threeArg :: Int -> GenT (Reader Word64) (ExprBuilder TypedId)
       threeArg size = do
         r1 <- argOrId size
         r2 <- argOrId size
         r3 <- argOrId size
         f <- liftGen arbitrary
         pure $ r1 >>= \r1' -> r2 >>= \r2' -> r3 >>= \r3' -> prim (PrimCallThree f r1' r2' r3')
-      sixArg :: Int -> GenT (Reader Word64) (ExprBuilder Id)
+      sixArg :: Int -> GenT (Reader Word64) (ExprBuilder TypedId)
       sixArg size = do
         r1 <- argOrId size
         r2 <- argOrId size
@@ -220,7 +245,7 @@ instance Arbitrary (ExprBuilder Id) where
               r3 >>= \r3' ->
                 r4 >>= \r4' ->
                   r5 >>= \r5' -> r6 >>= \r6' -> prim (PrimCallSix f r1' r2' r3' r4' r5' r6')
-      aLam :: Int -> GenT (Reader Word64) (ExprBuilder Id)
+      aLam :: Int -> GenT (Reader Word64) (ExprBuilder TypedId)
       aLam size = do
         body <- expand (argOrId size)
         -- Note (Koz, 21/01/25): We 'bypass' our protections on construction of
@@ -238,7 +263,7 @@ instance Arbitrary (ExprBuilder Id) where
         forall (a :: Type).
         GenT (Reader Word64) (ExprBuilder a) -> GenT (Reader Word64) (ExprBuilder a)
       expand (GenT f) = GenT $ \qcgen size -> local (+ 1) (f qcgen size)
-      anApp :: Int -> GenT (Reader Word64) (ExprBuilder Id)
+      anApp :: Int -> GenT (Reader Word64) (ExprBuilder TypedId)
       anApp size = do
         lhs <- aLam size
         rhs <- argOrId size
@@ -308,32 +333,41 @@ toExprGraph (ExprBuilder comp) = do
 -- | Construct a literal (constant) value.
 --
 -- @since 1.0.0
-lit :: Natural -> ExprBuilder Id
-lit = idOf . Lit
+lit :: Natural -> ExprBuilder TypedId
+lit n = withType ExprTypeNat <$> idOf (Lit n)
 
 -- | Construct a primitive function call.
 --
 -- @since 1.0.0
-prim :: PrimCall -> ExprBuilder Id
-prim = idOf . Prim
+prim :: PrimCall -> ExprBuilder TypedId
+prim p = withType (error "todo") <$> idOf (Prim p)
 
 -- | Construct a function application. The first argument is (an expression
 -- evaluating to) a function, the second argument is (an expression evaluating
 -- to) an argument.
---
--- = Important note
---
--- Currently, this does not verify that the first argument is indeed a function,
--- nor that the second argument is appropriate.
-app :: Ref -> Ref -> ExprBuilder Id
-app f x = idOf (App f x)
+app :: Ref -> Ref -> ExprBuilder TypedId
+app f x =
+  let argTy = typeOf x
+      funTy = typeOf f
+      resTy = case funTy of
+        ExprTypeLam argTy' bodyTy | argTy' == argTy -> bodyTy
+        ExprTypeLam argTy' bodyTy ->
+          typeError $
+            "Can't apply a function ("
+              ++ (show argTy')
+              ++ " -> "
+              ++ (show bodyTy)
+              ++ ") to an argument "
+              ++ (show argTy)
+        _ -> typeError $ "Can't apply a value which is not a function (" ++ (show funTy) ++ ")"
+   in withType resTy <$> idOf (App f x)
 
 -- | A proof of how many arguments are available to a Covenant program. Put
 -- another way, a value of type @'Scope' n@ means that we are under @n@ lambdas,
 -- each with an argument we can refer to.
 --
 -- @since 1.0.0
-data Scope (n :: Natural) = Scope
+data Scope (n :: Natural) = Scope [ExprType]
   deriving stock
     ( -- | @since 1.0.0
       Eq,
@@ -345,7 +379,7 @@ data Scope (n :: Natural) = Scope
 --
 -- @since 1.0.0
 emptyScope :: Scope 0
-emptyScope = Scope
+emptyScope = Scope []
 
 -- | Given a proof of scope, construct one of the arguments in that scope. This
 -- requires use of @TypeApplications@ to select which argument you are
@@ -361,7 +395,9 @@ arg ::
   (KnownNat n, CmpNat n m ~ LT) =>
   Scope m ->
   Arg
-arg Scope = Arg . fromIntegral . natVal $ Proxy @n
+arg (Scope tys) =
+  let n = fromIntegral . natVal $ Proxy @n
+   in Arg n (tys !! (fromIntegral n))
 
 -- | Given a scope, and a function to construct a lambda body using a \'larger\'
 -- scope, construct a lambda with that body.
@@ -377,12 +413,13 @@ arg Scope = Arg . fromIntegral . natVal $ Proxy @n
 -- @since 1.0.0
 lam ::
   forall (n :: Natural).
+  ExprType ->
   Scope n ->
   (Scope (n + 1) -> ExprBuilder Ref) ->
-  ExprBuilder Id
-lam Scope f = do
-  res <- f Scope
-  idOf . Lam $ res
+  ExprBuilder TypedId
+lam argTy scope f = do
+  res <- f (pushScope argTy scope)
+  withType (ExprTypeLam argTy (typeOf res)) <$> idOf (Lam res)
 
 -- Helpers
 
@@ -399,6 +436,15 @@ idOf e = ExprBuilder $ do
 nextId :: Id -> Id
 nextId (Id w) = Id $ w + 1
 
+withType :: ExprType -> Id -> TypedId
+withType = flip TypedId
+
+-- | Fail with type error.
+-- (2025/02/02) Farseen: I haven't figured out how to add error handling in the ExprBuilder monad.
+-- Till then, this will stand in for error handling.
+typeError :: forall a. String -> a
+typeError s = error s
+
 toIdList :: Expr -> [Id]
 toIdList = \case
   Lit _ -> []
@@ -413,4 +459,7 @@ toIdList = \case
 refToId :: Ref -> Maybe Id
 refToId = \case
   AnArg _ -> Nothing
-  AnId i -> Just i
+  AnId (TypedId i _) -> Just i
+
+pushScope :: forall (n :: Natural). ExprType -> Scope n -> Scope (n + 1)
+pushScope ty (Scope tys) = Scope (ty : tys)

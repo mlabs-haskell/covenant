@@ -13,8 +13,14 @@ module Covenant.Prim
     TwoArgFunc (..),
     ThreeArgFunc (..),
     SixArgFunc (..),
+    typeOfOneArgFunc,
+    typeOfTwoArgFunc,
+    typeOfThreeArgFunc,
+    typeOfSixArgFunc,
   )
 where
+
+import Covenant.ExprType (ExprType)
 
 import Test.QuickCheck (Arbitrary (arbitrary), elements)
 
@@ -65,6 +71,12 @@ data OneArgFunc
       -- | @since 1.0.0
       Show
     )
+
+-- | ExprType of the one-argument functions.
+-- 
+-- @since 1.0.0
+typeOfOneArgFunc :: OneArgFunc -> ExprType
+typeOfOneArgFunc = error "todo"
 
 -- | Does not shrink.
 --
@@ -163,6 +175,13 @@ data TwoArgFunc
       Show
     )
 
+-- | ExprType of the two-argument functions.
+-- 
+-- @since 1.0.0
+typeOfTwoArgFunc :: TwoArgFunc -> ExprType
+typeOfTwoArgFunc = error "todo"
+
+
 -- | Does not shrink.
 --
 -- @since 1.0.0
@@ -237,6 +256,12 @@ data ThreeArgFunc
       Show
     )
 
+-- | ExprType of the three-argument functions.
+-- 
+-- @since 1.0.0
+typeOfThreeArgFunc :: ThreeArgFunc -> ExprType
+typeOfThreeArgFunc = error "todo"
+
 -- | Does not shrink.
 --
 -- @since 1.0.0
@@ -272,6 +297,13 @@ data SixArgFunc
       -- | @since 1.0.0
       Show
     )
+
+-- | ExprType of the six-argument functions.
+-- 
+-- @since 1.0.0
+typeOfSixArgFunc :: SixArgFunc -> ExprType
+typeOfSixArgFunc = error "todo"
+
 
 -- | Does not shrink.
 --
