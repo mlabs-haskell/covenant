@@ -9,6 +9,12 @@
 -- Contains the basic functionality to build up Covenant expressions
 -- programmatically.
 --
+-- Throughout, we will refer to the \'ASG\' in a number of contexts. This stands
+-- for \'abstract syntax graph\', which is an AST (abstract syntax tree) with as
+-- much sharing of substructure as possible. This makes it a DAG (directed
+-- acyclic graph), hence its name change. We achieve this using hash consing:
+-- please see the Covenant wiki for more details about how this works.
+--
 -- @since 1.0.0
 module Covenant.ASG
   ( -- * Types
