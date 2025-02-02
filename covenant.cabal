@@ -86,6 +86,7 @@ library
     Covenant.Prim
 
   other-modules:
+    Covenant.Internal.ASG
     Covenant.Internal.ASGBuilder
     Covenant.Internal.ASGNode
 
