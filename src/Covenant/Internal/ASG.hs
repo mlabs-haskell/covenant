@@ -16,12 +16,12 @@ import Covenant.Internal.ASGBuilder
     ASGBuilderState (ASGBuilderState),
   )
 import Covenant.Internal.ASGNode
-  ( ASGNode
-      ( App,
-        Lam,
-        Let,
-        Lit,
-        Prim
+  ( ASGNodeInternal
+      ( AppInternal,
+        LamInternal,
+        LetInternal,
+        LitInternal,
+        PrimInternal
       ),
     Id,
     PrimCall
@@ -39,7 +39,7 @@ import Data.Maybe (mapMaybe)
 -- | A Covenant program, represented as an acyclic graph.
 --
 -- @since 1.0.0
-data ASG = ASG (Id, ASGNode) (AdjacencyMap (Id, ASGNode))
+data ASG = ASG (Id, ASGNodeInternal) (AdjacencyMap (Id, ASGNodeInternal))
   deriving stock
     ( -- | @since 1.0.0
       Eq,
@@ -68,9 +68,9 @@ compileASG (ASGBuilder comp) = do
       pure . ASG initial $ acyclic
   where
     go ::
-      Bimap Id ASGNode ->
+      Bimap Id ASGNodeInternal ->
       Id ->
-      [((Id, ASGNode), (Id, ASGNode))]
+      [((Id, ASGNodeInternal), (Id, ASGNodeInternal))]
     go binds curr = case Bimap.lookup curr binds of
       Nothing -> []
       Just e ->
@@ -82,17 +82,17 @@ compileASG (ASGBuilder comp) = do
 
 -- Helpers
 
-toIdList :: ASGNode -> [Id]
+toIdList :: ASGNodeInternal -> [Id]
 toIdList = \case
-  Lit _ -> []
-  Prim p -> mapMaybe refToId $ case p of
+  LitInternal _ -> []
+  PrimInternal p -> mapMaybe refToId $ case p of
     PrimCallOne _ r -> [r]
     PrimCallTwo _ r1 r2 -> [r1, r2]
     PrimCallThree _ r1 r2 r3 -> [r1, r2, r3]
     PrimCallSix _ r1 r2 r3 r4 r5 r6 -> [r1, r2, r3, r4, r5, r6]
-  Lam body -> mapMaybe refToId [body]
-  Let x body -> mapMaybe refToId [x, body]
-  App f x -> mapMaybe refToId [f, x]
+  LamInternal body -> mapMaybe refToId [body]
+  LetInternal x body -> mapMaybe refToId [x, body]
+  AppInternal f x -> mapMaybe refToId [f, x]
 
 refToId :: Ref -> Maybe Id
 refToId = \case

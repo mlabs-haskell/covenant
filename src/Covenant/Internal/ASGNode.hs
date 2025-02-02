@@ -4,7 +4,7 @@ module Covenant.Internal.ASGNode
     Bound (..),
     Ref (..),
     PrimCall (..),
-    ASGNode (..),
+    ASGNodeInternal (..),
   )
 where
 
@@ -94,16 +94,13 @@ data PrimCall
       Show
     )
 
--- | A node in a Covenant program. Since Covenant programs are hash consed, they
--- form a graph, hence \'ASG\' - \'abstract syntax graph\'.
---
--- @since 1.0.0
-data ASGNode
-  = Lit AConstant
-  | Prim PrimCall
-  | Lam Ref
-  | Let Ref Ref
-  | App Ref Ref
+-- Used only by the ASGBuilder
+data ASGNodeInternal
+  = LitInternal AConstant
+  | PrimInternal PrimCall
+  | LamInternal Ref
+  | LetInternal Ref Ref
+  | AppInternal Ref Ref
   deriving stock
     ( -- | @since 1.0.0
       Eq,

@@ -23,7 +23,6 @@ module Covenant.ASG
     Bound,
     Ref (..),
     PrimCall (..),
-    ASGNode,
     ASGBuilder,
     Scope,
     ASG,
@@ -54,7 +53,7 @@ import Covenant.Internal.ASGBuilder
     prim,
   )
 import Covenant.Internal.ASGNode
-  ( ASGNode (Lam, Let),
+  ( ASGNodeInternal (LamInternal, LetInternal),
     Arg (Arg),
     Bound (Bound),
     Id,
@@ -136,7 +135,7 @@ lam ::
   ASGBuilder Id
 lam Scope f = do
   res <- f Scope
-  idOf . Lam $ res
+  idOf . LamInternal $ res
 
 -- | Given a proof of scope, a 'Ref' to an expression to bind to, and a function
 -- to construct a @let@-binding body using a \'larger\' proof of scope, construct
@@ -161,4 +160,4 @@ letBind ::
   ASGBuilder Id
 letBind Scope r f = do
   res <- f Scope
-  idOf . Let r $ res
+  idOf . LetInternal r $ res
