@@ -12,11 +12,13 @@ module Covenant.Internal.ASGNode
     pattern Lam,
     pattern Let,
     pattern App,
+    childIds,
   )
 where
 
 import Covenant.Constant (AConstant)
 import Covenant.Prim (OneArgFunc, SixArgFunc, ThreeArgFunc, TwoArgFunc)
+import Data.Maybe (mapMaybe)
 import Data.Word (Word64)
 
 -- | A unique identifier for a node in a Covenant program.
@@ -105,7 +107,15 @@ data PrimCall
       Show
     )
 
--- Used only by the ASGBuilder
+-- | A single node in a Covenant ASG.
+--
+-- = Note
+--
+-- We use pattern synonyms to allow pattern-matching syntax to view 'ASGNode'
+-- contents, but /not/ construct them. For this, you need to use the API
+-- provided by 'Covenant.Internal.ASGBuilder.ASGBuilder'.
+--
+-- @since 1.0.0
 data ASGNode
   = LitInternal AConstant
   | PrimInternal PrimCall
@@ -121,24 +131,56 @@ data ASGNode
       Show
     )
 
--- | @since 1.0.0
+-- | A constant value.
+--
+-- @since 1.0.0
 pattern Lit :: AConstant -> ASGNode
 pattern Lit c <- LitInternal c
 
--- | @since 1.0.0
+-- | A call to a Plutus builtin.
+--
+-- @since 1.0.0
 pattern Prim :: PrimCall -> ASGNode
 pattern Prim p <- PrimInternal p
 
--- | @since 1.0.0
+-- | A lambda abstraction: the node contents are its body.
+--
+-- @since 1.0.0
 pattern Lam :: Ref -> ASGNode
 pattern Lam r <- LamInternal r
 
--- | @since 1.0.0
+-- | A `let` binding. The first 'Ref' is the binding, while the second is the
+-- body the binding is used in.
+--
+-- @since 1.0.0
 pattern Let :: Ref -> Ref -> ASGNode
 pattern Let rBind rBody <- LetInternal rBind rBody
 
--- | @since 1.0.0
+-- | A function application. The first 'Ref' is the function expression, while
+-- the second is the argument to be applied.
+--
+-- @since 1.0.0
 pattern App :: Ref -> Ref -> ASGNode
 pattern App rFun rArg <- AppInternal rFun rArg
 
 {-# COMPLETE Lit, Prim, Lam, Let, App #-}
+
+-- | @since 1.0.0
+childIds :: ASGNode -> [Id]
+childIds = \case
+  LitInternal _ -> []
+  PrimInternal p -> case p of
+    PrimCallOne _ r1 -> mapMaybe refToId [r1]
+    PrimCallTwo _ r1 r2 -> mapMaybe refToId [r1, r2]
+    PrimCallThree _ r1 r2 r3 -> mapMaybe refToId [r1, r2, r3]
+    PrimCallSix _ r1 r2 r3 r4 r5 r6 -> mapMaybe refToId [r1, r2, r3, r4, r5, r6]
+  LamInternal r1 -> mapMaybe refToId [r1]
+  LetInternal r1 r2 -> mapMaybe refToId [r1, r2]
+  AppInternal r1 r2 -> mapMaybe refToId [r1, r2]
+
+-- Helpers
+
+refToId :: Ref -> Maybe Id
+refToId = \case
+  AnId i -> pure i
+  _ -> Nothing

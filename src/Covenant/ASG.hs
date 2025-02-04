@@ -28,8 +28,11 @@ module Covenant.ASG
     ASGNode (Lit, Lam, Prim, App, Let),
     Scope,
     ASG,
+    ASGZipper,
 
     -- * Functions
+
+    -- ** Scope construction
     emptyScope,
 
     -- ** Builder functionality
@@ -43,10 +46,30 @@ module Covenant.ASG
 
     -- ** Compile
     compileASG,
+
+    -- ** Walking the ASG
+    openASGZipper,
+    closeASGZipper,
+    viewASGZipper,
+    downASGZipper,
+    leftASGZipper,
+    rightASGZipper,
+    upASGZipper,
   )
 where
 
-import Covenant.Internal.ASG (ASG, compileASG)
+import Covenant.Internal.ASG
+  ( ASG,
+    ASGZipper,
+    closeASGZipper,
+    compileASG,
+    downASGZipper,
+    leftASGZipper,
+    openASGZipper,
+    rightASGZipper,
+    upASGZipper,
+    viewASGZipper,
+  )
 import Covenant.Internal.ASGBuilder
   ( ASGBuilder,
     app,
