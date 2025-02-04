@@ -15,7 +15,7 @@ import Control.Monad.State.Strict (State, gets, modify')
 import Control.Monad.Trans (lift)
 import Covenant.Constant (AConstant)
 import Covenant.Internal.ASGNode
-  ( ASGNodeInternal
+  ( ASGNode
       ( AppInternal,
         LamInternal,
         LitInternal,
@@ -48,8 +48,8 @@ import Test.QuickCheck.GenT
     sized,
   )
 
-newtype ASGBuilderState = ASGBuilderState {binds :: Bimap Id ASGNodeInternal}
-  deriving (Eq, Ord) via Bimap Id ASGNodeInternal
+newtype ASGBuilderState = ASGBuilderState {binds :: Bimap Id ASGNode}
+  deriving (Eq, Ord) via Bimap Id ASGNode
   deriving stock (Show)
 
 makeFieldLabelsNoPrefix ''ASGBuilderState
@@ -197,7 +197,7 @@ app f x = idOf (AppInternal f x)
 -- the current `ExprBuilder` context, this `Id` will be looked up and reused;
 -- otherwise, a fresh `Id` will be assigned, and the node cached to ensure we
 -- have a reference to it henceforth.
-idOf :: ASGNodeInternal -> ASGBuilder Id
+idOf :: ASGNode -> ASGBuilder Id
 idOf e = ASGBuilder $ do
   existingId <- gets (Bimap.lookupR e . view #binds)
   case existingId of

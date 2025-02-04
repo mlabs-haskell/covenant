@@ -1,10 +1,17 @@
+{-# LANGUAGE PatternSynonyms #-}
+
 module Covenant.Internal.ASGNode
   ( Id (..),
     Arg (..),
     Bound (..),
     Ref (..),
     PrimCall (..),
-    ASGNodeInternal (..),
+    ASGNode (..),
+    pattern Lit,
+    pattern Prim,
+    pattern Lam,
+    pattern Let,
+    pattern App,
   )
 where
 
@@ -20,7 +27,11 @@ newtype Id = Id Word64
     ( -- | @since 1.0.0
       Eq,
       -- | @since 1.0.0
-      Ord
+      Ord,
+      -- | Needed for internal reasons, even though this type class is terrible.
+      --
+      -- @since 1.0.0
+      Enum
     )
     via Word64
   deriving stock
@@ -95,7 +106,7 @@ data PrimCall
     )
 
 -- Used only by the ASGBuilder
-data ASGNodeInternal
+data ASGNode
   = LitInternal AConstant
   | PrimInternal PrimCall
   | LamInternal Ref
@@ -109,3 +120,25 @@ data ASGNodeInternal
       -- | @since 1.0.0
       Show
     )
+
+-- | @since 1.0.0
+pattern Lit :: AConstant -> ASGNode
+pattern Lit c <- LitInternal c
+
+-- | @since 1.0.0
+pattern Prim :: PrimCall -> ASGNode
+pattern Prim p <- PrimInternal p
+
+-- | @since 1.0.0
+pattern Lam :: Ref -> ASGNode
+pattern Lam r <- LamInternal r
+
+-- | @since 1.0.0
+pattern Let :: Ref -> Ref -> ASGNode
+pattern Let rBind rBody <- LetInternal rBind rBody
+
+-- | @since 1.0.0
+pattern App :: Ref -> Ref -> ASGNode
+pattern App rFun rArg <- AppInternal rFun rArg
+
+{-# COMPLETE Lit, Prim, Lam, Let, App #-}

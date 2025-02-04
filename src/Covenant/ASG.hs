@@ -1,4 +1,5 @@
 {-# LANGUAGE AllowAmbiguousTypes #-}
+{-# LANGUAGE PatternSynonyms #-}
 
 -- |
 -- Module: Covenant.ASG
@@ -24,6 +25,7 @@ module Covenant.ASG
     Ref (..),
     PrimCall (..),
     ASGBuilder,
+    ASGNode (Lit, Lam, Prim, App, Let),
     Scope,
     ASG,
 
@@ -53,12 +55,17 @@ import Covenant.Internal.ASGBuilder
     prim,
   )
 import Covenant.Internal.ASGNode
-  ( ASGNodeInternal (LamInternal, LetInternal),
+  ( ASGNode (LamInternal, LetInternal),
     Arg (Arg),
     Bound (Bound),
     Id,
     PrimCall (PrimCallOne, PrimCallSix, PrimCallThree, PrimCallTwo),
     Ref (ABound, AnArg, AnId),
+    pattern App,
+    pattern Lam,
+    pattern Let,
+    pattern Lit,
+    pattern Prim,
   )
 import Data.Proxy (Proxy (Proxy))
 import GHC.TypeNats (CmpNat, KnownNat, natVal, type (+))
