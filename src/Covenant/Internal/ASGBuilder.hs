@@ -3,6 +3,8 @@
 module Covenant.Internal.ASGBuilder
   ( ASGBuilderState (..),
     ASGBuilder (..),
+    ASGBuilderError (..),
+    runASGBuilder,
     idOf,
     lit,
     prim,
@@ -10,7 +12,8 @@ module Covenant.Internal.ASGBuilder
   )
 where
 
-import Control.Monad.State.Strict (State, gets, modify')
+import Control.Monad.Except (ExceptT, liftEither, runExceptT)
+import Control.Monad.State.Strict (State, gets, modify', runState)
 import Covenant.Constant (AConstant)
 import Covenant.Internal.ASGNode
   ( ASGNode (App, Lit, Prim),
@@ -35,7 +38,7 @@ makeFieldLabelsNoPrefix ''ASGBuilderState
 -- enables hash consing.
 --
 -- @since 1.0.0
-newtype ASGBuilder (a :: Type) = ASGBuilder (State ASGBuilderState a)
+newtype ASGBuilder (a :: Type) = ASGBuilder (ExceptT ASGBuilderError (State ASGBuilderState) a)
   deriving
     ( -- | @since 1.0.0
       Functor,
@@ -44,7 +47,20 @@ newtype ASGBuilder (a :: Type) = ASGBuilder (State ASGBuilderState a)
       -- | @since 1.0.0
       Monad
     )
-    via (State ASGBuilderState)
+    via (ExceptT ASGBuilderError (State ASGBuilderState))
+
+-- | The errors that can occur during the construction of an ASG
+--
+-- @since 1.0.0
+data ASGBuilderError
+
+-- | Run a computation in the ASGBuilder monad
+--
+-- @since 1.0.0
+runASGBuilder :: ASGBuilder a -> ASGBuilderState -> (Either ASGBuilderError a, ASGBuilderState)
+runASGBuilder (ASGBuilder m) s =
+  let stateM = runExceptT m
+   in (runState stateM) s
 
 -- | Construct a literal (constant) value.
 --

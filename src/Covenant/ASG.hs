@@ -51,14 +51,15 @@ import Algebra.Graph.Acyclic.AdjacencyMap
     vertex,
   )
 import Algebra.Graph.AdjacencyMap qualified as Cyclic
-import Control.Monad.State.Strict (runState)
 import Covenant.Internal.ASGBuilder
-  ( ASGBuilder (ASGBuilder),
+  ( ASGBuilder,
+    ASGBuilderError,
     ASGBuilderState (ASGBuilderState),
     app,
     idOf,
     lit,
     prim,
+    runASGBuilder,
   )
 import Covenant.Internal.ASGNode
   ( ASGNode (App, Lam, Let, Lit, Prim),
@@ -70,7 +71,7 @@ import Covenant.Internal.ASGNode
   )
 import Data.Bimap (Bimap)
 import Data.Bimap qualified as Bimap
-import Data.Maybe (mapMaybe)
+import Data.Maybe (fromJust, mapMaybe)
 import Data.Proxy (Proxy (Proxy))
 import GHC.TypeNats (CmpNat, KnownNat, natVal, type (+))
 import Numeric.Natural (Natural)
@@ -90,20 +91,21 @@ data ASG = ASG (Id, ASGNode) (AdjacencyMap (Id, ASGNode))
 -- refers to into a call graph. This is guaranteed to be acyclic.
 --
 -- @since 1.0.0
-toASG :: ASGBuilder Id -> Maybe ASG
-toASG (ASGBuilder comp) = do
-  let (start, ASGBuilderState binds) = runState comp (ASGBuilderState Bimap.empty)
+toASG :: ASGBuilder Id -> Either ASGBuilderError ASG
+toASG comp = do
+  let (startOrError, ASGBuilderState (binds :: Bimap Id ASGNode)) = runASGBuilder comp (ASGBuilderState Bimap.empty)
+  start :: Id <- startOrError
   if Bimap.size binds == 1
     then do
-      -- This cannot fail, but the type system can't show it
-      initial <- (start,) <$> Bimap.lookup start binds
+      let -- This cannot fail, but the type system can't show it
+          initial = (start,) ((Bimap.!) binds start)
       pure . ASG initial . vertex $ initial
     else do
       let asGraph = Cyclic.edges . go binds $ start
       -- This cannot fail, but the type system can't show it
-      acyclic <- toAcyclic asGraph
+          acyclic = fromJust $ toAcyclic asGraph
       -- Same as above
-      initial <- (start,) <$> Bimap.lookup start binds
+          initial = (start,) ((Bimap.!) binds start)
       pure . ASG initial $ acyclic
   where
     go ::
