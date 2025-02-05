@@ -21,6 +21,7 @@ import Covenant.Internal.ASGNode
     PrimCall,
     Ref,
   )
+import Covenant.Internal.ASGType (ASGType, HasType (typeOf), TypeError, typeApp)
 import Data.Bimap (Bimap)
 import Data.Bimap qualified as Bimap
 import Data.Kind (Type)
@@ -53,6 +54,7 @@ newtype ASGBuilder (a :: Type) = ASGBuilder (ExceptT ASGBuilderError (State ASGB
 --
 -- @since 1.0.0
 data ASGBuilderError
+  = ATypeError TypeError
 
 -- | Run a computation in the ASGBuilder monad
 --
@@ -78,26 +80,32 @@ prim = idOf . Prim
 -- evaluating to) a function, the second argument is (an expression evaluating
 -- to) an argument.
 --
--- = Important note
---
--- Currently, this does not verify that the first argument is indeed a function,
--- nor that the second argument is appropriate.
+-- @since 1.0.0
 app :: Ref -> Ref -> ASGBuilder Id
-app f x = idOf (App f x)
+app fun arg =
+  let tyFun = typeOf fun
+      tyArg = typeOf arg
+   in do
+        tyRes <- liftEither . liftTypeError $ typeApp tyFun tyArg
+        idOf tyRes (App fun arg)
+  where
+    liftTypeError :: Either TypeError a -> Either ASGBuilderError a
+    liftTypeError (Left e) = Left $ ATypeError e
+    liftTypeError (Right a) = Right a
 
 -- Given a node, return its unique `Id`. If this is a node we've seen before in
 -- the current `ExprBuilder` context, this `Id` will be looked up and reused;
 -- otherwise, a fresh `Id` will be assigned, and the node cached to ensure we
 -- have a reference to it henceforth.
-idOf :: ASGNode -> ASGBuilder Id
-idOf e = ASGBuilder $ do
+idOf :: ASGType -> ASGNode -> ASGBuilder Id
+idOf ty e = ASGBuilder $ do
   existingId <- gets (Bimap.lookupR e . view #binds)
   case existingId of
     Nothing -> do
       hasAnyBindings <- gets (Bimap.null . view #binds)
       newId <-
         if hasAnyBindings
-          then (\(Id highest) -> Id (highest + 1)) <$> gets (fst . Bimap.findMax . view #binds)
-          else pure . Id $ 0
+          then (\(Id highest _) -> Id (highest + 1) ty) <$> gets (fst . Bimap.findMax . view #binds)
+          else pure $ Id 0 ty
       newId <$ modify' (over #binds (Bimap.insert newId e))
     Just nodeId -> pure nodeId

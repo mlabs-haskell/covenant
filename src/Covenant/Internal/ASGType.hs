@@ -2,10 +2,13 @@ module Covenant.Internal.ASGType
   ( -- * Types
     ASGType (..),
     TyConstant (..),
-    TyPlutusData (..),
+    TypeError (..),
 
     -- * Classes
     HasType (..),
+
+    -- * Methods
+    typeApp,
   )
 where
 
@@ -68,3 +71,18 @@ data TyPlutusData
 -- @since 1.0.0
 class HasType f where
   typeOf :: f -> ASGType
+
+-- | The errors that come up while resolving types.
+--
+-- @since 1.0.0
+data TypeError
+  = TyErrNotALambda ASGType
+  | TyErrArgMismatch ASGType ASGType -- expected, received
+
+typeApp :: ASGType -> ASGType -> Either TypeError ASGType
+typeApp tyFun tyArg = case tyFun of
+  TyLam tyParam tyRes ->
+    if tyParam == tyArg
+      then Right tyRes
+      else Left $ TyErrArgMismatch tyParam tyArg
+  _ -> Left $ TyErrNotALambda tyFun

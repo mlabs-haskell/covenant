@@ -69,10 +69,13 @@ import Covenant.Internal.ASGNode
     PrimCall (PrimCallOne, PrimCallSix, PrimCallThree, PrimCallTwo),
     Ref (ABound, AnArg, AnId),
   )
+import Covenant.Internal.ASGType (ASGType (TyLam), HasType (typeOf))
 import Data.Bimap (Bimap)
 import Data.Bimap qualified as Bimap
 import Data.Maybe (fromJust, mapMaybe)
 import Data.Proxy (Proxy (Proxy))
+import Data.Vector (Vector)
+import Data.Vector qualified as Vector
 import GHC.TypeNats (CmpNat, KnownNat, natVal, type (+))
 import Numeric.Natural (Natural)
 
@@ -102,9 +105,9 @@ toASG comp = do
       pure . ASG initial . vertex $ initial
     else do
       let asGraph = Cyclic.edges . go binds $ start
-      -- This cannot fail, but the type system can't show it
+          -- This cannot fail, but the type system can't show it
           acyclic = fromJust $ toAcyclic asGraph
-      -- Same as above
+          -- Same as above
           initial = (start,) ((Bimap.!) binds start)
       pure . ASG initial $ acyclic
   where
@@ -127,7 +130,7 @@ toASG comp = do
 -- bindings (each with a bound variable we can refer to.
 --
 -- @since 1.0.0
-data Scope (args :: Natural) (lets :: Natural) = Scope
+data Scope (args :: Natural) (lets :: Natural) = Scope (Vector ASGType) (Vector ASGType)
   deriving stock
     ( -- | @since 1.0.0
       Eq,
@@ -139,7 +142,7 @@ data Scope (args :: Natural) (lets :: Natural) = Scope
 --
 -- @since 1.0.0
 emptyScope :: Scope 0 0
-emptyScope = Scope
+emptyScope = Scope (Vector.empty) (Vector.empty)
 
 -- | Given a proof of scope, construct one of the arguments in that scope. This
 -- requires use of @TypeApplications@ to select which argument you are
@@ -155,7 +158,11 @@ arg ::
   (KnownNat n, CmpNat n m ~ LT) =>
   Scope m lets ->
   Arg
-arg Scope = Arg . fromIntegral . natVal $ Proxy @n
+arg (Scope args _) =
+  let n = natVal $ Proxy @n
+      -- This cannot fail, but the type system can't show it
+      argTy = (Vector.!) args (fromIntegral n)
+   in Arg (fromIntegral n) argTy
 
 -- | Given a proof of scope, construct one of the @let@-bound variables in that
 -- scope. This requires use of @TypeApplications@ to select which bound variable
@@ -171,7 +178,11 @@ bound ::
   (KnownNat n, CmpNat n m ~ LT) =>
   Scope args m ->
   Bound
-bound Scope = Bound . fromIntegral . natVal $ Proxy @n
+bound (Scope _ lets) =
+  let n = natVal $ Proxy @n
+      -- This cannot fail, but the type system can't show it
+      letTy = (Vector.!) lets (fromIntegral n)
+   in Bound (fromIntegral n) letTy
 
 -- | Given a proof of scope, and a function to construct a lambda body using a
 -- \'larger\' proof of scope, construct a lambda with that body.
@@ -187,12 +198,16 @@ bound Scope = Bound . fromIntegral . natVal $ Proxy @n
 -- @since 1.0.0
 lam ::
   forall (n :: Natural) (m :: Natural).
+  ASGType ->
   Scope n m ->
   (Scope (n + 1) m -> ASGBuilder Ref) ->
   ASGBuilder Id
-lam Scope f = do
-  res <- f Scope
-  idOf . Lam $ res
+lam argTy scope f = do
+  let scope' = pushArgToScope argTy scope
+  res <- f scope'
+  let resTy = typeOf res
+      lamTy = TyLam argTy resTy
+  idOf lamTy . Lam $ res
 
 -- | Given a proof of scope, a 'Ref' to an expression to bind to, and a function
 -- to construct a @let@-binding body using a \'larger\' proof of scope, construct
@@ -211,15 +226,33 @@ lam Scope f = do
 -- @since 1.0.0
 letBind ::
   forall (n :: Natural) (m :: Natural).
+  ASGType ->
   Scope n m ->
   Ref ->
   (Scope n (m + 1) -> ASGBuilder Ref) ->
   ASGBuilder Id
-letBind Scope r f = do
-  res <- f Scope
-  idOf . Let r $ res
+letBind letTy scope r f = do
+  let scope' = pushLetToScope letTy scope
+  res <- f scope'
+  idOf letTy . Let r $ res
 
 -- Helpers
+
+pushArgToScope ::
+  forall (n :: Natural) (m :: Natural).
+  ASGType ->
+  Scope n m ->
+  Scope (n + 1) m
+pushArgToScope ty (Scope args lets) =
+  Scope (Vector.cons ty args) lets
+
+pushLetToScope ::
+  forall (n :: Natural) (m :: Natural).
+  ASGType ->
+  Scope n m ->
+  Scope n (m + 1)
+pushLetToScope ty (Scope args lets) =
+  Scope args (Vector.cons ty lets)
 
 toIdList :: ASGNode -> [Id]
 toIdList = \case

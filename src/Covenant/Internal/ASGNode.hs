@@ -9,54 +9,46 @@ module Covenant.Internal.ASGNode
 where
 
 import Covenant.Constant (AConstant)
+import Covenant.Internal.ASGType (ASGType, HasType (typeOf))
 import Covenant.Prim (OneArgFunc, SixArgFunc, ThreeArgFunc, TwoArgFunc)
 import Data.Word (Word64)
 
 -- | A unique identifier for a node in a Covenant program.
 --
 -- @since 1.0.0
-newtype Id = Id Word64
-  deriving
+data Id = Id Word64 ASGType
+  deriving stock
     ( -- | @since 1.0.0
       Eq,
       -- | @since 1.0.0
-      Ord
-    )
-    via Word64
-  deriving stock
-    ( -- | @since 1.0.0
+      Ord,
+      -- | @since 1.0.0
       Show
     )
 
 -- | An argument passed to a function in a Covenant program.
 --
 -- @since 1.0.0
-newtype Arg = Arg Word64
-  deriving
+data Arg = Arg Word64 ASGType
+  deriving stock
     ( -- | @since 1.0.0
       Eq,
       -- | @since 1.0.0
-      Ord
-    )
-    via Word64
-  deriving stock
-    ( -- | @since 1.0.0
+      Ord,
+      -- | @since 1.0.0
       Show
     )
 
 -- | A @let@-bound variable in a Covenant program.
 --
 -- @since 1.0.0
-newtype Bound = Bound Word64
-  deriving
+data Bound = Bound Word64 ASGType
+  deriving stock
     ( -- | @since 1.0.0
       Eq,
       -- | @since 1.0.0
-      Ord
-    )
-    via Word64
-  deriving stock
-    ( -- | @since 1.0.0
+      Ord,
+      -- | @since 1.0.0
       Show
     )
 
@@ -112,3 +104,20 @@ data ASGNode
       -- | @since 1.0.0
       Show
     )
+
+--
+
+instance HasType Id where
+  typeOf (Id _ ty) = ty
+
+instance HasType Arg where
+  typeOf (Arg _ ty) = ty
+
+instance HasType Bound where
+  typeOf (Bound _ ty) = ty
+
+instance HasType Ref where
+  typeOf = \case
+    AnId x -> typeOf x
+    AnArg x -> typeOf x
+    ABound x -> typeOf x
