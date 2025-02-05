@@ -105,5 +105,16 @@ library
 
   hs-source-dirs: src
 
+library monad-hash-cons
+  import: lang
+  exposed-modules:
+    Control.Monad.HashCons
+
+  build-depends:
+    bimap,
+    mtl,
+
+  hs-source-dirs: src
+
 -- Tests
 -- Benchmarks
