@@ -36,6 +36,12 @@ import Data.Kind (Type)
 -- contain values of type @r@ in their capacity as references, though this is
 -- not a requirement of this transformer.
 --
+-- = Important note
+--
+-- This implementation is not suitable for any @m@ that throws exceptions. This
+-- includes @IO@, @ST@ and anything stacked atop them. For the reasons why, see
+-- [here](https://github.com/haskell-effectful/effectful/blob/master/transformers.md#statet).
+--
 -- @since 1.0.0
 newtype HashConsT (r :: Type) (e :: Type) (m :: Type -> Type) (a :: Type)
   = HashConsT (StateT (Bimap r e) m a)
