@@ -36,8 +36,6 @@ module Control.Monad.Action
     -- * Action monad
 
     -- ** Transformer
-    Update (..),
-    runUpdate,
     UpdateT (..),
     runUpdateT,
 
@@ -124,59 +122,11 @@ newtype Actionable a = Actionable (Acc a)
 actionable :: a -> Actionable a
 actionable = Actionable . pure
 
--- | A non-transformer implementation of the \'update monad\' pattern, as
--- described
+-- | A transformer implementing the \'update monad\' pattern, as described
 -- [here](https://www.schoolofhaskell.com/user/edwardk/heap-of-successes).
 --
 -- We leave the state implicit, as it is uniquely determined by the @act@ type,
 -- together with the 'Action' type class requirement.
---
--- @since 1.0.0
-newtype Update (act :: Type) (a :: Type)
-  = Update (StateOf act -> (act, a))
-  deriving stock
-    ( -- | @since 1.0.0
-      Functor
-    )
-
--- | @since 1.0.0
-instance (Action act) => Applicative (Update act) where
-  {-# INLINEABLE pure #-}
-  pure x = Update $ const (mempty, x)
-  {-# INLINEABLE (<*>) #-}
-  Update fs <*> Update xs = Update $ \s ->
-    let (act1, f) = fs s
-        s' = appEndo (act act1) s
-        (act2, x) = xs s'
-     in (act1 <> act2, f x)
-
--- | @since 1.0.0
-instance (Action act) => Monad (Update act) where
-  {-# INLINEABLE (>>=) #-}
-  Update xs >>= f = Update $ \s ->
-    let (act1, x) = xs s
-        s' = appEndo (act act1) s
-        Update applied = f x
-        (act2, y) = applied s'
-     in (act1 <> act2, y)
-
--- | Execute the given computation with the given starting state, returning the
--- result, the resulting state, and the action producing said state.
---
--- @since 1.0.0
-runUpdate ::
-  forall (act :: Type) (a :: Type).
-  (Action act) =>
-  Update act a ->
-  StateOf act ->
-  (StateOf act, act, a)
-runUpdate (Update comp) s =
-  let (act1, res) = comp s
-      s' = appEndo (act act1) s
-   in (s', act1, res)
-
--- | As 'Update', but as a transformer, allowing \'inner monads\' to be stacked
--- inside it.
 --
 -- = Important note
 --
@@ -270,11 +220,6 @@ class (Action act, Monad m) => MonadUpdate act m | m -> act where
   request = send (mempty :: act)
 
   {-# MINIMAL send #-}
-
--- | @since 1.0.0
-instance (Action act) => MonadUpdate act (Update act) where
-  {-# INLINEABLE send #-}
-  send x = Update $ \s -> (x, appEndo (act x) s)
 
 -- | @since 1.0.0
 instance (Action act, Monad m) => MonadUpdate act (UpdateT act m) where
