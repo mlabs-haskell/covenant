@@ -36,27 +36,9 @@ data TyConstant
   | TyInteger
   | TyByteString
   | TyString
-  | TyPair ASGType ASGType
-  | TyList ASGType
-  | TyPlutusData TyPlutusData
-  deriving stock
-    ( -- | @since 1.0.0
-      Eq,
-      -- | @since 1.0.0
-      Ord,
-      -- | @since 1.0.0
-      Show
-    )
-
--- | The type of @PlutusData@ terms.
---
--- @since 1.0.0
-data TyPlutusData
-  = TyPlutusConstr -- [TODO]
-  | TyPlutusMap TyPlutusData TyPlutusData -- TyPlutusMap Key Value
-  | TyPlutusList TyPlutusData
-  | TyPlutusI
-  | TyPlutusB
+  | TyPair TyConstant TyConstant
+  | TyList TyConstant
+  | TyPlutusData
   deriving stock
     ( -- | @since 1.0.0
       Eq,
