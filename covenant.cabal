@@ -86,7 +86,6 @@ library
     Covenant.Prim
 
   other-modules:
-    Covenant.Internal.ASGBuilder
     Covenant.Internal.ASGNode
 
   build-depends:
@@ -104,10 +103,11 @@ library
     text >=2.1.1 && <2.2,
     vector ==0.13.2.0,
 
-  hs-source-dirs: src
+  hs-source-dirs: src/covenant
 
 library monad-hash-cons
   import: lang
+  visibility: private
   exposed-modules:
     Control.Monad.HashCons
 
@@ -115,7 +115,7 @@ library monad-hash-cons
     bimap,
     mtl,
 
-  hs-source-dirs: src
+  hs-source-dirs: src/monad-hash-cons
 
 -- Tests
 -- Benchmarks

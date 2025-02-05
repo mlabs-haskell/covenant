@@ -24,7 +24,6 @@ module Covenant.ASG
     Ref (..),
     PrimCall (..),
     ASGNode,
-    ASGBuilder,
     Scope,
     ASG,
 
@@ -51,13 +50,8 @@ import Algebra.Graph.Acyclic.AdjacencyMap
     vertex,
   )
 import Algebra.Graph.AdjacencyMap qualified as Cyclic
-import Control.Monad.HashCons (refTo, runHashConsT)
-import Covenant.Internal.ASGBuilder
-  ( ASGBuilder (ASGBuilder),
-    app,
-    lit,
-    prim,
-  )
+import Control.Monad.HashCons (HashConsT, MonadHashCons (refTo), runHashConsT)
+import Covenant.Constant (AConstant)
 import Covenant.Internal.ASGNode
   ( ASGNode (App, Lam, Let, Lit, Prim),
     Arg (Arg),
@@ -68,7 +62,6 @@ import Covenant.Internal.ASGNode
   )
 import Data.Bimap (Bimap)
 import Data.Bimap qualified as Bimap
-import Data.Functor.Identity (Identity, runIdentity)
 import Data.Kind (Type)
 import Data.Maybe (mapMaybe)
 import Data.Proxy (Proxy (Proxy))
@@ -90,21 +83,26 @@ data ASG = ASG (Id, ASGNode) (AdjacencyMap (Id, ASGNode))
 -- refers to into a call graph. This is guaranteed to be acyclic.
 --
 -- @since 1.0.0
-toASG :: ASGBuilder Identity Id -> Maybe ASG
-toASG (ASGBuilder comp) = do
-  let (start, binds) = runIdentity . runHashConsT $ comp
-  if Bimap.size binds == 1
-    then do
-      -- This cannot fail, but the type system can't show it
-      initial <- (start,) <$> Bimap.lookup start binds
-      pure . ASG initial . vertex $ initial
-    else do
-      let asGraph = Cyclic.edges . go binds $ start
-      -- This cannot fail, but the type system can't show it
-      acyclic <- toAcyclic asGraph
-      -- Same as above
-      initial <- (start,) <$> Bimap.lookup start binds
-      pure . ASG initial $ acyclic
+toASG ::
+  forall (m :: Type -> Type).
+  (Monad m) =>
+  HashConsT Id ASGNode m Id ->
+  m (Maybe ASG)
+toASG comp = do
+  (start, binds) <- runHashConsT comp
+  pure $
+    if Bimap.size binds == 1
+      then do
+        -- This cannot fail, but the type system can't show it
+        initial <- (start,) <$> Bimap.lookup start binds
+        pure . ASG initial . vertex $ initial
+      else do
+        let asGraph = Cyclic.edges . go binds $ start
+        -- This cannot fail, but the type system can't show it
+        acyclic <- toAcyclic asGraph
+        -- Same as above
+        initial <- (start,) <$> Bimap.lookup start binds
+        pure . ASG initial $ acyclic
   where
     go ::
       Bimap Id ASGNode ->
@@ -138,6 +136,40 @@ data Scope (args :: Natural) (lets :: Natural) = Scope
 -- @since 1.0.0
 emptyScope :: Scope 0 0
 emptyScope = Scope
+
+-- | Construct a literal (constant) value.
+--
+-- @since 1.0.0
+lit ::
+  forall (m :: Type -> Type).
+  (MonadHashCons Id ASGNode m) =>
+  AConstant -> m Id
+lit = refTo . Lit
+
+-- | Construct a primitive function call.
+--
+-- @since 1.0.0
+prim ::
+  forall (m :: Type -> Type).
+  (MonadHashCons Id ASGNode m) =>
+  PrimCall -> m Id
+prim = refTo . Prim
+
+-- | Construct a function application. The first argument is (an expression
+-- evaluating to) a function, the second argument is (an expression evaluating
+-- to) an argument.
+--
+-- = Important note
+--
+-- Currently, this does not verify that the first argument is indeed a function,
+-- nor that the second argument is appropriate.
+--
+-- @since 1.0.0
+app ::
+  forall (m :: Type -> Type).
+  (MonadHashCons Id ASGNode m) =>
+  Ref -> Ref -> m Id
+app f x = refTo (App f x)
 
 -- | Given a proof of scope, construct one of the arguments in that scope. This
 -- requires use of @TypeApplications@ to select which argument you are
@@ -185,10 +217,10 @@ bound Scope = Bound . fromIntegral . natVal $ Proxy @n
 -- @since 1.0.0
 lam ::
   forall (args :: Natural) (binds :: Natural) (m :: Type -> Type).
-  (Monad m) =>
+  (MonadHashCons Id ASGNode m) =>
   Scope args binds ->
-  (Scope (args + 1) binds -> ASGBuilder m Ref) ->
-  ASGBuilder m Id
+  (Scope (args + 1) binds -> m Ref) ->
+  m Id
 lam Scope f = do
   res <- f Scope
   refTo . Lam $ res
@@ -210,11 +242,11 @@ lam Scope f = do
 -- @since 1.0.0
 letBind ::
   forall (args :: Natural) (binds :: Natural) (m :: Type -> Type).
-  (Monad m) =>
+  (MonadHashCons Id ASGNode m) =>
   Scope args binds ->
   Ref ->
-  (Scope args (binds + 1) -> ASGBuilder m Ref) ->
-  ASGBuilder m Id
+  (Scope args (binds + 1) -> m Ref) ->
+  m Id
 letBind Scope r f = do
   res <- f Scope
   refTo . Let r $ res
