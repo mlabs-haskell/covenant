@@ -20,7 +20,12 @@ newtype Id = Id Word64
     ( -- | @since 1.0.0
       Eq,
       -- | @since 1.0.0
-      Ord
+      Ord,
+      -- | @since 1.0.0
+      Bounded,
+      -- | We need this for internal reasons, even though this type class is
+      -- terrible.
+      Enum
     )
     via Word64
   deriving stock

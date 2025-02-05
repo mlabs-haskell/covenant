@@ -51,12 +51,10 @@ import Algebra.Graph.Acyclic.AdjacencyMap
     vertex,
   )
 import Algebra.Graph.AdjacencyMap qualified as Cyclic
-import Control.Monad.State.Strict (runState)
+import Control.Monad.HashCons (refTo, runHashConsT)
 import Covenant.Internal.ASGBuilder
   ( ASGBuilder (ASGBuilder),
-    ASGBuilderState (ASGBuilderState),
     app,
-    idOf,
     lit,
     prim,
   )
@@ -70,6 +68,8 @@ import Covenant.Internal.ASGNode
   )
 import Data.Bimap (Bimap)
 import Data.Bimap qualified as Bimap
+import Data.Functor.Identity (Identity, runIdentity)
+import Data.Kind (Type)
 import Data.Maybe (mapMaybe)
 import Data.Proxy (Proxy (Proxy))
 import GHC.TypeNats (CmpNat, KnownNat, natVal, type (+))
@@ -90,9 +90,9 @@ data ASG = ASG (Id, ASGNode) (AdjacencyMap (Id, ASGNode))
 -- refers to into a call graph. This is guaranteed to be acyclic.
 --
 -- @since 1.0.0
-toASG :: ASGBuilder Id -> Maybe ASG
+toASG :: ASGBuilder Identity Id -> Maybe ASG
 toASG (ASGBuilder comp) = do
-  let (start, ASGBuilderState binds) = runState comp (ASGBuilderState Bimap.empty)
+  let (start, binds) = runIdentity . runHashConsT $ comp
   if Bimap.size binds == 1
     then do
       -- This cannot fail, but the type system can't show it
@@ -184,13 +184,14 @@ bound Scope = Bound . fromIntegral . natVal $ Proxy @n
 --
 -- @since 1.0.0
 lam ::
-  forall (n :: Natural) (m :: Natural).
-  Scope n m ->
-  (Scope (n + 1) m -> ASGBuilder Ref) ->
-  ASGBuilder Id
+  forall (args :: Natural) (binds :: Natural) (m :: Type -> Type).
+  (Monad m) =>
+  Scope args binds ->
+  (Scope (args + 1) binds -> ASGBuilder m Ref) ->
+  ASGBuilder m Id
 lam Scope f = do
   res <- f Scope
-  idOf . Lam $ res
+  refTo . Lam $ res
 
 -- | Given a proof of scope, a 'Ref' to an expression to bind to, and a function
 -- to construct a @let@-binding body using a \'larger\' proof of scope, construct
@@ -208,14 +209,15 @@ lam Scope f = do
 --
 -- @since 1.0.0
 letBind ::
-  forall (n :: Natural) (m :: Natural).
-  Scope n m ->
+  forall (args :: Natural) (binds :: Natural) (m :: Type -> Type).
+  (Monad m) =>
+  Scope args binds ->
   Ref ->
-  (Scope n (m + 1) -> ASGBuilder Ref) ->
-  ASGBuilder Id
+  (Scope args (binds + 1) -> ASGBuilder m Ref) ->
+  ASGBuilder m Id
 letBind Scope r f = do
   res <- f Scope
-  idOf . Let r $ res
+  refTo . Let r $ res
 
 -- Helpers
 
