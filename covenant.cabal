@@ -81,6 +81,7 @@ common bench-lang
 library
   import: lang
   exposed-modules:
+    Control.Monad.HashCons
     Covenant.ASG
     Covenant.Constant
     Covenant.Prim
@@ -94,28 +95,16 @@ library
     bimap ==0.5.0,
     bytestring >=0.12.1.0 && <0.13,
     containers >=0.6.8 && <0.8,
-    monad-hash-cons,
     mtl >=2.3.1 && <3,
     optics-core ==0.4.1.1,
     optics-th ==0.4.1,
     quickcheck-instances ==0.3.32,
     quickcheck-transformer ==0.3.1.2,
     text >=2.1.1 && <2.2,
+    transformers >=0.6.1.0 && <0.7.0.0,
     vector ==0.13.2.0,
 
-  hs-source-dirs: src/covenant
-
-library monad-hash-cons
-  import: lang
-  visibility: private
-  exposed-modules:
-    Control.Monad.HashCons
-
-  build-depends:
-    bimap,
-    mtl,
-
-  hs-source-dirs: src/monad-hash-cons
+  hs-source-dirs: src
 
 -- Tests
 -- Benchmarks
