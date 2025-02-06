@@ -9,6 +9,7 @@ module Covenant.Internal.ASGNode
 where
 
 import Covenant.Constant (AConstant)
+import Covenant.Ledger (LedgerAccessor, LedgerDestructor)
 import Covenant.Prim (OneArgFunc, SixArgFunc, ThreeArgFunc, TwoArgFunc)
 import Data.Word (Word64)
 
@@ -104,6 +105,8 @@ data ASGNode
   | Lam Ref
   | Let Ref Ref
   | App Ref Ref
+  | LedgerAccess LedgerAccessor Ref
+  | LedgerDestruct LedgerDestructor Ref Ref
   deriving stock
     ( -- | @since 1.0.0
       Eq,

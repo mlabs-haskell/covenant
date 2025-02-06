@@ -61,7 +61,7 @@ import Covenant.Internal.ASGBuilder
     prim,
   )
 import Covenant.Internal.ASGNode
-  ( ASGNode (App, Lam, Let, Lit, Prim),
+  ( ASGNode (App, Lam, LedgerAccess, LedgerDestruct, Let, Lit, Prim),
     Arg (Arg),
     Bound (Bound),
     Id,
@@ -230,6 +230,8 @@ toIdList = \case
   Lam body -> mapMaybe refToId [body]
   Let x body -> mapMaybe refToId [x, body]
   App f x -> mapMaybe refToId [f, x]
+  LedgerAccess _ x -> mapMaybe refToId [x]
+  LedgerDestruct _ f x -> mapMaybe refToId [f, x]
 
 refToId :: Ref -> Maybe Id
 refToId = \case
