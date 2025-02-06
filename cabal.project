@@ -1,8 +1,10 @@
 packages: ./covenant.cabal
 
-documentation: true
-
 test-show-details: direct
 
 package covenant
   ghc-options: -Werror
+
+-- optics-th doesn't work with the template-haskell version shipped with 
+-- GHC 9.12, even though it poses no issues
+allow-newer: optics-th:template-haskell
