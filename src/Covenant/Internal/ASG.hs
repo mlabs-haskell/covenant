@@ -44,10 +44,15 @@ import Data.Bimap qualified as Bimap
 import Data.EnumMap.Strict (EnumMap)
 import Data.EnumMap.Strict qualified as EnumMap
 
--- | A Covenant program, represented as an acyclic graph.
+-- | A Covenant program, represented as an acyclic graph with a single source
+-- node. We use the term /ASG/, standing for \'abstract syntax graph\' for this
+-- concept.
 --
 -- @since 1.0.0
-data ASG = ASG Id (EnumMap Id ASGNode)
+data ASG
+  = ASG
+      Id -- Source node reference: this is the 'starting point' of the ASG, or the 'toplevel computation'
+      (EnumMap Id ASGNode)
   deriving stock
     ( -- | @since 1.0.0
       Eq,
