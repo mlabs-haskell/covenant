@@ -143,7 +143,7 @@ data Scope (args :: Natural) (lets :: Natural) = Scope (Vector ASGType) (Vector 
 --
 -- @since 1.0.0
 emptyScope :: Scope 0 0
-emptyScope = Scope (Vector.empty) (Vector.empty)
+emptyScope = Scope Vector.empty Vector.empty
 
 -- | Given a proof of scope, construct one of the arguments in that scope. This
 -- requires use of @TypeApplications@ to select which argument you are
