@@ -11,6 +11,7 @@ module Covenant.Constant
   ( -- * Types
     AConstant (..),
     PlutusData (..),
+    TyConstant (..),
   )
 where
 
@@ -106,6 +107,40 @@ data AConstant
       -- | @since 1.0.0
       Show
     )
+
+-- | The type of Plutus constant terms.
+--
+-- @since 1.0.0
+data TyConstant
+  = TyUnit
+  | TyBoolean
+  | TyInteger
+  | TyByteString
+  | TyString
+  | TyPair TyConstant TyConstant
+  | TyList TyConstant
+  | TyPlutusData
+  deriving stock
+    ( -- | @since 1.0.0
+      Eq,
+      -- | @since 1.0.0
+      Ord,
+      -- | @since 1.0.0
+      Show
+    )
+
+typeOfAConstant :: AConstant -> TyConstant
+typeOfAConstant = \case
+  AUnit -> TyUnit
+  ABoolean _ -> TyBoolean
+  AnInteger _ -> TyInteger
+  AByteString _ -> TyByteString
+  AString _ -> TyString
+  APair a b -> TyPair (typeOfAConstant a) (typeOfAConstant b)
+  AList v -> TyList $ case Vector.lastM v of
+    Nothing -> TyUnit
+    Just x -> typeOfAConstant x
+  AData _ -> TyPlutusData
 
 -- | @since 1.0.0
 instance Arbitrary AConstant where

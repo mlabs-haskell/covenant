@@ -63,13 +63,14 @@ import Covenant.Internal.ASGBuilder
   )
 import Covenant.Internal.ASGNode
   ( ASGNode (App, Lam, Let, Lit, Prim),
+    ASGType (TyLam),
     Arg (Arg),
     Bound (Bound),
     Id,
     PrimCall (PrimCallOne, PrimCallSix, PrimCallThree, PrimCallTwo),
     Ref (ABound, AnArg, AnId),
+    typeOfRef,
   )
-import Covenant.Internal.ASGType (ASGType (TyLam), HasType (typeOf))
 import Data.Bimap (Bimap)
 import Data.Bimap qualified as Bimap
 import Data.Maybe (fromJust, mapMaybe)
@@ -205,7 +206,7 @@ lam ::
 lam argTy scope f = do
   let scope' = pushArgToScope argTy scope
   res <- f scope'
-  let resTy = typeOf res
+  let resTy = typeOfRef res
       lamTy = TyLam argTy resTy
   idOf lamTy . Lam $ res
 

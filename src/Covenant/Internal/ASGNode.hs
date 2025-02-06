@@ -1,15 +1,19 @@
 module Covenant.Internal.ASGNode
-  ( Id (..),
+  ( -- * Data Types
+    Id (..),
     Arg (..),
     Bound (..),
     Ref (..),
     PrimCall (..),
     ASGNode (..),
+    ASGType (..),
+
+    -- * Functions
+    typeOfRef,
   )
 where
 
-import Covenant.Constant (AConstant)
-import Covenant.Internal.ASGType (ASGType, HasType (typeOf))
+import Covenant.Constant (AConstant, TyConstant)
 import Covenant.Prim (OneArgFunc, SixArgFunc, ThreeArgFunc, TwoArgFunc)
 import Data.Word (Word64)
 
@@ -105,19 +109,25 @@ data ASGNode
       Show
     )
 
+-- | The type of an @ASGNode@.
+--
+-- @since 1.0.0
+data ASGType
+  = TyConstant TyConstant
+  | TyLam ASGType ASGType -- TyLam ArgType ResType
+  deriving stock
+    ( -- | @since 1.0.0
+      Eq,
+      -- | @since 1.0.0
+      Ord,
+      -- | @since 1.0.0
+      Show
+    )
+
 --
 
-instance HasType Id where
-  typeOf (Id _ ty) = ty
-
-instance HasType Arg where
-  typeOf (Arg _ ty) = ty
-
-instance HasType Bound where
-  typeOf (Bound _ ty) = ty
-
-instance HasType Ref where
-  typeOf = \case
-    AnId x -> typeOf x
-    AnArg x -> typeOf x
-    ABound x -> typeOf x
+typeOfRef :: Ref -> ASGType
+typeOfRef = \case
+  AnId (Id _ ty) -> ty
+  AnArg (Arg _ ty) -> ty
+  ABound (Bound _ ty) -> ty

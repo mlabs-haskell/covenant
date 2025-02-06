@@ -88,7 +88,6 @@ library
   other-modules:
     Covenant.Internal.ASGBuilder
     Covenant.Internal.ASGNode
-    Covenant.Internal.ASGType
 
 
   build-depends:
