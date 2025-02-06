@@ -21,24 +21,7 @@ import Covenant.Internal.ASGBuilder
   ( ASGBuilder (ASGBuilder),
     ASGBuilderState (ASGBuilderState),
   )
-import Covenant.Internal.ASGNode
-  ( ASGNode
-      ( AppInternal,
-        LamInternal,
-        LetInternal,
-        LitInternal,
-        PrimInternal
-      ),
-    Id,
-    PrimCall
-      ( PrimCallOne,
-        PrimCallSix,
-        PrimCallThree,
-        PrimCallTwo
-      ),
-    Ref (AnId),
-    childIds,
-  )
+import Covenant.Internal.ASGNode (ASGNode, Id, childIds)
 import Data.Bimap (Bimap)
 import Data.Bimap qualified as Bimap
 import Data.EnumMap.Strict (EnumMap)
@@ -209,30 +192,12 @@ compileASG (ASGBuilder comp) = do
       ReaderT (Bimap Id ASGNode) Maybe (EnumMap Id ASGNode)
     go currId currNode = do
       let currMap = EnumMap.singleton currId currNode
-      descendants <- allDescendants currNode
-      traversed <- traverse (uncurry go) descendants
+      children <- allChildren currNode
+      traversed <- traverse (uncurry go) children
       pure . EnumMap.unions $ currMap : traversed
 
 -- Helpers
 
--- Essentially `mapMaybe` but in a more general environment and taking apart
--- `Ref`. We have to write it this way because a 'transformed' `mapMaybe` isn't
--- a thing.
-queryAll :: [Ref] -> ReaderT (Bimap Id ASGNode) Maybe [(Id, ASGNode)]
-queryAll = \case
-  [] -> pure []
-  r : rs -> case r of
-    AnId i -> (:) . (i,) <$> (ask >>= Bimap.lookup i) <*> queryAll rs
-    _ -> queryAll rs
-
-allDescendants :: ASGNode -> ReaderT (Bimap Id ASGNode) Maybe [(Id, ASGNode)]
-allDescendants = \case
-  LitInternal _ -> pure []
-  PrimInternal p -> case p of
-    PrimCallOne _ r1 -> queryAll [r1]
-    PrimCallTwo _ r1 r2 -> queryAll [r1, r2]
-    PrimCallThree _ r1 r2 r3 -> queryAll [r1, r2, r3]
-    PrimCallSix _ r1 r2 r3 r4 r5 r6 -> queryAll [r1, r2, r3, r4, r5, r6]
-  LamInternal r -> queryAll [r]
-  LetInternal rBind rBody -> queryAll [rBind, rBody]
-  AppInternal rFun rArg -> queryAll [rFun, rArg]
+-- Retrieve all immediate children of the argument, together with their `Id`s
+allChildren :: ASGNode -> ReaderT (Bimap Id ASGNode) Maybe [(Id, ASGNode)]
+allChildren = traverse (\i -> ask >>= fmap (i,) . Bimap.lookup i) . childIds
