@@ -89,7 +89,6 @@ library
     Covenant.Internal.ASGBuilder
     Covenant.Internal.ASGNode
 
-
   build-depends:
     QuickCheck ==2.15.0.1,
     algebraic-graphs ==0.7,
