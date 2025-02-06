@@ -16,9 +16,10 @@ module Covenant.Internal.ASGBuilder
   )
 where
 
-import Control.Monad.Except (ExceptT, liftEither, runExceptT)
+import Control.Monad (unless)
+import Control.Monad.Except (ExceptT, MonadError, liftEither, runExceptT)
 import Control.Monad.State.Strict (State, gets, modify', runState)
-import Covenant.Constant (AConstant, TyConstant)
+import Covenant.Constant (AConstant (ABoolean, AByteString, AData, AList, APair, AString, AUnit, AnInteger), TyConstant (TyBoolean, TyByteString, TyInteger, TyList, TyPair, TyPlutusData, TyString, TyUnit))
 import Covenant.Internal.ASGNode
   ( ASGNode (App, Lit, Prim),
     ASGType (TyConstant, TyLam),
@@ -30,6 +31,7 @@ import Covenant.Internal.ASGNode
 import Covenant.Prim (OneArgFunc, SixArgFunc, ThreeArgFunc, TwoArgFunc, typeOfOneArgFunc, typeOfSixArgFunc, typeOfThreeArgFunc, typeOfTwoArgFunc)
 import Data.Bimap (Bimap)
 import Data.Bimap qualified as Bimap
+import Data.Foldable (traverse_)
 import Data.Kind (Type)
 import Data.Vector (Vector)
 import Data.Vector qualified as Vector
@@ -54,7 +56,9 @@ newtype ASGBuilder (a :: Type) = ASGBuilder (ExceptT ASGBuilderError (State ASGB
       -- | @since 1.0.0
       Applicative,
       -- | @since 1.0.0
-      Monad
+      Monad,
+      -- | @since 1.0.0
+      MonadError ASGBuilderError
     )
     via (ExceptT ASGBuilderError (State ASGBuilderState))
 
@@ -72,6 +76,7 @@ data TypeError
   | TyErrAppArgMismatch ASGType ASGType -- expected, received
   | TyErrPrimNotAConstant ASGType
   | TyErrPrimArgMismatch (Vector TyConstant) (Vector TyConstant) -- exptected, received
+  | TyErrNonHomogenousList
 
 -- | Run a computation in the ASGBuilder monad
 --
@@ -85,7 +90,9 @@ runASGBuilder (ASGBuilder m) s =
 --
 -- @since 1.0.0
 lit :: AConstant -> ASGBuilder Id
-lit = idOf . Lit
+lit c = do
+  ty <- TyConstant <$> liftEither (typeLit c)
+  idOf ty (Lit c)
 
 -- | Construct a primitive function call.
 --
@@ -130,6 +137,27 @@ idOf ty e = ASGBuilder $ do
 liftTypeError :: Either TypeError a -> Either ASGBuilderError a
 liftTypeError (Left e) = Left $ ATypeError e
 liftTypeError (Right a) = Right a
+
+typeLit :: AConstant -> Either ASGBuilderError TyConstant
+typeLit = \case
+  AUnit -> Right TyUnit
+  ABoolean _ -> Right TyBoolean
+  AnInteger _ -> Right TyInteger
+  AByteString _ -> Right TyByteString
+  AString _ -> Right TyString
+  APair a b -> do
+    tyA <- typeLit a
+    tyB <- typeLit b
+    pure $ TyPair tyA tyB
+  AList ty elems -> do
+    traverse_
+      ( \v1 -> do
+          ty' <- typeLit v1
+          unless (ty' == ty) (Left $ ATypeError TyErrNonHomogenousList)
+      )
+      elems
+    pure $ TyList ty
+  AData _ -> pure TyPlutusData
 
 typeApp :: ASGType -> ASGType -> Either TypeError ASGType
 typeApp tyFun tyArg = case tyFun of
