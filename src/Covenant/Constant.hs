@@ -206,10 +206,9 @@ instance Arbitrary TyConstant where
                 pure TyByteString,
                 pure TyString,
                 pure TyPlutusData,
-                ( do
-                    a <- go (size `quot` 2)
-                    b <- go (size `quot` 2)
-                    pure $ TyPair a b
-                ),
+                do
+                  a <- go (size `quot` 2)
+                  b <- go (size `quot` 2)
+                  pure $ TyPair a b,
                 TyList <$> go (size - 1)
               ]

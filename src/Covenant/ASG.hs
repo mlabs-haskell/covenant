@@ -102,14 +102,14 @@ toASG comp = do
   if Bimap.size binds == 1
     then do
       let -- This cannot fail, but the type system can't show it
-          initial = (start,) ((Bimap.!) binds start)
+          initial = (start, (Bimap.!) binds start)
       pure . ASG initial . vertex $ initial
     else do
       let asGraph = Cyclic.edges . go binds $ start
           -- This cannot fail, but the type system can't show it
           acyclic = fromJust $ toAcyclic asGraph
           -- Same as above
-          initial = (start,) ((Bimap.!) binds start)
+          initial = (start, (Bimap.!) binds start)
       pure . ASG initial $ acyclic
   where
     go ::

@@ -65,8 +65,14 @@ newtype ASGBuilder (a :: Type) = ASGBuilder (ExceptT ASGBuilderError (State ASGB
 -- | The errors that can occur during the construction of an ASG
 --
 -- @since 1.0.0
-data ASGBuilderError
-  = ATypeError TypeError
+newtype ASGBuilderError = ATypeError TypeError
+  deriving
+    ( -- | @since 1.0.0
+      Eq,
+      -- | @since 1.0.0
+      Show
+    )
+    via TypeError
 
 -- | The errors that come up while resolving types.
 --
@@ -77,6 +83,12 @@ data TypeError
   | TyErrPrimNotAConstant ASGType
   | TyErrPrimArgMismatch (Vector TyConstant) (Vector TyConstant) -- exptected, received
   | TyErrNonHomogenousList
+  deriving stock
+    ( -- | @since 1.0.0
+      Eq,
+      -- | @since 1.0.0
+      Show
+    )
 
 -- | Run a computation in the ASGBuilder monad
 --
@@ -84,7 +96,7 @@ data TypeError
 runASGBuilder :: ASGBuilder a -> ASGBuilderState -> (Either ASGBuilderError a, ASGBuilderState)
 runASGBuilder (ASGBuilder m) s =
   let stateM = runExceptT m
-   in (runState stateM) s
+   in runState stateM s
 
 -- | Construct a literal (constant) value.
 --
