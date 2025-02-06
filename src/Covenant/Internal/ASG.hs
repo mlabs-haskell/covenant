@@ -60,10 +60,46 @@ data ASG
       Show
     )
 
+-- A list zipper, with two stacks representing 'elements to the left of the
+-- current position' and 'elements to the right of the current position. We
+-- specialize to `Id` here because that's all we'll need.
+data Tape = Tape [Id] Id [Id]
+
+-- Move the tape left, assuming it can.
+tapeLeft :: Tape -> Tape
+tapeLeft t@(Tape lefts curr rights) = case lefts of
+  [] -> t -- can't move
+  rightmostLeft : rest -> Tape rest rightmostLeft (curr : rights)
+
+-- Move the tape right, assuming it can.
+tapeRight :: Tape -> Tape
+tapeRight t@(Tape lefts curr rights) = case rights of
+  [] -> t -- can't move
+  leftmostRight : rest -> Tape (curr : lefts) leftmostRight rest
+
 -- | A zipper for the ASG, allowing traversal.
 --
+-- = Note on implementation
+--
+-- We use a \'stack of tapes\' definition of graph zippers: specifically, we
+-- track our parents, as well as our position relative our siblings at each
+-- level, using list zippers, which we store in a stack as we descend. Since any
+-- 'ASG' is guaranteed to be a single-source DAG, this won't pose any problems,
+-- as we cannot \'loop back on ourselves\'.
+--
+-- One slightly surprising result of this is that a node may have different left
+-- and right siblings depending on how we traverse to it. This is a side effect
+-- of hash consing and computation sharing: a node may be the child of several
+-- different parents, and thus have different siblings given each parent. While
+-- perhaps surprising, this doesn't pose any problems currently, as our zipper
+-- is read-only (for now).
+--
 -- @since 1.0.0
-data ASGZipper = ASGZipper (EnumMap Id ASGNode) [Tape] Tape
+data ASGZipper
+  = ASGZipper
+      (EnumMap Id ASGNode) -- references and meaning from original ASG
+      [Tape] -- stack of parents of the current focus, along with the position we were at when we descended
+      Tape -- current focus, with the left and right siblings tracked as if they were a list
 
 -- | \'Unzip\' an 'ASG', starting the traversal at the source node corresponding
 -- to the \'toplevel\' computation.
@@ -96,8 +132,13 @@ viewASGZipper (ASGZipper binds _ curr) = case curr of
   Tape _ currId _ -> binds EnumMap.! currId
 
 -- | Move the 'ASGZipper' to the leftmost child of the current focus, if it
--- exists. This bypasses any arguments or @let@-bindings; if no such children
--- exist, nothing happens.
+-- exists; otherwise, nothing happens.
+--
+-- = Note
+--
+-- Due to the design of 'ASGNode', `let`-bound variables and function arguments
+-- do not form dedicated ASG nodes. Thus, any such are not treated as siblings
+-- or children, but instead as part of the node.
 --
 -- @since 1.0.0
 downASGZipper :: ASGZipper -> ASGZipper
@@ -116,8 +157,13 @@ leftASGZipper (ASGZipper binds parents curr) =
   ASGZipper binds parents (tapeLeft curr)
 
 -- | Move the 'ASGZipper' to the right sibling of the current focus, if it
--- exists. This bypasses any arguments or @let@-bindings; if no such node
--- exists, nothing happens.
+-- exists; otherwise, nothing happens.
+--
+-- = Note
+--
+-- Due to the design of 'ASGNode', `let`-bound variables and function arguments
+-- do not form dedicated ASG nodes. Thus, any such are not treated as siblings
+-- or children, but instead as part of the node.
 --
 -- @since 1.0.0
 rightASGZipper :: ASGZipper -> ASGZipper
@@ -190,15 +236,3 @@ allDescendants = \case
   LamInternal r -> queryAll [r]
   LetInternal rBind rBody -> queryAll [rBind, rBody]
   AppInternal rFun rArg -> queryAll [rFun, rArg]
-
-data Tape = Tape [Id] Id [Id]
-
-tapeLeft :: Tape -> Tape
-tapeLeft t@(Tape lefts curr rights) = case lefts of
-  [] -> t -- can't move
-  rightmostLeft : rest -> Tape rest rightmostLeft (curr : rights)
-
-tapeRight :: Tape -> Tape
-tapeRight t@(Tape lefts curr rights) = case rights of
-  [] -> t -- can't move
-  leftmostRight : rest -> Tape (curr : lefts) leftmostRight rest
