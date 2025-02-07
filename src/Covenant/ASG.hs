@@ -180,7 +180,7 @@ bound Scope = Bound . fromIntegral . natVal $ Proxy @n
 --
 -- This is @const@:
 --
--- > lam emptyScope $ \s10 -> lam s10 $ \s20 -> pure . AnArg $ arg @1 s20
+-- > lam emptyScope $ \s10 -> AnId <$> lam s10 (\s20 -> pure . AnArg $ arg @1 s20)
 --
 -- @since 1.0.0
 lam ::
