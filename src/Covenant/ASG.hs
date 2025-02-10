@@ -48,6 +48,16 @@ module Covenant.ASG
     compileASG,
 
     -- ** Walking the ASG
+
+    -- *** High-level wrapper
+    ASGMove (..),
+    ASGMoves (..),
+    ASGTraverseT (..),
+    runASGTraverseT,
+    moveASGView,
+    currentASGView,
+
+    -- *** Low-level interface
     openASGZipper,
     closeASGZipper,
     viewASGZipper,
@@ -58,6 +68,14 @@ module Covenant.ASG
   )
 where
 
+import Control.Monad.Action
+  ( Action (StateOf, act),
+    Actionable,
+    MonadUpdate (request, update),
+    UpdateT,
+    actionable,
+    runUpdateT,
+  )
 import Covenant.Internal.ASG
   ( ASG,
     ASGZipper,
@@ -90,6 +108,9 @@ import Covenant.Internal.ASGNode
     pattern Lit,
     pattern Prim,
   )
+import Data.Foldable (foldl')
+import Data.Kind (Type)
+import Data.Monoid (Endo (Endo))
 import Data.Proxy (Proxy (Proxy))
 import GHC.TypeNats (CmpNat, KnownNat, natVal, type (+))
 import Numeric.Natural (Natural)
@@ -191,3 +212,80 @@ letBind ::
 letBind Scope r f = do
   res <- f Scope
   idOf . LetInternal r $ res
+
+-- | @since 1.0.0
+data ASGMove
+  = ASGMoveLeft
+  | ASGMoveRight
+  | ASGMoveUp
+  | ASGMoveDown
+  deriving stock
+    ( -- | @since 1.0.0
+      Eq,
+      -- | @since 1.0.0
+      Show
+    )
+
+-- | @since 1.0.0
+newtype ASGMoves = ASGMoves (Actionable ASGMove)
+  deriving
+    ( -- | @since 1.0.0
+      Semigroup,
+      -- | @since 1.0.0
+      Monoid
+    )
+    via Actionable ASGMove
+
+-- | @since 1.0.0
+instance Action ASGMoves where
+  type StateOf ASGMoves = ASGZipper
+  {-# INLINEABLE act #-}
+  act (ASGMoves moves) = Endo $ \s -> foldl' go s moves
+    where
+      go ::
+        ASGZipper -> ASGMove -> ASGZipper
+      go oldState = \case
+        ASGMoveLeft -> leftASGZipper oldState
+        ASGMoveRight -> rightASGZipper oldState
+        ASGMoveUp -> upASGZipper oldState
+        ASGMoveDown -> downASGZipper oldState
+
+-- | @since 1.0.0
+newtype ASGTraverseT (m :: Type -> Type) (a :: Type)
+  = ASGTraverseT (UpdateT ASGMoves m a)
+  deriving
+    ( -- | @since 1.0.0
+      Functor,
+      -- | @since 1.0.0
+      Applicative,
+      -- | @since 1.0.0
+      Monad,
+      -- | @since 1.0.0
+      MonadUpdate ASGMoves
+    )
+    via (UpdateT ASGMoves m)
+
+-- | @since 1.0.0
+runASGTraverseT ::
+  forall (m :: Type -> Type) (a :: Type).
+  (Functor m) =>
+  ASGTraverseT m a ->
+  ASG ->
+  m (ASG, ASGMoves, a)
+runASGTraverseT (ASGTraverseT comp) =
+  fmap (\(z, ms, x) -> (closeASGZipper z, ms, x)) . runUpdateT comp . openASGZipper
+
+-- | @since 1.0.0
+moveASGView ::
+  forall (m :: Type -> Type).
+  (Monad m) =>
+  ASGMove ->
+  ASGTraverseT m ()
+moveASGView = update . ASGMoves . actionable
+
+-- | @since 1.0.0
+currentASGView ::
+  forall (m :: Type -> Type).
+  (Monad m) =>
+  ASGTraverseT m ASGZipper
+currentASGView = request

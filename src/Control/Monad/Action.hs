@@ -93,7 +93,7 @@ class (Monoid a) => Action (a :: Type) where
 --
 -- instance Action MyAction where
 --    type StateOf MyAction = MyState
---    act (MyAction actionable) = Endo $ \s -> fold' go s actionable
+--    act (MyAction actionable) = Endo $ \s -> foldl' go s actionable
 --       where
 --           go :: MyState -> MyType -> MyState
 --           go oldState x = ...
