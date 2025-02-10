@@ -28,6 +28,7 @@ module Covenant.ASG
     ASGNode (Lit, Lam, Prim, App, Let),
     Scope,
     ASG,
+    ASGNeighbourhood,
     ASGZipper,
 
     -- * Functions
@@ -78,6 +79,7 @@ import Control.Monad.Action
   )
 import Covenant.Internal.ASG
   ( ASG,
+    ASGNeighbourhood,
     ASGZipper,
     closeASGZipper,
     compileASG,
