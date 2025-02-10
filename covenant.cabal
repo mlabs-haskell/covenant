@@ -87,16 +87,17 @@ library
     Covenant.Prim
 
   other-modules:
+    Covenant.Internal.ASG
     Covenant.Internal.ASGBuilder
     Covenant.Internal.ASGNode
 
   build-depends:
     QuickCheck ==2.15.0.1,
     acc ==0.2.0.3,
-    algebraic-graphs ==0.7,
     bimap ==0.5.0,
     bytestring >=0.12.1.0 && <0.13,
     containers >=0.6.8 && <0.8,
+    enummapset ==0.7.3.0,
     mtl >=2.3.1 && <3,
     optics-core ==0.4.1.1,
     optics-th ==0.4.1,

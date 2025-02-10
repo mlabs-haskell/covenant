@@ -15,7 +15,12 @@ import Control.Monad.State.Strict (State, gets, modify')
 import Control.Monad.Trans (lift)
 import Covenant.Constant (AConstant)
 import Covenant.Internal.ASGNode
-  ( ASGNode (App, Lam, Lit, Prim),
+  ( ASGNode
+      ( AppInternal,
+        LamInternal,
+        LitInternal,
+        PrimInternal
+      ),
     Arg (Arg),
     Id (Id),
     PrimCall
@@ -133,7 +138,7 @@ instance Arbitrary (ASGBuilder Id) where
         -- would require existentialization (using something like `Some`), which
         -- doesn't really help us any (because we have full control anyway), but
         -- does make the code much harder to read and debug.
-        pure $ body >>= \bodyRef -> idOf (Lam bodyRef)
+        pure $ body >>= \bodyRef -> idOf (LamInternal bodyRef)
       -- Note (Koz, 21/01/25): This is essentially `local`, but because GenT
       -- isn't an instance of MonadReader, we have to write it by hand. We could
       -- have defined an orphan instance instead, but I figured it'd be better
@@ -169,13 +174,13 @@ instance Arbitrary (ASGBuilder Id) where
 --
 -- @since 1.0.0
 lit :: AConstant -> ASGBuilder Id
-lit = idOf . Lit
+lit = idOf . LitInternal
 
 -- | Construct a primitive function call.
 --
 -- @since 1.0.0
 prim :: PrimCall -> ASGBuilder Id
-prim = idOf . Prim
+prim = idOf . PrimInternal
 
 -- | Construct a function application. The first argument is (an expression
 -- evaluating to) a function, the second argument is (an expression evaluating
@@ -186,7 +191,7 @@ prim = idOf . Prim
 -- Currently, this does not verify that the first argument is indeed a function,
 -- nor that the second argument is appropriate.
 app :: Ref -> Ref -> ASGBuilder Id
-app f x = idOf (App f x)
+app f x = idOf (AppInternal f x)
 
 -- Given a node, return its unique `Id`. If this is a node we've seen before in
 -- the current `ExprBuilder` context, this `Id` will be looked up and reused;
