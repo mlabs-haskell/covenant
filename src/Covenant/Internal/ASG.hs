@@ -47,6 +47,7 @@ data ASG
 -- current position' and 'elements to the right of the current position. We
 -- specialize to `Id` here because that's all we'll need.
 data Tape = Tape [Id] Id [Id]
+  deriving stock (Eq)
 
 -- Move the tape left, assuming it can.
 tapeLeft :: Tape -> Tape
@@ -83,6 +84,10 @@ data ASGZipper
       (EnumMap Id ASGNode) -- references and meaning from original ASG
       [Tape] -- stack of parents of the current focus, along with the position we were at when we descended
       Tape -- current focus, with the left and right siblings tracked as if they were a list
+  deriving stock
+    ( -- | @since 1.0.0
+      Eq
+    )
 
 -- | \'Unzip\' an 'ASG', starting the traversal at the source node corresponding
 -- to the \'toplevel\' computation.

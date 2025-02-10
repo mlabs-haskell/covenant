@@ -213,7 +213,11 @@ letBind Scope r f = do
   res <- f Scope
   idOf . LetInternal r $ res
 
--- | @since 1.0.0
+-- | The possible moves in the 'ASGZipper' wrapper monad. These need to be
+-- wrapped in 'ASGMoves' to make them usable with the update monad
+-- implementation: see 'moveASGView' for a helper avoiding this.
+--
+-- @since 1.0.0
 data ASGMove
   = ASGMoveLeft
   | ASGMoveRight
@@ -226,7 +230,10 @@ data ASGMove
       Show
     )
 
--- | @since 1.0.0
+-- | Wrapper needed to make 'ASGMove' a monoid, so that an update monad
+-- implementation of traversing the ASG is possible.
+--
+-- @since 1.0.0
 newtype ASGMoves = ASGMoves (Actionable ASGMove)
   deriving
     ( -- | @since 1.0.0
@@ -250,7 +257,29 @@ instance Action ASGMoves where
         ASGMoveUp -> upASGZipper oldState
         ASGMoveDown -> downASGZipper oldState
 
--- | @since 1.0.0
+-- | A higher-level wrapper for zipper operations over an ASG. Designed to avoid
+-- needing to carry around 'ASGZipper' arguments, as well as opening and closing
+-- zippers automatically behind the scenes. Currently just a higher-level
+-- wrapper around 'UpdateT' with a specialized state and action.
+--
+-- For example, the following function could be implemented using this
+-- interface:
+--
+-- > toLeftmostDescendant :: ASGTraverseT m ()
+-- > toLeftmostDescendant = currentASGView >>= go
+-- >    where
+-- >      go :: ASGZipper -> ASGTraverseT m ()
+-- >      go curr = do
+-- >        moveASGView ASGMoveDown
+-- >        newState <- currentASGView
+-- >        if newState == curr
+-- >          then pure () -- can't move any more
+-- >          else go newState -- move again
+--
+-- While this could be written using 'ASGZipper' explicitly, it would require
+-- manually passing around the 'ASGZipper' as it changed.
+--
+-- @since 1.0.0
 newtype ASGTraverseT (m :: Type -> Type) (a :: Type)
   = ASGTraverseT (UpdateT ASGMoves m a)
   deriving
@@ -265,7 +294,11 @@ newtype ASGTraverseT (m :: Type -> Type) (a :: Type)
     )
     via (UpdateT ASGMoves m)
 
--- | @since 1.0.0
+-- | Given an 'ASG', open a zipper into it, perform the movements required by
+-- the computation, then reclose the zipper at the end. Also produces the moves
+-- made as part of the computation.
+--
+-- @since 1.0.0
 runASGTraverseT ::
   forall (m :: Type -> Type) (a :: Type).
   (Functor m) =>
@@ -275,7 +308,25 @@ runASGTraverseT ::
 runASGTraverseT (ASGTraverseT comp) =
   fmap (\(z, ms, x) -> (closeASGZipper z, ms, x)) . runUpdateT comp . openASGZipper
 
--- | @since 1.0.0
+-- | Given a direction, attempt to move in that direction. More specifically:
+--
+-- * 'ASGMoveLeft' attempts to move to the rightmost left sibling of the
+-- currently-focused node.
+-- * 'ASGMoveRight' attempts to move to the leftmost right sibling of the
+-- currently-focused node.
+-- * 'ASGMoveDown' moves to the leftmost child of the currently-focused node.
+-- * 'ASGMoveUp' moves to the parent of the currently-focused node. If the node
+-- has multiple parents, the move is a \'reversal\' of whatever move got us
+-- there.
+--
+-- If a move is impossible, nothing happens.
+--
+-- = Note
+--
+-- This mirrors the movement functionality over \'raw\' 'ASGZipper's. See the
+-- descriptions of those functions for more precise information.
+--
+-- @since 1.0.0
 moveASGView ::
   forall (m :: Type -> Type).
   (Monad m) =>
@@ -283,7 +334,9 @@ moveASGView ::
   ASGTraverseT m ()
 moveASGView = update . ASGMoves . actionable
 
--- | @since 1.0.0
+-- | Get the current implicit zipper state.
+--
+-- @since 1.0.0
 currentASGView ::
   forall (m :: Type -> Type).
   (Monad m) =>
