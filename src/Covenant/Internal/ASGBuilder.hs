@@ -49,7 +49,8 @@ import Covenant.Internal.ASGNode
     Ref,
     typeOfRef,
   )
-import Covenant.Prim (OneArgFunc, SixArgFunc, ThreeArgFunc, TwoArgFunc, typeOfOneArgFunc, typeOfSixArgFunc, typeOfThreeArgFunc, typeOfTwoArgFunc)
+import Covenant.Internal.PrimType (typeOfOneArgFunc, typeOfSixArgFunc, typeOfThreeArgFunc, typeOfTwoArgFunc)
+import Covenant.Prim (OneArgFunc, SixArgFunc, ThreeArgFunc, TwoArgFunc)
 import Data.Bimap (Bimap)
 import Data.Bimap qualified as Bimap
 import Data.Foldable (traverse_)
@@ -109,16 +110,12 @@ data TypeError
       ASGType
       -- | Type of @x@
       ASGType
-  | -- | Tried to call primitive function with an argument that is not a Plutus expression
-    TyErrPrimArgNotAnExpr
-      -- | Type of the given argument
-      ASGType
   | -- | Tried to call a primitive function with incorrect arguments
     TyErrPrimArgMismatch
       -- | Types of expected arguments
-      (Vector TyExpr)
+      (Vector ASGType)
       -- | Types of provided arguments
-      (Vector TyExpr)
+      (Vector ASGType)
   | -- | Tried to construct where the items have different types.
     TyErrNonHomogenousList
   deriving stock
@@ -218,56 +215,40 @@ typeApp tyFun tyArg = case tyFun of
   _ -> Left $ TyErrAppNotALambda tyFun
 
 typePrim :: PrimCall -> Either TypeError ASGType
-typePrim = fmap TyExpr . go
+typePrim = go
   where
-    go :: PrimCall -> Either TypeError TyExpr
+    go :: PrimCall -> Either TypeError ASGType
     go (PrimCallOne fun arg1) = do
-      tyArg1 <- getConstantOrThrow $ typeOfRef arg1
-      typeOneArgFunc fun tyArg1
+      typeOneArgFunc fun (typeOfRef arg1)
     go (PrimCallTwo fun arg1 arg2) = do
-      tyArg1 <- getConstantOrThrow $ typeOfRef arg1
-      tyArg2 <- getConstantOrThrow $ typeOfRef arg2
-      typeTwoArgFunc fun tyArg1 tyArg2
+      typeTwoArgFunc fun (typeOfRef arg1) (typeOfRef arg2)
     go (PrimCallThree fun arg1 arg2 arg3) = do
-      tyArg1 <- getConstantOrThrow $ typeOfRef arg1
-      tyArg2 <- getConstantOrThrow $ typeOfRef arg2
-      tyArg3 <- getConstantOrThrow $ typeOfRef arg3
-      typeThreeArgFunc fun tyArg1 tyArg2 tyArg3
+      typeThreeArgFunc fun (typeOfRef arg1) (typeOfRef arg2) (typeOfRef arg3)
     go (PrimCallSix fun arg1 arg2 arg3 arg4 arg5 arg6) = do
-      tyArg1 <- getConstantOrThrow $ typeOfRef arg1
-      tyArg2 <- getConstantOrThrow $ typeOfRef arg2
-      tyArg3 <- getConstantOrThrow $ typeOfRef arg3
-      tyArg4 <- getConstantOrThrow $ typeOfRef arg4
-      tyArg5 <- getConstantOrThrow $ typeOfRef arg5
-      tyArg6 <- getConstantOrThrow $ typeOfRef arg6
-      typeSixArgFunc fun tyArg1 tyArg2 tyArg3 tyArg4 tyArg5 tyArg6
+      typeSixArgFunc fun (typeOfRef arg1) (typeOfRef arg2) (typeOfRef arg3) (typeOfRef arg4) (typeOfRef arg5) (typeOfRef arg6)
 
-    getConstantOrThrow :: ASGType -> Either TypeError TyExpr
-    getConstantOrThrow (TyExpr c) = Right c
-    getConstantOrThrow ty = Left $ TyErrPrimArgNotAnExpr ty
-
-typeOneArgFunc :: OneArgFunc -> TyExpr -> Either TypeError TyExpr
+typeOneArgFunc :: OneArgFunc -> ASGType -> Either TypeError ASGType
 typeOneArgFunc fun tyArg1 =
   let (tyParam1, tyRes) = typeOfOneArgFunc fun
    in if tyParam1 == tyArg1
         then Right tyRes
         else Left $ TyErrPrimArgMismatch (Vector.fromList [tyParam1]) (Vector.fromList [tyArg1])
 
-typeTwoArgFunc :: TwoArgFunc -> TyExpr -> TyExpr -> Either TypeError TyExpr
+typeTwoArgFunc :: TwoArgFunc -> ASGType -> ASGType -> Either TypeError ASGType
 typeTwoArgFunc fun tyArg1 tyArg2 =
   let (tyParam1, tyParam2, tyRes) = typeOfTwoArgFunc fun
    in if (tyParam1, tyParam2) == (tyArg1, tyArg2)
         then Right tyRes
         else Left $ TyErrPrimArgMismatch (Vector.fromList [tyParam1, tyParam2]) (Vector.fromList [tyArg1, tyArg2])
 
-typeThreeArgFunc :: ThreeArgFunc -> TyExpr -> TyExpr -> TyExpr -> Either TypeError TyExpr
+typeThreeArgFunc :: ThreeArgFunc -> ASGType -> ASGType -> ASGType -> Either TypeError ASGType
 typeThreeArgFunc fun tyArg1 tyArg2 tyArg3 =
   let (tyParam1, tyParam2, tyParam3, tyRes) = typeOfThreeArgFunc fun
    in if (tyParam1, tyParam2, tyParam3) == (tyArg1, tyArg2, tyArg3)
         then Right tyRes
         else Left $ TyErrPrimArgMismatch (Vector.fromList [tyParam1, tyParam2, tyParam3]) (Vector.fromList [tyArg1, tyArg2, tyArg3])
 
-typeSixArgFunc :: SixArgFunc -> TyExpr -> TyExpr -> TyExpr -> TyExpr -> TyExpr -> TyExpr -> Either TypeError TyExpr
+typeSixArgFunc :: SixArgFunc -> ASGType -> ASGType -> ASGType -> ASGType -> ASGType -> ASGType -> Either TypeError ASGType
 typeSixArgFunc fun tyArg1 tyArg2 tyArg3 tyArg4 tyArg5 tyArg6 =
   let (tyParam1, tyParam2, tyParam3, tyParam4, tyParam5, tyParam6, tyRes) = typeOfSixArgFunc fun
    in if (tyParam1, tyParam2, tyParam3, tyParam4, tyParam5, tyParam6) == (tyArg1, tyArg2, tyArg3, tyArg4, tyArg5, tyArg6)
