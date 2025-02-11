@@ -53,8 +53,7 @@ module Covenant.ASG
     -- *** High-level wrapper
     ASGMove (..),
     ASGMoves (..),
-    ASGTraverseT (..),
-    runASGTraverseT,
+    runASGZipper,
     moveASGView,
     currentASGView,
 
@@ -258,55 +257,18 @@ instance Action ASGMoves where
           ASGMoveDown -> downASGZipper
           ASGMoveUp -> upASGZipper
 
--- | A higher-level wrapper for zipper operations over an ASG. Designed to avoid
--- needing to carry around 'ASGZipper' arguments, as well as opening and closing
--- zippers automatically behind the scenes. Currently just a higher-level
--- wrapper around 'UpdateT' with a specialized state and action.
---
--- For example, the following function could be implemented using this
--- interface:
---
--- > toLeftmostDescendant :: ASGTraverseT m ()
--- > toLeftmostDescendant = currentASGView >>= go
--- >    where
--- >      go :: ASGZipper -> ASGTraverseT m ()
--- >      go curr = do
--- >        moveASGView ASGMoveDown
--- >        newState <- currentASGView
--- >        if newState == curr
--- >          then pure () -- can't move any more
--- >          else go newState -- move again
---
--- While this could be written using 'ASGZipper' explicitly, it would require
--- manually passing around the 'ASGZipper' as it changed.
---
--- @since 1.0.0
-newtype ASGTraverseT (m :: Type -> Type) (a :: Type)
-  = ASGTraverseT (UpdateT ASGMoves m a)
-  deriving
-    ( -- | @since 1.0.0
-      Functor,
-      -- | @since 1.0.0
-      Applicative,
-      -- | @since 1.0.0
-      Monad,
-      -- | @since 1.0.0
-      MonadUpdate ASGMoves
-    )
-    via (UpdateT ASGMoves m)
-
 -- | Given an 'ASG', open a zipper into it, perform the movements required by
 -- the computation, then reclose the zipper at the end. Also produces the moves
 -- made as part of the computation.
 --
 -- @since 1.0.0
-runASGTraverseT ::
+runASGZipper ::
   forall (m :: Type -> Type) (a :: Type).
   (Functor m) =>
-  ASGTraverseT m a ->
+  UpdateT ASGMoves m a ->
   ASG ->
   m (ASG, ASGMoves, a)
-runASGTraverseT (ASGTraverseT comp) =
+runASGZipper comp =
   fmap (\(z, ms, x) -> (closeASGZipper z, ms, x)) . runUpdateT comp . openASGZipper
 
 -- | Given a direction, attempt to move in that direction. More specifically:
@@ -330,9 +292,9 @@ runASGTraverseT (ASGTraverseT comp) =
 -- @since 1.0.0
 moveASGView ::
   forall (m :: Type -> Type).
-  (Monad m) =>
+  (MonadUpdate ASGMoves m) =>
   ASGMove ->
-  ASGTraverseT m ()
+  m ()
 moveASGView = update . ASGMoves . actionable
 
 -- | Get the current implicit zipper state.
@@ -340,6 +302,6 @@ moveASGView = update . ASGMoves . actionable
 -- @since 1.0.0
 currentASGView ::
   forall (m :: Type -> Type).
-  (Monad m) =>
-  ASGTraverseT m ASGZipper
+  (MonadUpdate ASGMoves m) =>
+  m ASGZipper
 currentASGView = request
