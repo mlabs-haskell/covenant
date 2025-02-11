@@ -11,18 +11,18 @@ module Covenant.Internal.ASG
     closeASGZipper,
     tapeLeft,
     tapeRight,
-    compileASG
+    compileASG,
   )
 where
 
-import Control.Monad.Reader (runReaderT, ReaderT, ask)
+import Control.Monad.HashCons (HashConsT, runHashConsT)
+import Control.Monad.Reader (ReaderT, ask, runReaderT)
 import Covenant.Internal.ASGNode (ASGNode, Id, childIds)
+import Data.Bimap (Bimap)
+import Data.Bimap qualified as Bimap
 import Data.EnumMap.Strict (EnumMap)
 import Data.EnumMap.Strict qualified as EnumMap
 import Data.Kind (Type)
-import Control.Monad.HashCons (HashConsT, runHashConsT)
-import Data.Bimap qualified as Bimap
-import Data.Bimap (Bimap)
 
 -- | A Covenant program, represented as an acyclic graph with a single source
 -- node. We use the term /ASG/, standing for \'abstract syntax graph\' for this
@@ -41,9 +41,10 @@ data ASG
     )
 
 -- | @since 1.0.0
-compileASG :: forall (m :: Type -> Type) . 
-  Monad m => 
-  HashConsT Id ASGNode m Id -> 
+compileASG ::
+  forall (m :: Type -> Type).
+  (Monad m) =>
+  HashConsT Id ASGNode m Id ->
   m (Maybe ASG)
 compileASG comp = do
   (start, binds) <- runHashConsT comp
