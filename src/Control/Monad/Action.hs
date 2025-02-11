@@ -46,6 +46,12 @@ where
 
 import Acc (Acc)
 import Control.Monad.Trans (MonadTrans (lift))
+import Control.Monad.Trans.Except (ExceptT)
+import Control.Monad.Trans.Maybe (MaybeT)
+import Control.Monad.Trans.RWS.CPS (RWST)
+import Control.Monad.Trans.Reader (ReaderT)
+import Control.Monad.Trans.State.Strict (StateT)
+import Control.Monad.Trans.Writer.CPS (WriterT)
 import Data.Functor (void)
 import Data.Kind (Type)
 import Data.Monoid (Endo, appEndo)
@@ -225,3 +231,57 @@ class (Action act, Monad m) => MonadUpdate act m | m -> act where
 instance (Action act, Monad m) => MonadUpdate act (UpdateT act m) where
   {-# INLINEABLE send #-}
   send x = UpdateT $ \s -> pure (x, appEndo (act x) s)
+
+-- | @since 1.0.0
+instance (MonadUpdate act m) => MonadUpdate act (ReaderT r m) where
+  {-# INLINEABLE send #-}
+  send = lift . send
+  {-# INLINEABLE update #-}
+  update = lift . update
+  {-# INLINEABLE request #-}
+  request = lift request
+
+-- | @since 1.0.0
+instance (MonadUpdate act m) => MonadUpdate act (MaybeT m) where
+  {-# INLINEABLE send #-}
+  send = lift . send
+  {-# INLINEABLE update #-}
+  update = lift . update
+  {-# INLINEABLE request #-}
+  request = lift request
+
+-- | @since 1.0.0
+instance (MonadUpdate act m) => MonadUpdate act (StateT s m) where
+  {-# INLINEABLE send #-}
+  send = lift . send
+  {-# INLINEABLE update #-}
+  update = lift . update
+  {-# INLINEABLE request #-}
+  request = lift request
+
+-- | @since 1.0.0
+instance (MonadUpdate act m) => MonadUpdate act (WriterT w m) where
+  {-# INLINEABLE send #-}
+  send = lift . send
+  {-# INLINEABLE update #-}
+  update = lift . update
+  {-# INLINEABLE request #-}
+  request = lift request
+
+-- | @since 1.0.0
+instance (MonadUpdate act m) => MonadUpdate act (RWST r w s m) where
+  {-# INLINEABLE send #-}
+  send = lift . send
+  {-# INLINEABLE update #-}
+  update = lift . update
+  {-# INLINEABLE request #-}
+  request = lift request
+
+-- | @since 1.0.0
+instance (MonadUpdate act m) => MonadUpdate act (ExceptT e m) where
+  {-# INLINEABLE send #-}
+  send = lift . send
+  {-# INLINEABLE update #-}
+  update = lift . update
+  {-# INLINEABLE request #-}
+  request = lift request
