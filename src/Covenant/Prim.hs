@@ -22,7 +22,10 @@ where
 
 import Covenant.Constant
   ( TyExpr
-      ( TyBoolean,
+      ( TyBLS12_381G1Element,
+        TyBLS12_381G2Element,
+        TyBLS12_381PairingMLResult,
+        TyBoolean,
         TyByteString,
         TyInteger,
         TyList,
@@ -325,12 +328,12 @@ typeOfOneArgFunc = \case
   SerialiseData -> (TyPlutusData, TyByteString)
   MkNilData -> (TyUnit, TyList TyPlutusData)
   MkNilPairData -> (TyUnit, TyList (TyPair TyPlutusData TyPlutusData))
-  BLS12_381_G1_neg -> (TyByteString, TyByteString)
-  BLS12_381_G1_compress -> (TyByteString, TyByteString)
-  BLS12_381_G1_uncompress -> (TyByteString, TyByteString)
-  BLS12_381_G2_neg -> (TyByteString, TyByteString)
-  BLS12_381_G2_compress -> (TyByteString, TyByteString)
-  BLS12_381_G2_uncompress -> (TyByteString, TyByteString)
+  BLS12_381_G1_neg -> (TyBLS12_381G1Element, TyBLS12_381G1Element)
+  BLS12_381_G1_compress -> (TyBLS12_381G1Element, TyByteString)
+  BLS12_381_G1_uncompress -> (TyByteString, TyBLS12_381G1Element)
+  BLS12_381_G2_neg -> (TyBLS12_381G2Element, TyBLS12_381G2Element)
+  BLS12_381_G2_compress -> (TyBLS12_381G2Element, TyByteString)
+  BLS12_381_G2_uncompress -> (TyByteString, TyBLS12_381G2Element)
   Keccak_256 -> (TyByteString, TyByteString)
   Blake2b_244 -> (TyByteString, TyByteString) -- TODO: Fix typo in Prim.hs to Blake2b_224
   ComplementByteString -> (TyByteString, TyByteString)
@@ -368,17 +371,17 @@ typeOfTwoArgFunc = \case
   ConstrData -> (TyInteger, TyList TyPlutusData, TyPlutusData)
   EqualsData -> (TyPlutusData, TyPlutusData, TyBoolean)
   MkPairData -> (TyPlutusData, TyPlutusData, TyPair TyPlutusData TyPlutusData)
-  BLS12_381_G1_add -> (TyByteString, TyByteString, TyByteString)
-  BLS12_381_G1_scalarMul -> (TyInteger, TyByteString, TyByteString)
-  BLS12_381_G1_equal -> (TyByteString, TyByteString, TyBoolean)
-  BLS12_381_G1_hashToGroup -> (TyByteString, TyByteString, TyByteString)
-  BLS12_381_G2_add -> (TyByteString, TyByteString, TyByteString)
-  BLS12_381_G2_scalarMul -> (TyInteger, TyByteString, TyByteString)
-  BLS12_381_G2_equal -> (TyByteString, TyByteString, TyBoolean)
-  BLS12_381_G2_hashToGroup -> (TyByteString, TyByteString, TyByteString)
-  BLS12_381_millerLoop -> (TyByteString, TyByteString, TyByteString)
-  BLS12_381_mulMlResult -> (TyByteString, TyByteString, TyByteString)
-  BLS12_381_finalVerify -> (TyByteString, TyByteString, TyBoolean)
+  BLS12_381_G1_add -> (TyBLS12_381G1Element, TyBLS12_381G1Element, TyBLS12_381G1Element)
+  BLS12_381_G1_scalarMul -> (TyInteger, TyBLS12_381G1Element, TyBLS12_381G1Element)
+  BLS12_381_G1_equal -> (TyBLS12_381G1Element, TyBLS12_381G1Element, TyBoolean)
+  BLS12_381_G1_hashToGroup -> (TyByteString, TyByteString, TyBLS12_381G1Element)
+  BLS12_381_G2_add -> (TyBLS12_381G2Element, TyBLS12_381G2Element, TyBLS12_381G2Element)
+  BLS12_381_G2_scalarMul -> (TyInteger, TyBLS12_381G2Element, TyBLS12_381G2Element)
+  BLS12_381_G2_equal -> (TyBLS12_381G2Element, TyBLS12_381G2Element, TyBoolean)
+  BLS12_381_G2_hashToGroup -> (TyByteString, TyByteString, TyBLS12_381G2Element)
+  BLS12_381_millerLoop -> (TyBLS12_381G1Element, TyBLS12_381G2Element, TyBLS12_381PairingMLResult)
+  BLS12_381_mulMlResult -> (TyBLS12_381PairingMLResult, TyBLS12_381PairingMLResult, TyBLS12_381PairingMLResult)
+  BLS12_381_finalVerify -> (TyBLS12_381PairingMLResult, TyBLS12_381PairingMLResult, TyBoolean)
   ByteStringToInteger -> (TyBoolean, TyByteString, TyInteger)
   ReadBit -> (TyByteString, TyInteger, TyBoolean)
   ReplicateByte -> (TyInteger, TyInteger, TyByteString)
@@ -410,7 +413,15 @@ typeOfThreeArgFunc = \case
 -- @since 1.0.0
 typeOfSixArgFunc :: SixArgFunc -> (TyExpr, TyExpr, TyExpr, TyExpr, TyExpr, TyExpr, TyExpr)
 typeOfSixArgFunc = \case
-  ChooseData -> (TyPlutusData, TyPlutusData, TyPlutusData, TyPlutusData, TyPlutusData, TyPlutusData, TyPlutusData)
+  ChooseData ->
+    ( TyPlutusData,
+      TyPlutusData,
+      TyPlutusData,
+      TyPlutusData,
+      TyPlutusData,
+      TyPlutusData,
+      TyPlutusData
+    )
   CaseData ->
     ( TyPlutusData,
       TyPair TyInteger (TyList TyPlutusData),

@@ -120,6 +120,9 @@ data TyExpr
   | TyPair TyExpr TyExpr
   | TyList TyExpr
   | TyPlutusData
+  | TyBLS12_381G1Element
+  | TyBLS12_381G2Element
+  | TyBLS12_381PairingMLResult
   deriving stock
     ( -- | @since 1.0.0
       Eq,
