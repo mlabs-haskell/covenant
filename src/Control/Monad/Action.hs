@@ -93,10 +93,10 @@ class (Monoid a) => Action (a :: Type) where
 --
 -- instance Action MyAction where
 --    type StateOf MyAction = MyState
---    act (MyAction actionable) = Endo $ \s -> foldl' go s actionable
---       where
---           go :: MyState -> MyType -> MyState
---           go oldState x = ...
+--    act (MyAction acts) = foldMap go acts
+--    where
+--      go :: MyType -> Endo MyState
+--      go x = Endo $ \oldState -> ...
 -- @
 --
 -- To \'inject\' your type into an 'Actionable', use 'actionable'.

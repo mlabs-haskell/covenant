@@ -110,7 +110,6 @@ import Covenant.Internal.ASGNode
     pattern Lit,
     pattern Prim,
   )
-import Data.Foldable (foldl')
 import Data.Kind (Type)
 import Data.Monoid (Endo (Endo))
 import Data.Proxy (Proxy (Proxy))
@@ -249,15 +248,15 @@ newtype ASGMoves = ASGMoves (Actionable ASGMove)
 instance Action ASGMoves where
   type StateOf ASGMoves = ASGZipper
   {-# INLINEABLE act #-}
-  act (ASGMoves moves) = Endo $ \s -> foldl' go s moves
+  act (ASGMoves moves) = foldMap go moves
     where
-      go ::
-        ASGZipper -> ASGMove -> ASGZipper
-      go oldState = \case
-        ASGMoveLeft -> leftASGZipper oldState
-        ASGMoveRight -> rightASGZipper oldState
-        ASGMoveUp -> upASGZipper oldState
-        ASGMoveDown -> downASGZipper oldState
+      go :: ASGMove -> Endo ASGZipper
+      go =
+        Endo . \case
+          ASGMoveLeft -> leftASGZipper
+          ASGMoveRight -> rightASGZipper
+          ASGMoveDown -> downASGZipper
+          ASGMoveUp -> upASGZipper
 
 -- | A higher-level wrapper for zipper operations over an ASG. Designed to avoid
 -- needing to carry around 'ASGZipper' arguments, as well as opening and closing
