@@ -185,13 +185,16 @@ bound (Scope _ lets) =
       letTy = (Vector.!) lets (fromIntegral n)
    in Bound (fromIntegral n) letTy
 
--- | Given a proof of scope, and a function to construct a lambda body using a
--- \'larger\' proof of scope, construct a lambda with that body.
+-- | Given the type of the lambda argument and a proof of scope, and a function
+-- to construct a lambda body using a \'larger\' proof of scope, construct a
+-- lambda with that body.
 --
+-- Note (Farseen, 2025\/02\/11): Update this example once parametric polymorphism is implemented.
 -- For example, this is how you define @id@:
 --
 -- > lam emptyScope $ \s10 -> pure . AnArg $ arg @0 s10
 --
+-- Note (Farseen, 2025\/02\/11): Update this example once parametric polymorphism is implemented.
 -- This is @const@:
 --
 -- > lam emptyScope $ \s10 -> lam s10 $ \s20 -> pure . AnArg $ arg @1 s20
@@ -199,6 +202,7 @@ bound (Scope _ lets) =
 -- @since 1.0.0
 lam ::
   forall (n :: Natural) (m :: Natural).
+  -- | The type of the lambda argument
   ASGType ->
   Scope n m ->
   (Scope (n + 1) m -> ASGBuilder Ref) ->
@@ -221,12 +225,13 @@ lam argTy scope f = do
 -- >     five <- lit 5
 -- >     four <- lit 4
 -- >     prod <- mul five four
--- >     letBind emptyScope prod $ \s01 ->
+-- >     letBind TyInteger emptyScope prod $ \s01 ->
 -- >          mul (ABound . bound @0 $ s01) (ABound . bound @0 $ s01)
 --
 -- @since 1.0.0
 letBind ::
   forall (n :: Natural) (m :: Natural).
+  -- | Type of the binding
   ASGType ->
   Scope n m ->
   Ref ->
