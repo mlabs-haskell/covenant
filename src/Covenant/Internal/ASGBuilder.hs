@@ -78,11 +78,28 @@ newtype ASGBuilderError = ATypeError TypeError
 --
 -- @since 1.0.0
 data TypeError
-  = TyErrAppNotALambda ASGType
-  | TyErrAppArgMismatch ASGType ASGType -- expected, received
-  | TyErrPrimNotAConstant ASGType
-  | TyErrPrimArgMismatch (Vector TyConstant) (Vector TyConstant) -- exptected, received
-  | TyErrNonHomogenousList
+  = -- | Tried to apply a value @f@ to @x@, but @f@ was not a lambda.
+    TyErrAppNotALambda
+      -- | Type of @f@.
+      ASGType
+  | -- | Tried to apply a value @f@ to @x@, but @x@ was not of the expected type.
+    TyErrAppArgMismatch
+      -- | Expected type
+      ASGType
+      -- | Type of @x@
+      ASGType
+  | -- | Tried to call primitive function with a non-constant argument
+    TyErrPrimNotAConstant
+      -- | Type of the given argument
+      ASGType
+  | -- | Tried to call a primitive function with incorrect arguments
+    TyErrPrimArgMismatch
+      -- | Types of expected arguments
+      (Vector TyConstant)
+      -- | Types of provided arguments
+      (Vector TyConstant)
+  | -- | Tried to construct where the items have different types.
+    TyErrNonHomogenousList
   deriving stock
     ( -- | @since 1.0.0
       Eq,
