@@ -1,3 +1,5 @@
+{-# LANGUAGE PatternSynonyms #-}
+
 module Covenant.Internal.ASGNode
   ( Id (..),
     Arg (..),
@@ -5,12 +7,21 @@ module Covenant.Internal.ASGNode
     Ref (..),
     PrimCall (..),
     ASGNode (..),
+    pattern Lit,
+    pattern Prim,
+    pattern Lam,
+    pattern Let,
+    pattern App,
+    pattern LedgerAccess,
+    pattern LedgerDestruct,
+    childIds,
   )
 where
 
 import Covenant.Constant (AConstant)
 import Covenant.Ledger (LedgerAccessor, LedgerDestructor)
 import Covenant.Prim (OneArgFunc, SixArgFunc, ThreeArgFunc, TwoArgFunc)
+import Data.Maybe (mapMaybe)
 import Data.Word (Word64)
 
 -- | A unique identifier for a node in a Covenant program.
@@ -21,7 +32,13 @@ newtype Id = Id Word64
     ( -- | @since 1.0.0
       Eq,
       -- | @since 1.0.0
-      Ord
+      Ord,
+      -- | @since 1.0.0
+      Bounded,
+      -- | Needed for internal reasons, even though this type class is terrible.
+      --
+      -- @since 1.0.0
+      Enum
     )
     via Word64
   deriving stock
@@ -95,18 +112,23 @@ data PrimCall
       Show
     )
 
--- | A node in a Covenant program. Since Covenant programs are hash consed, they
--- form a graph, hence \'ASG\' - \'abstract syntax graph\'.
+-- | A single node in a Covenant ASG.
+--
+-- = Note
+--
+-- We use pattern synonyms to allow pattern-matching syntax to view 'ASGNode'
+-- contents, but /not/ construct them. For this, you need to use the API
+-- provided by 'Covenant.Internal.ASGBuilder.ASGBuilder'.
 --
 -- @since 1.0.0
 data ASGNode
-  = Lit AConstant
-  | Prim PrimCall
-  | Lam Ref
-  | Let Ref Ref
-  | App Ref Ref
-  | LedgerAccess LedgerAccessor Ref
-  | LedgerDestruct LedgerDestructor Ref Ref
+  = LitInternal AConstant
+  | PrimInternal PrimCall
+  | LamInternal Ref
+  | LetInternal Ref Ref
+  | AppInternal Ref Ref
+  | LedgerAccessInternal LedgerAccessor Ref
+  | LedgerDestructInternal LedgerDestructor Ref Ref
   deriving stock
     ( -- | @since 1.0.0
       Eq,
@@ -115,3 +137,72 @@ data ASGNode
       -- | @since 1.0.0
       Show
     )
+
+-- | A constant value.
+--
+-- @since 1.0.0
+pattern Lit :: AConstant -> ASGNode
+pattern Lit c <- LitInternal c
+
+-- | A call to a Plutus builtin.
+--
+-- @since 1.0.0
+pattern Prim :: PrimCall -> ASGNode
+pattern Prim p <- PrimInternal p
+
+-- | A lambda abstraction: the node contents are its body.
+--
+-- @since 1.0.0
+pattern Lam :: Ref -> ASGNode
+pattern Lam r <- LamInternal r
+
+-- | A `let` binding. The first 'Ref' is the binding, while the second is the
+-- body the binding is used in.
+--
+-- @since 1.0.0
+pattern Let :: Ref -> Ref -> ASGNode
+pattern Let rBind rBody <- LetInternal rBind rBody
+
+-- | A function application. The first 'Ref' is the function expression, while
+-- the second is the argument to be applied.
+--
+-- @since 1.0.0
+pattern App :: Ref -> Ref -> ASGNode
+pattern App rFun rArg <- AppInternal rFun rArg
+
+-- | An accessor for a ledger type.
+--
+-- @since 1.0.0
+pattern LedgerAccess :: LedgerAccessor -> Ref -> ASGNode
+pattern LedgerAccess acc rArg <- LedgerAccessInternal acc rArg
+
+-- | A destructor for a ledger sum. The first 'Ref' is for a destructor
+-- function, while the second is the argument to be destructured.
+--
+-- @since 1.0.0
+pattern LedgerDestruct :: LedgerDestructor -> Ref -> Ref -> ASGNode
+pattern LedgerDestruct d rDest rArg <- LedgerDestructInternal d rDest rArg
+
+{-# COMPLETE Lit, Prim, Lam, Let, App, LedgerAccess, LedgerDestruct #-}
+
+-- | @since 1.0.0
+childIds :: ASGNode -> [Id]
+childIds = \case
+  LitInternal _ -> []
+  PrimInternal p -> case p of
+    PrimCallOne _ r1 -> mapMaybe refToId [r1]
+    PrimCallTwo _ r1 r2 -> mapMaybe refToId [r1, r2]
+    PrimCallThree _ r1 r2 r3 -> mapMaybe refToId [r1, r2, r3]
+    PrimCallSix _ r1 r2 r3 r4 r5 r6 -> mapMaybe refToId [r1, r2, r3, r4, r5, r6]
+  LamInternal r1 -> mapMaybe refToId [r1]
+  LetInternal r1 r2 -> mapMaybe refToId [r1, r2]
+  AppInternal r1 r2 -> mapMaybe refToId [r1, r2]
+  LedgerAccessInternal _ r1 -> mapMaybe refToId [r1]
+  LedgerDestructInternal _ r1 r2 -> mapMaybe refToId [r1, r2]
+
+-- Helpers
+
+refToId :: Ref -> Maybe Id
+refToId = \case
+  AnId i -> pure i
+  _ -> Nothing

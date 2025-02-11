@@ -1,4 +1,5 @@
 {-# LANGUAGE AllowAmbiguousTypes #-}
+{-# LANGUAGE PatternSynonyms #-}
 
 -- |
 -- Module: Covenant.ASG
@@ -23,15 +24,17 @@ module Covenant.ASG
     Bound,
     Ref (..),
     PrimCall (..),
-    ASGNode,
-    ASGBuilder,
+    ASGNode (Lit, Lam, Prim, App, Let, LedgerAccess, LedgerDestruct),
     Scope,
     ASG,
+    ASGZipper,
 
     -- * Functions
+
+    -- ** Scope construction
     emptyScope,
 
-    -- ** Build up expressions
+    -- ** Builder functionality
     lit,
     prim,
     arg,
@@ -39,85 +42,65 @@ module Covenant.ASG
     app,
     lam,
     letBind,
+    ledgerAccess,
+    ledgerDestruct,
 
-    -- ** Compile an expression
-    toASG,
+    -- ** Compile
+    compileASG,
+
+    -- ** Walking the ASG
+    openASGZipper,
+    closeASGZipper,
+    viewASGZipper,
+    downASGZipper,
+    leftASGZipper,
+    rightASGZipper,
+    upASGZipper,
   )
 where
 
-import Algebra.Graph.Acyclic.AdjacencyMap
-  ( AdjacencyMap,
-    toAcyclic,
-    vertex,
-  )
-import Algebra.Graph.AdjacencyMap qualified as Cyclic
-import Control.Monad.State.Strict (runState)
-import Covenant.Internal.ASGBuilder
-  ( ASGBuilder (ASGBuilder),
-    ASGBuilderState (ASGBuilderState),
-    app,
-    idOf,
-    lit,
-    prim,
+import Control.Monad.HashCons (MonadHashCons (refTo))
+import Covenant.Constant (AConstant)
+import Covenant.Internal.ASG
+  ( ASG,
+    ASGZipper,
+    closeASGZipper,
+    compileASG,
+    downASGZipper,
+    leftASGZipper,
+    openASGZipper,
+    rightASGZipper,
+    upASGZipper,
+    viewASGZipper,
   )
 import Covenant.Internal.ASGNode
-  ( ASGNode (App, Lam, LedgerAccess, LedgerDestruct, Let, Lit, Prim),
+  ( ASGNode
+      ( AppInternal,
+        LamInternal,
+        LedgerAccessInternal,
+        LedgerDestructInternal,
+        LetInternal,
+        LitInternal,
+        PrimInternal
+      ),
     Arg (Arg),
     Bound (Bound),
     Id,
     PrimCall (PrimCallOne, PrimCallSix, PrimCallThree, PrimCallTwo),
     Ref (ABound, AnArg, AnId),
+    pattern App,
+    pattern Lam,
+    pattern LedgerAccess,
+    pattern LedgerDestruct,
+    pattern Let,
+    pattern Lit,
+    pattern Prim,
   )
-import Data.Bimap (Bimap)
-import Data.Bimap qualified as Bimap
-import Data.Maybe (mapMaybe)
+import Covenant.Ledger (LedgerAccessor, LedgerDestructor)
+import Data.Kind (Type)
 import Data.Proxy (Proxy (Proxy))
 import GHC.TypeNats (CmpNat, KnownNat, natVal, type (+))
 import Numeric.Natural (Natural)
-
--- | A Covenant program, represented as an acyclic graph.
---
--- @since 1.0.0
-data ASG = ASG (Id, ASGNode) (AdjacencyMap (Id, ASGNode))
-  deriving stock
-    ( -- | @since 1.0.0
-      Eq,
-      -- | @since 1.0.0
-      Show
-    )
-
--- | Given an 'Id' result in a builder monad, compile the computation that 'Id'
--- refers to into a call graph. This is guaranteed to be acyclic.
---
--- @since 1.0.0
-toASG :: ASGBuilder Id -> Maybe ASG
-toASG (ASGBuilder comp) = do
-  let (start, ASGBuilderState binds) = runState comp (ASGBuilderState Bimap.empty)
-  if Bimap.size binds == 1
-    then do
-      -- This cannot fail, but the type system can't show it
-      initial <- (start,) <$> Bimap.lookup start binds
-      pure . ASG initial . vertex $ initial
-    else do
-      let asGraph = Cyclic.edges . go binds $ start
-      -- This cannot fail, but the type system can't show it
-      acyclic <- toAcyclic asGraph
-      -- Same as above
-      initial <- (start,) <$> Bimap.lookup start binds
-      pure . ASG initial $ acyclic
-  where
-    go ::
-      Bimap Id ASGNode ->
-      Id ->
-      [((Id, ASGNode), (Id, ASGNode))]
-    go binds curr = case Bimap.lookup curr binds of
-      Nothing -> []
-      Just e ->
-        let idList = toIdList e
-            stepdown i = case Bimap.lookup i binds of
-              Nothing -> []
-              Just e' -> ((curr, e), (i, e')) : go binds i
-         in concatMap stepdown idList
 
 -- | A proof of how many arguments and @let@-binds are available to a Covenant
 -- program. Put another way, a value of type @'Scope' n m@ means that we are
@@ -138,6 +121,40 @@ data Scope (args :: Natural) (lets :: Natural) = Scope
 -- @since 1.0.0
 emptyScope :: Scope 0 0
 emptyScope = Scope
+
+-- | Construct a literal (constant) value.
+--
+-- @since 1.0.0
+lit ::
+  forall (m :: Type -> Type).
+  (MonadHashCons Id ASGNode m) =>
+  AConstant -> m Id
+lit = refTo . LitInternal
+
+-- | Construct a primitive function call.
+--
+-- @since 1.0.0
+prim ::
+  forall (m :: Type -> Type).
+  (MonadHashCons Id ASGNode m) =>
+  PrimCall -> m Id
+prim = refTo . PrimInternal
+
+-- | Construct a function application. The first argument is (an expression
+-- evaluating to) a function, the second argument is (an expression evaluating
+-- to) an argument.
+--
+-- = Important note
+--
+-- Currently, this does not verify that the first argument is indeed a function,
+-- nor that the second argument is appropriate.
+--
+-- @since 1.0.0
+app ::
+  forall (m :: Type -> Type).
+  (MonadHashCons Id ASGNode m) =>
+  Ref -> Ref -> m Id
+app f x = refTo (AppInternal f x)
 
 -- | Given a proof of scope, construct one of the arguments in that scope. This
 -- requires use of @TypeApplications@ to select which argument you are
@@ -180,17 +197,18 @@ bound Scope = Bound . fromIntegral . natVal $ Proxy @n
 --
 -- This is @const@:
 --
--- > lam emptyScope $ \s10 -> lam s10 $ \s20 -> pure . AnArg $ arg @1 s20
+-- > lam emptyScope $ \s10 -> AnId <$> lam s10 (\s20 -> pure . AnArg $ arg @1 s20)
 --
 -- @since 1.0.0
 lam ::
-  forall (n :: Natural) (m :: Natural).
-  Scope n m ->
-  (Scope (n + 1) m -> ASGBuilder Ref) ->
-  ASGBuilder Id
+  forall (args :: Natural) (binds :: Natural) (m :: Type -> Type).
+  (MonadHashCons Id ASGNode m) =>
+  Scope args binds ->
+  (Scope (args + 1) binds -> m Ref) ->
+  m Id
 lam Scope f = do
   res <- f Scope
-  idOf . Lam $ res
+  refTo . LamInternal $ res
 
 -- | Given a proof of scope, a 'Ref' to an expression to bind to, and a function
 -- to construct a @let@-binding body using a \'larger\' proof of scope, construct
@@ -208,33 +226,37 @@ lam Scope f = do
 --
 -- @since 1.0.0
 letBind ::
-  forall (n :: Natural) (m :: Natural).
-  Scope n m ->
+  forall (args :: Natural) (binds :: Natural) (m :: Type -> Type).
+  (MonadHashCons Id ASGNode m) =>
+  Scope args binds ->
   Ref ->
-  (Scope n (m + 1) -> ASGBuilder Ref) ->
-  ASGBuilder Id
+  (Scope args (binds + 1) -> m Ref) ->
+  m Id
 letBind Scope r f = do
   res <- f Scope
-  idOf . Let r $ res
+  refTo . LetInternal r $ res
 
--- Helpers
+-- | Construct a ledger type accessor.
+--
+-- @since 1.0.0
+ledgerAccess ::
+  forall (m :: Type -> Type).
+  (MonadHashCons Id ASGNode m) =>
+  LedgerAccessor ->
+  Ref ->
+  m Id
+ledgerAccess acc = refTo . LedgerAccessInternal acc
 
-toIdList :: ASGNode -> [Id]
-toIdList = \case
-  Lit _ -> []
-  Prim p -> mapMaybe refToId $ case p of
-    PrimCallOne _ r -> [r]
-    PrimCallTwo _ r1 r2 -> [r1, r2]
-    PrimCallThree _ r1 r2 r3 -> [r1, r2, r3]
-    PrimCallSix _ r1 r2 r3 r4 r5 r6 -> [r1, r2, r3, r4, r5, r6]
-  Lam body -> mapMaybe refToId [body]
-  Let x body -> mapMaybe refToId [x, body]
-  App f x -> mapMaybe refToId [f, x]
-  LedgerAccess _ x -> mapMaybe refToId [x]
-  LedgerDestruct _ f x -> mapMaybe refToId [f, x]
-
-refToId :: Ref -> Maybe Id
-refToId = \case
-  AnArg _ -> Nothing
-  AnId i -> Just i
-  ABound _ -> Nothing
+-- | Construct a ledger sum type destructor. The first 'Ref' must be a
+-- function suitable for destructuring the second 'Ref', though we do not
+-- currently check this.
+--
+-- @since 1.0.0
+ledgerDestruct ::
+  forall (m :: Type -> Type).
+  (MonadHashCons Id ASGNode m) =>
+  LedgerDestructor ->
+  Ref ->
+  Ref ->
+  m Id
+ledgerDestruct d rFun = refTo . LedgerDestructInternal d rFun
