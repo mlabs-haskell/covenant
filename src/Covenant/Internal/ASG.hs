@@ -2,7 +2,6 @@ module Covenant.Internal.ASG
   ( ASG (..),
     ASGNeighbourhood (..),
     ASGZipper (..),
-    compileASG,
     openASGZipper,
     viewASGZipper,
     downASGZipper,
@@ -12,21 +11,19 @@ module Covenant.Internal.ASG
     closeASGZipper,
     asgnLeft,
     asgnRight,
+    compileASG,
   )
 where
 
+import Control.Monad.HashCons (HashConsT, runHashConsT)
 import Control.Monad.Reader (ReaderT, ask, runReaderT)
-import Control.Monad.State.Strict (runState)
-import Covenant.Internal.ASGBuilder
-  ( ASGBuilder (ASGBuilder),
-    ASGBuilderState (ASGBuilderState),
-  )
 import Covenant.Internal.ASGNode (ASGNode, Id, childIds)
 import Data.Bimap (Bimap)
 import Data.Bimap qualified as Bimap
 import Data.EnumMap.Strict (EnumMap)
 import Data.EnumMap.Strict qualified as EnumMap
 import Data.Foldable (traverse_)
+import Data.Kind (Type)
 import Optics.Fold (A_Fold, foldVL)
 import Optics.Getter (A_Getter, to)
 import Optics.Label (LabelOptic (labelOptic))
@@ -46,6 +43,41 @@ data ASG
       -- | @since 1.0.0
       Show
     )
+
+-- | Given a hash consing computation associating 'Id's with 'ASGNode's
+-- producing a \'top-level\' computation 'Id', transform it into an 'ASG'.
+--
+-- = Note
+--
+-- This currently returns a 'Maybe', because we cannot convince the type system
+-- that lookups cannot 'miss' when building the ASG. In practice, if this ever
+-- returns 'Nothing', something has gone very, /very/ wrong.
+--
+-- @since 1.0.0
+compileASG ::
+  forall (m :: Type -> Type).
+  (Monad m) =>
+  HashConsT Id ASGNode m Id ->
+  m (Maybe ASG)
+compileASG comp = do
+  (start, binds) <- runHashConsT comp
+  pure $ do
+    u <- Bimap.lookup start binds
+    built <- runReaderT (go start u) binds
+    pure . ASG start $ built
+  where
+    -- Note (Koz, 04/02/2025): We rely on the monoidal behaviour of `EnumMap`
+    -- for accumulation here, instead of carrying around an explicit
+    -- accumulator. This is normally a bit risky, as the default behaviour of
+    -- `<>` on `Map`s of any flavour throws away values on key collisions.
+    -- However, we know that `ASGBuilder` uses a `Bimap`, thus making key
+    -- collisions impossible; therefore, we can use `<>` without concern.
+    go :: Id -> ASGNode -> ReaderT (Bimap Id ASGNode) Maybe (EnumMap Id ASGNode)
+    go currId currNode = do
+      let currMap = EnumMap.singleton currId currNode
+      children <- allChildren currNode
+      traversed <- traverse (uncurry go) children
+      pure . EnumMap.unions $ currMap : traversed
 
 -- | A view of a single ASG node, as well as its left and right siblings, if
 -- any. The view uses 'Id's, and is thus only meaningful in the context of some
@@ -267,40 +299,6 @@ upASGZipper :: ASGZipper -> ASGZipper
 upASGZipper z@(ASGZipper binds parents _) = case parents of
   [] -> z -- nowhere to go
   parent : rest -> ASGZipper binds rest parent
-
--- | Given an 'ASGBuilder' whose result is the 'Id' corresponding to the
--- \'toplevel computation\' in the desired ASG, attempt to compile to an 'ASG'.
---
--- = Note
---
--- This currently cannot fail, despite the type specifying that it can. This
--- stems from the fact that we don't statically know every lookup for every
--- 'Id'. In practice, if you ever get 'Nothing' from this, something has gone
--- very, /very/ wrong.
---
--- @since 1.0.0
-compileASG :: ASGBuilder Id -> Maybe ASG
-compileASG (ASGBuilder comp) = do
-  let (start, ASGBuilderState binds) = runState comp (ASGBuilderState Bimap.empty)
-  u <- Bimap.lookup start binds
-  built <- runReaderT (go start u) binds
-  pure . ASG start $ built
-  where
-    -- Note (Koz, 04/02/2025): We rely on the monoidal behaviour of `EnumMap`
-    -- for accumulation here, instead of carrying around an explicit
-    -- accumulator. This is normally a bit risky, as the default behaviour of
-    -- `<>` on `Map`s of any flavour throws away values on key collisions.
-    -- However, we know that `ASGBuilder` uses a `Bimap`, thus making key
-    -- collisions impossible; therefore, we can use `<>` without concern.
-    go ::
-      Id ->
-      ASGNode ->
-      ReaderT (Bimap Id ASGNode) Maybe (EnumMap Id ASGNode)
-    go currId currNode = do
-      let currMap = EnumMap.singleton currId currNode
-      children <- allChildren currNode
-      traversed <- traverse (uncurry go) children
-      pure . EnumMap.unions $ currMap : traversed
 
 -- Helpers
 

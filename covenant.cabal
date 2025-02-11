@@ -82,13 +82,13 @@ library
   import: lang
   exposed-modules:
     Control.Monad.Action
+    Control.Monad.HashCons
     Covenant.ASG
     Covenant.Constant
     Covenant.Prim
 
   other-modules:
     Covenant.Internal.ASG
-    Covenant.Internal.ASGBuilder
     Covenant.Internal.ASGNode
 
   build-depends:
@@ -104,6 +104,7 @@ library
     quickcheck-instances ==0.3.32,
     quickcheck-transformer ==0.3.1.2,
     text >=2.1.1 && <2.2,
+    transformers >=0.6.1.0 && <0.7.0.0,
     vector ==0.13.2.0,
 
   hs-source-dirs: src
