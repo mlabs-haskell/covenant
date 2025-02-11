@@ -27,6 +27,8 @@ module Covenant.ASG
     ASGBuilder,
     Scope,
     ASG,
+    ASGBuilderError (..),
+    TypeError (..),
 
     -- * Functions
     emptyScope,
@@ -53,8 +55,15 @@ import Algebra.Graph.Acyclic.AdjacencyMap
 import Algebra.Graph.AdjacencyMap qualified as Cyclic
 import Covenant.Internal.ASGBuilder
   ( ASGBuilder,
-    ASGBuilderError,
+    ASGBuilderError (ATypeError),
     ASGBuilderState (ASGBuilderState),
+    TypeError
+      ( TyErrAppArgMismatch,
+        TyErrAppNotALambda,
+        TyErrNonHomogenousList,
+        TyErrPrimArgMismatch,
+        TyErrPrimNotAConstant
+      ),
     app,
     idOf,
     lit,
