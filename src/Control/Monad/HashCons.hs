@@ -98,6 +98,9 @@ hashCons x = HashConsT $ do
 -- = Laws
 --
 -- 1. @'refTo' x '>>' 'refTo' x@ @=@ @'refTo' x@
+-- 2. @'liftA2' (/=) ('refTo' x) ('refTo' y)@ @=@
+--    @'liftA2' \\(idX idX -> (x '/=' y) '==' (idX '/=' idY)) ('refTo' x)
+--    ('refTo' y)@
 --
 -- @since 1.0.0
 class
