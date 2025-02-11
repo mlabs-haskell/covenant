@@ -30,6 +30,8 @@ newtype Id = Id Word64
       Eq,
       -- | @since 1.0.0
       Ord,
+      -- | @since 1.0.0
+      Bounded,
       -- | Needed for internal reasons, even though this type class is terrible.
       --
       -- @since 1.0.0

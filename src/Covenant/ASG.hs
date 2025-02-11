@@ -24,7 +24,6 @@ module Covenant.ASG
     Bound,
     Ref (..),
     PrimCall (..),
-    ASGBuilder,
     ASGNode (Lit, Lam, Prim, App, Let),
     Scope,
     ASG,
@@ -58,6 +57,8 @@ module Covenant.ASG
   )
 where
 
+import Control.Monad.HashCons (MonadHashCons (refTo))
+import Covenant.Constant (AConstant)
 import Covenant.Internal.ASG
   ( ASG,
     ASGZipper,
@@ -70,15 +71,8 @@ import Covenant.Internal.ASG
     upASGZipper,
     viewASGZipper,
   )
-import Covenant.Internal.ASGBuilder
-  ( ASGBuilder,
-    app,
-    idOf,
-    lit,
-    prim,
-  )
 import Covenant.Internal.ASGNode
-  ( ASGNode (LamInternal, LetInternal),
+  ( ASGNode (AppInternal, LamInternal, LetInternal, LitInternal, PrimInternal),
     Arg (Arg),
     Bound (Bound),
     Id,
@@ -90,6 +84,7 @@ import Covenant.Internal.ASGNode
     pattern Lit,
     pattern Prim,
   )
+import Data.Kind (Type)
 import Data.Proxy (Proxy (Proxy))
 import GHC.TypeNats (CmpNat, KnownNat, natVal, type (+))
 import Numeric.Natural (Natural)
@@ -113,6 +108,40 @@ data Scope (args :: Natural) (lets :: Natural) = Scope
 -- @since 1.0.0
 emptyScope :: Scope 0 0
 emptyScope = Scope
+
+-- | Construct a literal (constant) value.
+--
+-- @since 1.0.0
+lit ::
+  forall (m :: Type -> Type).
+  (MonadHashCons Id ASGNode m) =>
+  AConstant -> m Id
+lit = refTo . LitInternal
+
+-- | Construct a primitive function call.
+--
+-- @since 1.0.0
+prim ::
+  forall (m :: Type -> Type).
+  (MonadHashCons Id ASGNode m) =>
+  PrimCall -> m Id
+prim = refTo . PrimInternal
+
+-- | Construct a function application. The first argument is (an expression
+-- evaluating to) a function, the second argument is (an expression evaluating
+-- to) an argument.
+--
+-- = Important note
+--
+-- Currently, this does not verify that the first argument is indeed a function,
+-- nor that the second argument is appropriate.
+--
+-- @since 1.0.0
+app ::
+  forall (m :: Type -> Type).
+  (MonadHashCons Id ASGNode m) =>
+  Ref -> Ref -> m Id
+app f x = refTo (AppInternal f x)
 
 -- | Given a proof of scope, construct one of the arguments in that scope. This
 -- requires use of @TypeApplications@ to select which argument you are
@@ -159,13 +188,14 @@ bound Scope = Bound . fromIntegral . natVal $ Proxy @n
 --
 -- @since 1.0.0
 lam ::
-  forall (n :: Natural) (m :: Natural).
-  Scope n m ->
-  (Scope (n + 1) m -> ASGBuilder Ref) ->
-  ASGBuilder Id
+  forall (args :: Natural) (binds :: Natural) (m :: Type -> Type).
+  (MonadHashCons Id ASGNode m) =>
+  Scope args binds ->
+  (Scope (args + 1) binds -> m Ref) ->
+  m Id
 lam Scope f = do
   res <- f Scope
-  idOf . LamInternal $ res
+  refTo . LamInternal $ res
 
 -- | Given a proof of scope, a 'Ref' to an expression to bind to, and a function
 -- to construct a @let@-binding body using a \'larger\' proof of scope, construct
@@ -183,11 +213,12 @@ lam Scope f = do
 --
 -- @since 1.0.0
 letBind ::
-  forall (n :: Natural) (m :: Natural).
-  Scope n m ->
+  forall (args :: Natural) (binds :: Natural) (m :: Type -> Type).
+  (MonadHashCons Id ASGNode m) =>
+  Scope args binds ->
   Ref ->
-  (Scope n (m + 1) -> ASGBuilder Ref) ->
-  ASGBuilder Id
+  (Scope args (binds + 1) -> m Ref) ->
+  m Id
 letBind Scope r f = do
   res <- f Scope
-  idOf . LetInternal r $ res
+  refTo . LetInternal r $ res
