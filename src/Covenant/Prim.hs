@@ -21,7 +21,7 @@ module Covenant.Prim
 where
 
 import Covenant.Constant
-  ( TyConstant
+  ( TyExpr
       ( TyBoolean,
         TyByteString,
         TyInteger,
@@ -300,7 +300,7 @@ instance Arbitrary SixArgFunc where
 -- Returns a tuple of (arg type, result type).
 --
 -- @since 1.0.0
-typeOfOneArgFunc :: OneArgFunc -> (TyConstant, TyConstant)
+typeOfOneArgFunc :: OneArgFunc -> (TyExpr, TyExpr)
 typeOfOneArgFunc = \case
   LengthOfByteString -> (TyByteString, TyInteger)
   Sha2_256 -> (TyByteString, TyByteString)
@@ -342,7 +342,7 @@ typeOfOneArgFunc = \case
 -- Returns a tuple of (arg1 type, arg2 type, return type).
 --
 -- @since 1.0.0
-typeOfTwoArgFunc :: TwoArgFunc -> (TyConstant, TyConstant, TyConstant)
+typeOfTwoArgFunc :: TwoArgFunc -> (TyExpr, TyExpr, TyExpr)
 typeOfTwoArgFunc = \case
   AddInteger -> (TyInteger, TyInteger, TyInteger)
   SubtractInteger -> (TyInteger, TyInteger, TyInteger)
@@ -389,7 +389,7 @@ typeOfTwoArgFunc = \case
 -- Returns a tuple of (arg1 type, arg2 type, arg3 type, return type).
 --
 -- @since 1.0.0
-typeOfThreeArgFunc :: ThreeArgFunc -> (TyConstant, TyConstant, TyConstant, TyConstant)
+typeOfThreeArgFunc :: ThreeArgFunc -> (TyExpr, TyExpr, TyExpr, TyExpr)
 typeOfThreeArgFunc = \case
   VerifyEd25519Signature -> (TyByteString, TyByteString, TyByteString, TyBoolean)
   VerifyEcdsaSecp256k1Signature -> (TyByteString, TyByteString, TyByteString, TyBoolean)
@@ -408,7 +408,7 @@ typeOfThreeArgFunc = \case
 -- Returns a tuple of (arg1 type, arg2 type, arg3 type, .. arg6 type, return type).
 --
 -- @since 1.0.0
-typeOfSixArgFunc :: SixArgFunc -> (TyConstant, TyConstant, TyConstant, TyConstant, TyConstant, TyConstant, TyConstant)
+typeOfSixArgFunc :: SixArgFunc -> (TyExpr, TyExpr, TyExpr, TyExpr, TyExpr, TyExpr, TyExpr)
 typeOfSixArgFunc = \case
   ChooseData -> (TyPlutusData, TyPlutusData, TyPlutusData, TyPlutusData, TyPlutusData, TyPlutusData, TyPlutusData)
   CaseData ->

@@ -11,7 +11,7 @@ module Covenant.Constant
   ( -- * Types
     AConstant (..),
     PlutusData (..),
-    TyConstant (..),
+    TyExpr (..),
   )
 where
 
@@ -97,7 +97,7 @@ data AConstant
   | AByteString ByteString
   | AString Text
   | APair AConstant AConstant
-  | AList TyConstant (Vector AConstant)
+  | AList TyExpr (Vector AConstant)
   | AData PlutusData
   deriving stock
     ( -- | @since 1.0.0
@@ -108,17 +108,17 @@ data AConstant
       Show
     )
 
--- | The type of Plutus constant terms.
+-- | The type of Plutus expressions.
 --
 -- @since 1.0.0
-data TyConstant
+data TyExpr
   = TyUnit
   | TyBoolean
   | TyInteger
   | TyByteString
   | TyString
-  | TyPair TyConstant TyConstant
-  | TyList TyConstant
+  | TyPair TyExpr TyExpr
+  | TyList TyExpr
   | TyPlutusData
   deriving stock
     ( -- | @since 1.0.0
@@ -183,11 +183,11 @@ instance Arbitrary AConstant where
     AData dat -> AData <$> shrink dat
 
 -- | @since 1.0.0
-instance Arbitrary TyConstant where
+instance Arbitrary TyExpr where
   {-# INLINEABLE arbitrary #-}
   arbitrary = sized go
     where
-      go :: Int -> Gen TyConstant
+      go :: Int -> Gen TyExpr
       go size
         | size <= 0 =
             oneof

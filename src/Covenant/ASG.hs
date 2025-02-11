@@ -62,7 +62,7 @@ import Covenant.Internal.ASGBuilder
         TyErrAppNotALambda,
         TyErrNonHomogenousList,
         TyErrPrimArgMismatch,
-        TyErrPrimNotAConstant
+        TyErrPrimArgNotAnExpr
       ),
     app,
     idOf,

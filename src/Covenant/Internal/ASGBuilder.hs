@@ -19,10 +19,31 @@ where
 import Control.Monad (unless)
 import Control.Monad.Except (ExceptT, MonadError, liftEither, runExceptT)
 import Control.Monad.State.Strict (State, gets, modify', runState)
-import Covenant.Constant (AConstant (ABoolean, AByteString, AData, AList, APair, AString, AUnit, AnInteger), TyConstant (TyBoolean, TyByteString, TyInteger, TyList, TyPair, TyPlutusData, TyString, TyUnit))
+import Covenant.Constant
+  ( AConstant
+      ( ABoolean,
+        AByteString,
+        AData,
+        AList,
+        APair,
+        AString,
+        AUnit,
+        AnInteger
+      ),
+    TyExpr
+      ( TyBoolean,
+        TyByteString,
+        TyInteger,
+        TyList,
+        TyPair,
+        TyPlutusData,
+        TyString,
+        TyUnit
+      ),
+  )
 import Covenant.Internal.ASGNode
   ( ASGNode (App, Lit, Prim),
-    ASGType (TyConstant, TyLam),
+    ASGType (TyExpr, TyLam),
     Id (Id),
     PrimCall (PrimCallOne, PrimCallSix, PrimCallThree, PrimCallTwo),
     Ref,
@@ -88,16 +109,16 @@ data TypeError
       ASGType
       -- | Type of @x@
       ASGType
-  | -- | Tried to call primitive function with a non-constant argument
-    TyErrPrimNotAConstant
+  | -- | Tried to call primitive function with an argument that is not a Plutus expression
+    TyErrPrimArgNotAnExpr
       -- | Type of the given argument
       ASGType
   | -- | Tried to call a primitive function with incorrect arguments
     TyErrPrimArgMismatch
       -- | Types of expected arguments
-      (Vector TyConstant)
+      (Vector TyExpr)
       -- | Types of provided arguments
-      (Vector TyConstant)
+      (Vector TyExpr)
   | -- | Tried to construct where the items have different types.
     TyErrNonHomogenousList
   deriving stock
@@ -120,7 +141,7 @@ runASGBuilder (ASGBuilder m) s =
 -- @since 1.0.0
 lit :: AConstant -> ASGBuilder Id
 lit c = do
-  ty <- TyConstant <$> liftEither (typeLit c)
+  ty <- TyExpr <$> liftEither (typeLit c)
   idOf ty (Lit c)
 
 -- | Construct a primitive function call.
@@ -167,7 +188,7 @@ liftTypeError :: Either TypeError a -> Either ASGBuilderError a
 liftTypeError (Left e) = Left $ ATypeError e
 liftTypeError (Right a) = Right a
 
-typeLit :: AConstant -> Either ASGBuilderError TyConstant
+typeLit :: AConstant -> Either ASGBuilderError TyExpr
 typeLit = \case
   AUnit -> Right TyUnit
   ABoolean _ -> Right TyBoolean
@@ -197,9 +218,9 @@ typeApp tyFun tyArg = case tyFun of
   _ -> Left $ TyErrAppNotALambda tyFun
 
 typePrim :: PrimCall -> Either TypeError ASGType
-typePrim = fmap TyConstant . go
+typePrim = fmap TyExpr . go
   where
-    go :: PrimCall -> Either TypeError TyConstant
+    go :: PrimCall -> Either TypeError TyExpr
     go (PrimCallOne fun arg1) = do
       tyArg1 <- getConstantOrThrow $ typeOfRef arg1
       typeOneArgFunc fun tyArg1
@@ -221,32 +242,32 @@ typePrim = fmap TyConstant . go
       tyArg6 <- getConstantOrThrow $ typeOfRef arg6
       typeSixArgFunc fun tyArg1 tyArg2 tyArg3 tyArg4 tyArg5 tyArg6
 
-    getConstantOrThrow :: ASGType -> Either TypeError TyConstant
-    getConstantOrThrow (TyConstant c) = Right c
-    getConstantOrThrow ty = Left $ TyErrPrimNotAConstant ty
+    getConstantOrThrow :: ASGType -> Either TypeError TyExpr
+    getConstantOrThrow (TyExpr c) = Right c
+    getConstantOrThrow ty = Left $ TyErrPrimArgNotAnExpr ty
 
-typeOneArgFunc :: OneArgFunc -> TyConstant -> Either TypeError TyConstant
+typeOneArgFunc :: OneArgFunc -> TyExpr -> Either TypeError TyExpr
 typeOneArgFunc fun tyArg1 =
   let (tyParam1, tyRes) = typeOfOneArgFunc fun
    in if tyParam1 == tyArg1
         then Right tyRes
         else Left $ TyErrPrimArgMismatch (Vector.fromList [tyParam1]) (Vector.fromList [tyArg1])
 
-typeTwoArgFunc :: TwoArgFunc -> TyConstant -> TyConstant -> Either TypeError TyConstant
+typeTwoArgFunc :: TwoArgFunc -> TyExpr -> TyExpr -> Either TypeError TyExpr
 typeTwoArgFunc fun tyArg1 tyArg2 =
   let (tyParam1, tyParam2, tyRes) = typeOfTwoArgFunc fun
    in if (tyParam1, tyParam2) == (tyArg1, tyArg2)
         then Right tyRes
         else Left $ TyErrPrimArgMismatch (Vector.fromList [tyParam1, tyParam2]) (Vector.fromList [tyArg1, tyArg2])
 
-typeThreeArgFunc :: ThreeArgFunc -> TyConstant -> TyConstant -> TyConstant -> Either TypeError TyConstant
+typeThreeArgFunc :: ThreeArgFunc -> TyExpr -> TyExpr -> TyExpr -> Either TypeError TyExpr
 typeThreeArgFunc fun tyArg1 tyArg2 tyArg3 =
   let (tyParam1, tyParam2, tyParam3, tyRes) = typeOfThreeArgFunc fun
    in if (tyParam1, tyParam2, tyParam3) == (tyArg1, tyArg2, tyArg3)
         then Right tyRes
         else Left $ TyErrPrimArgMismatch (Vector.fromList [tyParam1, tyParam2, tyParam3]) (Vector.fromList [tyArg1, tyArg2, tyArg3])
 
-typeSixArgFunc :: SixArgFunc -> TyConstant -> TyConstant -> TyConstant -> TyConstant -> TyConstant -> TyConstant -> Either TypeError TyConstant
+typeSixArgFunc :: SixArgFunc -> TyExpr -> TyExpr -> TyExpr -> TyExpr -> TyExpr -> TyExpr -> Either TypeError TyExpr
 typeSixArgFunc fun tyArg1 tyArg2 tyArg3 tyArg4 tyArg5 tyArg6 =
   let (tyParam1, tyParam2, tyParam3, tyParam4, tyParam5, tyParam6, tyRes) = typeOfSixArgFunc fun
    in if (tyParam1, tyParam2, tyParam3, tyParam4, tyParam5, tyParam6) == (tyArg1, tyArg2, tyArg3, tyArg4, tyArg5, tyArg6)

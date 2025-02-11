@@ -13,7 +13,7 @@ module Covenant.Internal.ASGNode
   )
 where
 
-import Covenant.Constant (AConstant, TyConstant)
+import Covenant.Constant (AConstant, TyExpr)
 import Covenant.Prim (OneArgFunc, SixArgFunc, ThreeArgFunc, TwoArgFunc)
 import Data.Word (Word64)
 
@@ -113,7 +113,7 @@ data ASGNode
 --
 -- @since 1.0.0
 data ASGType
-  = TyConstant TyConstant
+  = TyExpr TyExpr
   | TyLam ASGType ASGType -- TyLam ArgType ResType
   deriving stock
     ( -- | @since 1.0.0
