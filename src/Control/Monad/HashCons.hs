@@ -145,6 +145,6 @@ instance (MonadHashCons r e m) => MonadHashCons r e (RWST r' w s m) where
   refTo e = lift (refTo e)
 
 -- | @since 1.0.0
-instance (MonadHashCons r e m) => MonadHashCons r e (ExceptT e m) where
+instance (MonadHashCons r e m) => MonadHashCons r e (ExceptT e' m) where
   {-# INLINEABLE refTo #-}
   refTo e = lift (refTo e)
