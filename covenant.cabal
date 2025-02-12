@@ -85,6 +85,7 @@ library
     Control.Monad.HashCons
     Covenant.ASG
     Covenant.Constant
+    Covenant.Ledger
     Covenant.Prim
 
   other-modules:

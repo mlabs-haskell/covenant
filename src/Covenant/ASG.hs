@@ -24,7 +24,7 @@ module Covenant.ASG
     Bound,
     Ref (..),
     PrimCall (..),
-    ASGNode (Lit, Lam, Prim, App, Let),
+    ASGNode (Lit, Lam, Prim, App, Let, LedgerAccess, LedgerDestruct),
     Scope,
     ASG,
     ASGNeighbourhood,
@@ -43,6 +43,8 @@ module Covenant.ASG
     app,
     lam,
     letBind,
+    ledgerAccess,
+    ledgerDestruct,
 
     -- ** Compile
     compileASG,
@@ -91,7 +93,15 @@ import Covenant.Internal.ASG
     viewASGZipper,
   )
 import Covenant.Internal.ASGNode
-  ( ASGNode (AppInternal, LamInternal, LetInternal, LitInternal, PrimInternal),
+  ( ASGNode
+      ( AppInternal,
+        LamInternal,
+        LedgerAccessInternal,
+        LedgerDestructInternal,
+        LetInternal,
+        LitInternal,
+        PrimInternal
+      ),
     Arg (Arg),
     Bound (Bound),
     Id,
@@ -99,10 +109,13 @@ import Covenant.Internal.ASGNode
     Ref (ABound, AnArg, AnId),
     pattern App,
     pattern Lam,
+    pattern LedgerAccess,
+    pattern LedgerDestruct,
     pattern Let,
     pattern Lit,
     pattern Prim,
   )
+import Covenant.Ledger (LedgerAccessor, LedgerDestructor)
 import Data.Kind (Type)
 import Data.Monoid (Endo (Endo))
 import Data.Proxy (Proxy (Proxy))
@@ -242,6 +255,31 @@ letBind ::
 letBind Scope r f = do
   res <- f Scope
   refTo . LetInternal r $ res
+
+-- | Construct a ledger type accessor.
+--
+-- @since 1.0.0
+ledgerAccess ::
+  forall (m :: Type -> Type).
+  (MonadHashCons Id ASGNode m) =>
+  LedgerAccessor ->
+  Ref ->
+  m Id
+ledgerAccess acc = refTo . LedgerAccessInternal acc
+
+-- | Construct a ledger sum type destructor. The first 'Ref' must be a
+-- function suitable for destructuring the second 'Ref', though we do not
+-- currently check this.
+--
+-- @since 1.0.0
+ledgerDestruct ::
+  forall (m :: Type -> Type).
+  (MonadHashCons Id ASGNode m) =>
+  LedgerDestructor ->
+  Ref ->
+  Ref ->
+  m Id
+ledgerDestruct d rFun = refTo . LedgerDestructInternal d rFun
 
 -- | The possible moves in the 'ASGZipper' wrapper monad. These need to be
 -- wrapped in 'ASGMoves' to make them usable with the update monad

@@ -12,11 +12,14 @@ module Covenant.Internal.ASGNode
     pattern Lam,
     pattern Let,
     pattern App,
+    pattern LedgerAccess,
+    pattern LedgerDestruct,
     childIds,
   )
 where
 
 import Covenant.Constant (AConstant)
+import Covenant.Ledger (LedgerAccessor, LedgerDestructor)
 import Covenant.Prim (OneArgFunc, SixArgFunc, ThreeArgFunc, TwoArgFunc)
 import Data.Maybe (mapMaybe)
 import Data.Word (Word64)
@@ -124,6 +127,8 @@ data ASGNode
   | LamInternal Ref
   | LetInternal Ref Ref
   | AppInternal Ref Ref
+  | LedgerAccessInternal LedgerAccessor Ref
+  | LedgerDestructInternal LedgerDestructor Ref Ref
   deriving stock
     ( -- | @since 1.0.0
       Eq,
@@ -165,7 +170,20 @@ pattern Let rBind rBody <- LetInternal rBind rBody
 pattern App :: Ref -> Ref -> ASGNode
 pattern App rFun rArg <- AppInternal rFun rArg
 
-{-# COMPLETE Lit, Prim, Lam, Let, App #-}
+-- | An accessor for a ledger type.
+--
+-- @since 1.0.0
+pattern LedgerAccess :: LedgerAccessor -> Ref -> ASGNode
+pattern LedgerAccess acc rArg <- LedgerAccessInternal acc rArg
+
+-- | A destructor for a ledger sum. The first 'Ref' is for a destructor
+-- function, while the second is the argument to be destructured.
+--
+-- @since 1.0.0
+pattern LedgerDestruct :: LedgerDestructor -> Ref -> Ref -> ASGNode
+pattern LedgerDestruct d rDest rArg <- LedgerDestructInternal d rDest rArg
+
+{-# COMPLETE Lit, Prim, Lam, Let, App, LedgerAccess, LedgerDestruct #-}
 
 -- | @since 1.0.0
 childIds :: ASGNode -> [Id]
@@ -179,6 +197,8 @@ childIds = \case
   LamInternal r1 -> mapMaybe refToId [r1]
   LetInternal r1 r2 -> mapMaybe refToId [r1, r2]
   AppInternal r1 r2 -> mapMaybe refToId [r1, r2]
+  LedgerAccessInternal _ r1 -> mapMaybe refToId [r1]
+  LedgerDestructInternal _ r1 r2 -> mapMaybe refToId [r1, r2]
 
 -- Helpers
 
