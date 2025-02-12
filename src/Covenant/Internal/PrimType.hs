@@ -21,7 +21,7 @@ import Covenant.Constant
         TyUnit
       ),
   )
-import Covenant.Internal.ASGNode (ASGType (ATyExpr, ATyLam), TyLam (TyLam))
+import Covenant.Internal.ASGNode (TyASGNode (ATyExpr, ATyLam), TyLam (TyLam))
 import Covenant.Prim
   ( OneArgFunc
       ( BData,
@@ -69,7 +69,7 @@ import Covenant.Prim
 -- Returns a tuple of (arg type, result type).
 --
 -- @since 1.0.0
-typeOfOneArgFunc :: OneArgFunc -> (ASGType, ASGType)
+typeOfOneArgFunc :: OneArgFunc -> (TyASGNode, TyASGNode)
 typeOfOneArgFunc =
   liftTy <$> \case
     LengthOfByteString -> (TyByteString, TyInteger)
@@ -108,14 +108,14 @@ typeOfOneArgFunc =
     FindFirstSetBit -> (TyByteString, TyInteger)
     Ripemd_160 -> (TyByteString, TyByteString)
   where
-    liftTy :: (TyExpr, TyExpr) -> (ASGType, ASGType)
+    liftTy :: (TyExpr, TyExpr) -> (TyASGNode, TyASGNode)
     liftTy (t1, t2) = (ATyExpr t1, ATyExpr t2)
 
 -- | Maps two-argument functions to their input and output types.
 -- Returns a tuple of (arg1 type, arg2 type, return type).
 --
 -- @since 1.0.0
-typeOfTwoArgFunc :: TwoArgFunc -> (ASGType, ASGType, ASGType)
+typeOfTwoArgFunc :: TwoArgFunc -> (TyASGNode, TyASGNode, TyASGNode)
 typeOfTwoArgFunc =
   liftTy <$> \case
     AddInteger -> (TyInteger, TyInteger, TyInteger)
@@ -159,14 +159,14 @@ typeOfTwoArgFunc =
     ShiftByteString -> (TyByteString, TyInteger, TyByteString)
     RotateByteString -> (TyByteString, TyInteger, TyByteString)
   where
-    liftTy :: (TyExpr, TyExpr, TyExpr) -> (ASGType, ASGType, ASGType)
+    liftTy :: (TyExpr, TyExpr, TyExpr) -> (TyASGNode, TyASGNode, TyASGNode)
     liftTy (t1, t2, t3) = (ATyExpr t1, ATyExpr t2, ATyExpr t3)
 
 -- | Maps three-argument functions to their input and output types.
 -- Returns a tuple of (arg1 type, arg2 type, arg3 type, return type).
 --
 -- @since 1.0.0
-typeOfThreeArgFunc :: ThreeArgFunc -> (ASGType, ASGType, ASGType, ASGType)
+typeOfThreeArgFunc :: ThreeArgFunc -> (TyASGNode, TyASGNode, TyASGNode, TyASGNode)
 typeOfThreeArgFunc =
   liftTy <$> \case
     VerifyEd25519Signature -> (TyByteString, TyByteString, TyByteString, TyBoolean)
@@ -182,14 +182,14 @@ typeOfThreeArgFunc =
     WriteBits -> (TyByteString, TyList TyInteger, TyBoolean, TyByteString)
     ExpModInteger -> (TyInteger, TyInteger, TyInteger, TyInteger)
   where
-    liftTy :: (TyExpr, TyExpr, TyExpr, TyExpr) -> (ASGType, ASGType, ASGType, ASGType)
+    liftTy :: (TyExpr, TyExpr, TyExpr, TyExpr) -> (TyASGNode, TyASGNode, TyASGNode, TyASGNode)
     liftTy (t1, t2, t3, t4) = (ATyExpr t1, ATyExpr t2, ATyExpr t3, ATyExpr t4)
 
 -- | Maps six-argument functions to their input and output types.
 -- Returns a tuple of (arg1 type, arg2 type, arg3 type, .. arg6 type, return type).
 --
 -- @since 1.0.0
-typeOfSixArgFunc :: SixArgFunc -> (ASGType, ASGType, ASGType, ASGType, ASGType, ASGType, ASGType)
+typeOfSixArgFunc :: SixArgFunc -> (TyASGNode, TyASGNode, TyASGNode, TyASGNode, TyASGNode, TyASGNode, TyASGNode)
 typeOfSixArgFunc = \case
   ChooseData ->
     ( ATyExpr TyPlutusData,

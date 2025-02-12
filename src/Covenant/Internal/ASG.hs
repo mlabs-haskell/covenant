@@ -23,7 +23,7 @@ import Control.Monad.Except (ExceptT, MonadError, runExceptT)
 import Control.Monad.HashCons (HashConsT, MonadHashCons, runHashConsT)
 import Control.Monad.Identity (Identity (runIdentity))
 import Control.Monad.Reader (ReaderT, ask, runReaderT)
-import Covenant.Internal.ASGNode (ASGNode, ASGType, Id, childIds)
+import Covenant.Internal.ASGNode (ASGNode, Id, TyASGNode, childIds)
 import Data.Bimap (Bimap)
 import Data.Bimap qualified as Bimap
 import Data.EnumMap.Strict (EnumMap)
@@ -90,19 +90,19 @@ data TypeError
   = -- | Tried to apply a value @f@ to @x@, but @f@ was not a lambda.
     TyErrAppNotALambda
       -- | Type of @f@.
-      ASGType
+      TyASGNode
   | -- | Tried to apply a value @f@ to @x@, but @x@ was not of the expected type.
     TyErrAppArgMismatch
       -- | Expected type
-      ASGType
+      TyASGNode
       -- | Type of @x@
-      ASGType
+      TyASGNode
   | -- | Tried to call a primitive function with incorrect arguments
     TyErrPrimArgMismatch
       -- | Types of expected arguments
-      (Vector ASGType)
+      (Vector TyASGNode)
       -- | Types of provided arguments
-      (Vector ASGType)
+      (Vector TyASGNode)
   | -- | Tried to construct where the items have different types.
     TyErrNonHomogenousList
   deriving stock

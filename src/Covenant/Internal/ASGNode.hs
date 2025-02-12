@@ -7,7 +7,7 @@ module Covenant.Internal.ASGNode
     Ref (..),
     PrimCall (..),
     ASGNode (..),
-    ASGType (..),
+    TyASGNode (..),
     TyLam (..),
     pattern Lit,
     pattern Prim,
@@ -55,7 +55,7 @@ newtype Id = Id Word64
 -- | An argument passed to a function in a Covenant program.
 --
 -- @since 1.0.0
-data Arg = Arg Word64 ASGType
+data Arg = Arg Word64 TyASGNode
   deriving stock
     ( -- | @since 1.0.0
       Eq,
@@ -68,7 +68,7 @@ data Arg = Arg Word64 ASGType
 -- | A @let@-bound variable in a Covenant program.
 --
 -- @since 1.0.0
-data Bound = Bound Word64 ASGType
+data Bound = Bound Word64 TyASGNode
   deriving stock
     ( -- | @since 1.0.0
       Eq,
@@ -123,10 +123,10 @@ data PrimCall
 -- @since 1.0.0
 data ASGNode
   = LitInternal TyExpr AConstant
-  | PrimInternal ASGType PrimCall
+  | PrimInternal TyASGNode PrimCall
   | LamInternal TyLam Ref
-  | LetInternal ASGType Ref Ref
-  | AppInternal ASGType Ref Ref
+  | LetInternal TyASGNode Ref Ref
+  | AppInternal TyASGNode Ref Ref
   | LedgerAccessInternal LedgerAccessor Ref
   | LedgerDestructInternal LedgerDestructor Ref Ref
   deriving stock
@@ -147,7 +147,7 @@ pattern Lit ty c <- LitInternal ty c
 -- | A call to a Plutus builtin.
 --
 -- @since 1.0.0
-pattern Prim :: ASGType -> PrimCall -> ASGNode
+pattern Prim :: TyASGNode -> PrimCall -> ASGNode
 pattern Prim ty p <- PrimInternal ty p
 
 -- | A lambda abstraction: the node contents are its body.
@@ -160,14 +160,14 @@ pattern Lam ty r <- LamInternal ty r
 -- body the binding is used in.
 --
 -- @since 1.0.0
-pattern Let :: ASGType -> Ref -> Ref -> ASGNode
+pattern Let :: TyASGNode -> Ref -> Ref -> ASGNode
 pattern Let ty rBind rBody <- LetInternal ty rBind rBody
 
 -- | A function application. The first 'Ref' is the function expression, while
 -- the second is the argument to be applied.
 --
 -- @since 1.0.0
-pattern App :: ASGType -> Ref -> Ref -> ASGNode
+pattern App :: TyASGNode -> Ref -> Ref -> ASGNode
 pattern App ty rFun rArg <- AppInternal ty rFun rArg
 
 -- | An accessor for a ledger type.
@@ -188,7 +188,7 @@ pattern LedgerDestruct d rDest rArg <- LedgerDestructInternal d rDest rArg
 -- | The type of an @ASGNode@.
 --
 -- @since 1.0.0
-data ASGType
+data TyASGNode
   = ATyExpr TyExpr
   | ATyLam TyLam
   deriving stock
@@ -206,9 +206,9 @@ data ASGType
 data TyLam
   = TyLam
       -- | argument type
-      ASGType
+      TyASGNode
       -- | return type
-      ASGType
+      TyASGNode
   deriving stock
     ( -- | @since 1.0.0
       Eq,
@@ -240,13 +240,13 @@ refToId = \case
   AnId i -> pure i
   _ -> Nothing
 
-typeOfRef :: forall (m :: Type -> Type). (Monad m) => Ref -> HashConsT Id ASGNode m ASGType
+typeOfRef :: forall (m :: Type -> Type). (Monad m) => Ref -> HashConsT Id ASGNode m TyASGNode
 typeOfRef = \case
   AnId anId -> typeOfNode <$> lookupRef anId
   AnArg (Arg _ ty) -> pure ty
   ABound (Bound _ ty) -> pure ty
 
-typeOfNode :: ASGNode -> ASGType
+typeOfNode :: ASGNode -> TyASGNode
 typeOfNode = \case
   LitInternal ty _ -> ATyExpr ty
   PrimInternal ty _ -> ty

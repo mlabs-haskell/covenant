@@ -108,12 +108,12 @@ import Covenant.Internal.ASGNode
         LitInternal,
         PrimInternal
       ),
-    ASGType (ATyLam),
     Arg (Arg),
     Bound (Bound),
     Id,
     PrimCall (PrimCallOne, PrimCallSix, PrimCallThree, PrimCallTwo),
     Ref (ABound, AnArg, AnId),
+    TyASGNode (ATyLam),
     TyLam (TyLam),
     typeOfRef,
     pattern App,
@@ -141,7 +141,7 @@ import Numeric.Natural (Natural)
 -- bindings (each with a bound variable we can refer to.
 --
 -- @since 1.0.0
-data Scope (args :: Natural) (lets :: Natural) = Scope (Vector ASGType) (Vector ASGType)
+data Scope (args :: Natural) (lets :: Natural) = Scope (Vector TyASGNode) (Vector TyASGNode)
   deriving stock
     ( -- | @since 1.0.0
       Eq,
@@ -242,7 +242,7 @@ bound (Scope _ lets) =
 lam ::
   forall (args :: Natural) (binds :: Natural).
   -- | The type of the lambda argument
-  ASGType ->
+  TyASGNode ->
   Scope args binds ->
   (Scope (args + 1) binds -> ASGCompiler Ref) ->
   ASGCompiler Id
@@ -271,7 +271,7 @@ lam argTy scope f = do
 letBind ::
   forall (args :: Natural) (binds :: Natural).
   -- | The type of the let binding
-  ASGType ->
+  TyASGNode ->
   Scope args binds ->
   Ref ->
   (Scope args (binds + 1) -> ASGCompiler Ref) ->
@@ -285,7 +285,7 @@ letBind letTy scope r f = do
 
 pushArgToScope ::
   forall (n :: Natural) (m :: Natural).
-  ASGType ->
+  TyASGNode ->
   Scope n m ->
   Scope (n + 1) m
 pushArgToScope ty (Scope args lets) =
@@ -293,7 +293,7 @@ pushArgToScope ty (Scope args lets) =
 
 pushLetToScope ::
   forall (n :: Natural) (m :: Natural).
-  ASGType ->
+  TyASGNode ->
   Scope n m ->
   Scope n (m + 1)
 pushLetToScope ty (Scope args lets) =
@@ -329,7 +329,7 @@ typeLit = \case
     pure $ TyList ty
   AData _ -> pure TyPlutusData
 
-typeApp :: ASGType -> ASGType -> Either TypeError ASGType
+typeApp :: TyASGNode -> TyASGNode -> Either TypeError TyASGNode
 typeApp tyFun tyArg = case tyFun of
   ATyLam (TyLam tyParam tyRes) ->
     if tyParam == tyArg
@@ -337,7 +337,7 @@ typeApp tyFun tyArg = case tyFun of
       else Left $ TyErrAppArgMismatch tyParam tyArg
   _ -> Left $ TyErrAppNotALambda tyFun
 
-typePrim :: PrimCall -> ASGCompiler ASGType
+typePrim :: PrimCall -> ASGCompiler TyASGNode
 typePrim p = case p of
   (PrimCallOne fun arg1) -> do
     ty <- ASGCompiler <$> lift $ typeOfRef arg1
@@ -360,28 +360,28 @@ typePrim p = case p of
     ty6 <- ASGCompiler <$> lift $ typeOfRef arg6
     liftTypeError $ typeSixArgFunc fun ty1 ty2 ty3 ty4 ty5 ty6
 
-typeOneArgFunc :: OneArgFunc -> ASGType -> Either TypeError ASGType
+typeOneArgFunc :: OneArgFunc -> TyASGNode -> Either TypeError TyASGNode
 typeOneArgFunc fun tyArg1 =
   let (tyParam1, tyRes) = typeOfOneArgFunc fun
    in if tyParam1 == tyArg1
         then Right tyRes
         else Left $ TyErrPrimArgMismatch (Vector.fromList [tyParam1]) (Vector.fromList [tyArg1])
 
-typeTwoArgFunc :: TwoArgFunc -> ASGType -> ASGType -> Either TypeError ASGType
+typeTwoArgFunc :: TwoArgFunc -> TyASGNode -> TyASGNode -> Either TypeError TyASGNode
 typeTwoArgFunc fun tyArg1 tyArg2 =
   let (tyParam1, tyParam2, tyRes) = typeOfTwoArgFunc fun
    in if (tyParam1, tyParam2) == (tyArg1, tyArg2)
         then Right tyRes
         else Left $ TyErrPrimArgMismatch (Vector.fromList [tyParam1, tyParam2]) (Vector.fromList [tyArg1, tyArg2])
 
-typeThreeArgFunc :: ThreeArgFunc -> ASGType -> ASGType -> ASGType -> Either TypeError ASGType
+typeThreeArgFunc :: ThreeArgFunc -> TyASGNode -> TyASGNode -> TyASGNode -> Either TypeError TyASGNode
 typeThreeArgFunc fun tyArg1 tyArg2 tyArg3 =
   let (tyParam1, tyParam2, tyParam3, tyRes) = typeOfThreeArgFunc fun
    in if (tyParam1, tyParam2, tyParam3) == (tyArg1, tyArg2, tyArg3)
         then Right tyRes
         else Left $ TyErrPrimArgMismatch (Vector.fromList [tyParam1, tyParam2, tyParam3]) (Vector.fromList [tyArg1, tyArg2, tyArg3])
 
-typeSixArgFunc :: SixArgFunc -> ASGType -> ASGType -> ASGType -> ASGType -> ASGType -> ASGType -> Either TypeError ASGType
+typeSixArgFunc :: SixArgFunc -> TyASGNode -> TyASGNode -> TyASGNode -> TyASGNode -> TyASGNode -> TyASGNode -> Either TypeError TyASGNode
 typeSixArgFunc fun tyArg1 tyArg2 tyArg3 tyArg4 tyArg5 tyArg6 =
   let (tyParam1, tyParam2, tyParam3, tyParam4, tyParam5, tyParam6, tyRes) = typeOfSixArgFunc fun
    in if (tyParam1, tyParam2, tyParam3, tyParam4, tyParam5, tyParam6) == (tyArg1, tyArg2, tyArg3, tyArg4, tyArg5, tyArg6)
