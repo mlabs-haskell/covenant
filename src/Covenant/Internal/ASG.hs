@@ -1,5 +1,8 @@
 module Covenant.Internal.ASG
   ( ASG (..),
+    ASGCompiler (..),
+    ASGCompileError (..),
+    TypeError (..),
     ASGNeighbourhood (..),
     ASGZipper (..),
     openASGZipper,
@@ -12,18 +15,23 @@ module Covenant.Internal.ASG
     asgnLeft,
     asgnRight,
     compileASG,
+    runASGCompiler,
   )
 where
 
-import Control.Monad.HashCons (HashConsT, runHashConsT)
+import Control.Monad.Except (ExceptT, MonadError, runExceptT)
+import Control.Monad.HashCons (HashConsT, MonadHashCons, runHashConsT)
+import Control.Monad.Identity (Identity (runIdentity))
 import Control.Monad.Reader (ReaderT, ask, runReaderT)
-import Covenant.Internal.ASGNode (ASGNode, Id, childIds)
+import Covenant.Internal.ASGNode (ASGNode, ASGType, Id, childIds)
 import Data.Bimap (Bimap)
 import Data.Bimap qualified as Bimap
 import Data.EnumMap.Strict (EnumMap)
 import Data.EnumMap.Strict qualified as EnumMap
 import Data.Foldable (traverse_)
 import Data.Kind (Type)
+import Data.Maybe (fromJust)
+import Data.Vector (Vector)
 import Optics.Fold (A_Fold, foldVL)
 import Optics.Getter (A_Getter, to)
 import Optics.Label (LabelOptic (labelOptic))
@@ -44,6 +52,74 @@ data ASG
       Show
     )
 
+-- | A helper monad for building up Covenant programs. In particular, this
+-- enables hash consing.
+--
+-- @since 1.0.0
+newtype ASGCompiler (a :: Type) = ASGCompiler (ExceptT ASGCompileError (HashConsT Id ASGNode Identity) a)
+  deriving
+    ( -- | @since 1.0.0
+      Functor,
+      -- | @since 1.0.0
+      Applicative,
+      -- | @since 1.0.0
+      Monad,
+      -- | @since 1.0.0
+      MonadError ASGCompileError,
+      -- | @since 1.0.0
+      MonadHashCons Id ASGNode
+    )
+    via (ExceptT ASGCompileError (HashConsT Id ASGNode Identity))
+
+-- | The errors that can occur during the construction of an ASG
+--
+-- @since 1.0.0
+newtype ASGCompileError = ATypeError TypeError
+  deriving
+    ( -- | @since 1.0.0
+      Eq,
+      -- | @since 1.0.0
+      Show
+    )
+    via TypeError
+
+-- | The errors that come up while resolving types.
+--
+-- @since 1.0.0
+data TypeError
+  = -- | Tried to apply a value @f@ to @x@, but @f@ was not a lambda.
+    TyErrAppNotALambda
+      -- | Type of @f@.
+      ASGType
+  | -- | Tried to apply a value @f@ to @x@, but @x@ was not of the expected type.
+    TyErrAppArgMismatch
+      -- | Expected type
+      ASGType
+      -- | Type of @x@
+      ASGType
+  | -- | Tried to call a primitive function with incorrect arguments
+    TyErrPrimArgMismatch
+      -- | Types of expected arguments
+      (Vector ASGType)
+      -- | Types of provided arguments
+      (Vector ASGType)
+  | -- | Tried to construct where the items have different types.
+    TyErrNonHomogenousList
+  deriving stock
+    ( -- | @since 1.0.0
+      Eq,
+      -- | @since 1.0.0
+      Show
+    )
+
+-- | Run a computation in the ASGCompiler monad
+--
+-- @since 1.0.0
+runASGCompiler :: ASGCompiler a -> (Either ASGCompileError a, Bimap Id ASGNode)
+runASGCompiler (ASGCompiler m) =
+  let hashConsM = runExceptT m
+   in runIdentity $ runHashConsT hashConsM
+
 -- | Given a hash consing computation associating 'Id's with 'ASGNode's
 -- producing a \'top-level\' computation 'Id', transform it into an 'ASG'.
 --
@@ -57,20 +133,24 @@ data ASG
 compileASG ::
   forall (m :: Type -> Type).
   (Monad m) =>
-  HashConsT Id ASGNode m Id ->
-  m (Maybe ASG)
-compileASG comp = do
-  (start, binds) <- runHashConsT comp
-  pure $ do
-    u <- Bimap.lookup start binds
-    built <- runReaderT (go start u) binds
-    pure . ASG start $ built
+  ASGCompiler Id ->
+  m (Either ASGCompileError ASG)
+compileASG comp =
+  pure
+    ( do
+        let (startOrErr, binds) = runASGCompiler comp
+        start <- startOrErr
+        pure $ fromJust $ do
+          u <- Bimap.lookup start binds
+          built <- runReaderT (go start u) binds
+          pure . ASG start $ built
+    )
   where
     -- Note (Koz, 04/02/2025): We rely on the monoidal behaviour of `EnumMap`
     -- for accumulation here, instead of carrying around an explicit
     -- accumulator. This is normally a bit risky, as the default behaviour of
     -- `<>` on `Map`s of any flavour throws away values on key collisions.
-    -- However, we know that `ASGBuilder` uses a `Bimap`, thus making key
+    -- However, we know that `ASGCompiler` uses a `Bimap`, thus making key
     -- collisions impossible; therefore, we can use `<>` without concern.
     go :: Id -> ASGNode -> ReaderT (Bimap Id ASGNode) Maybe (EnumMap Id ASGNode)
     go currId currNode = do
