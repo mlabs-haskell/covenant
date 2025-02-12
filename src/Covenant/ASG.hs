@@ -81,7 +81,7 @@ import Control.Monad.Action
 import Control.Monad.Error.Class (liftEither)
 import Control.Monad.HashCons (MonadHashCons (refTo))
 import Control.Monad.Trans (MonadTrans (lift))
-import Covenant.Constant (AConstant (ABoolean, AByteString, AData, AList, APair, AString, AUnit, AnInteger), TyExpr (TyBoolean, TyByteString, TyInteger, TyList, TyPair, TyPlutusData, TyString, TyUnit))
+import Covenant.Constant (AConstant (ABoolean, AByteString, AData, AList, APair, AString, AUnit, AnInteger))
 import Covenant.Internal.ASG
   ( ASG,
     ASGCompileError (ATypeError),
@@ -125,6 +125,18 @@ import Covenant.Internal.ASGNode
     pattern Prim,
   )
 import Covenant.Internal.PrimType (typeOfOneArgFunc, typeOfSixArgFunc, typeOfThreeArgFunc, typeOfTwoArgFunc)
+import Covenant.Internal.TyExpr
+  ( TyExpr
+      ( TyBoolean,
+        TyByteString,
+        TyInteger,
+        TyList,
+        TyPair,
+        TyPlutusData,
+        TyString,
+        TyUnit
+      ),
+  )
 import Covenant.Ledger (LedgerAccessor, LedgerDestructor)
 import Covenant.Prim (OneArgFunc, SixArgFunc, ThreeArgFunc, TwoArgFunc)
 import Data.Foldable (traverse_)

@@ -23,7 +23,8 @@ module Covenant.Internal.ASGNode
 where
 
 import Control.Monad.HashCons (HashConsT, lookupRef)
-import Covenant.Constant (AConstant, TyExpr)
+import Covenant.Constant (AConstant)
+import Covenant.Internal.TyExpr (TyExpr)
 import Covenant.Ledger (LedgerAccessor, LedgerDestructor)
 import Covenant.Prim (OneArgFunc, SixArgFunc, ThreeArgFunc, TwoArgFunc)
 import Data.Kind (Type)

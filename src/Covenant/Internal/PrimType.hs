@@ -6,7 +6,8 @@ module Covenant.Internal.PrimType
   )
 where
 
-import Covenant.Constant
+import Covenant.Internal.ASGNode (TyASGNode (ATyExpr, ATyLam), TyLam (TyLam))
+import Covenant.Internal.TyExpr
   ( TyExpr
       ( TyBLS12_381G1Element,
         TyBLS12_381G2Element,
@@ -21,7 +22,6 @@ import Covenant.Constant
         TyUnit
       ),
   )
-import Covenant.Internal.ASGNode (TyASGNode (ATyExpr, ATyLam), TyLam (TyLam))
 import Covenant.Prim
   ( OneArgFunc
       ( BData,

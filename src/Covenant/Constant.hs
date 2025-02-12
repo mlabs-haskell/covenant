@@ -11,10 +11,10 @@ module Covenant.Constant
   ( -- * Types
     AConstant (..),
     PlutusData (..),
-    TyExpr (..),
   )
 where
 
+import Covenant.Internal.TyExpr (TyExpr)
 import Data.ByteString (ByteString)
 import Data.Text (Text)
 import Data.Vector (Vector)
@@ -45,30 +45,6 @@ data PlutusData
   | PlutusList (Vector PlutusData)
   | PlutusI Integer
   | PlutusB ByteString
-  deriving stock
-    ( -- | @since 1.0.0
-      Eq,
-      -- | @since 1.0.0
-      Ord,
-      -- | @since 1.0.0
-      Show
-    )
-
--- | The type of Plutus expressions.
---
--- @since 1.0.0
-data TyExpr
-  = TyUnit
-  | TyBoolean
-  | TyInteger
-  | TyByteString
-  | TyString
-  | TyPair TyExpr TyExpr
-  | TyList TyExpr
-  | TyPlutusData
-  | TyBLS12_381G1Element
-  | TyBLS12_381G2Element
-  | TyBLS12_381PairingMLResult
   deriving stock
     ( -- | @since 1.0.0
       Eq,
@@ -184,34 +160,3 @@ instance Arbitrary AConstant where
     APair x y -> (APair x <$> shrink y) <> (APair <$> shrink x <*> pure y)
     AList ty v -> AList ty <$> shrink v
     AData dat -> AData <$> shrink dat
-
--- | @since 1.0.0
-instance Arbitrary TyExpr where
-  {-# INLINEABLE arbitrary #-}
-  arbitrary = sized go
-    where
-      go :: Int -> Gen TyExpr
-      go size
-        | size <= 0 =
-            oneof
-              [ pure TyUnit,
-                pure TyBoolean,
-                pure TyInteger,
-                pure TyByteString,
-                pure TyString,
-                pure TyPlutusData
-              ]
-        | otherwise =
-            oneof
-              [ pure TyUnit,
-                pure TyBoolean,
-                pure TyInteger,
-                pure TyByteString,
-                pure TyString,
-                pure TyPlutusData,
-                do
-                  a <- go (size `quot` 2)
-                  b <- go (size `quot` 2)
-                  pure $ TyPair a b,
-                TyList <$> go (size - 1)
-              ]
