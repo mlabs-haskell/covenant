@@ -31,7 +31,6 @@ import Control.Monad.Trans.Writer.CPS (WriterT)
 import Data.Bimap (Bimap)
 import Data.Bimap qualified as Bimap
 import Data.Kind (Type)
-import Data.Maybe (fromJust)
 
 -- | A transformer implementing hash consing capabilities, with references of
 -- type @r@ and referents of type @e@. It is assumed that values of type @e@
@@ -101,12 +100,8 @@ lookupRef_ ::
   forall (r :: Type) (e :: Type) (m :: Type -> Type).
   (Monad m, Ord e, Ord r) =>
   r ->
-  HashConsT r e m e
-lookupRef_ r =
-  HashConsT
-    ( -- This shouldn't fail, as long as users of HashConsT don't construct @r@ out of thin air
-      fromJust . Bimap.lookup r <$> get
-    )
+  HashConsT r e m (Maybe e)
+lookupRef_ r = HashConsT (Bimap.lookup r <$> get)
 
 -- | An @mtl@-style capability type class for hash consing capability, using
 -- references of type @r@ and values of type @e@.
@@ -117,7 +112,7 @@ lookupRef_ r =
 -- 2. @'liftA2' (/=) ('refTo' x) ('refTo' y)@ @=@
 --    @'liftA2' \\(idX idX -> (x '/=' y) '==' (idX '/=' idY)) ('refTo' x)
 --    ('refTo' y)@
--- 3. @'refTo' x '>>=' 'lookupRef'@ @=@ @'pure' x@
+-- 3. @'refTo' x '>>=' 'lookupRef'@ @=@ @'pure' (Just x)@
 --
 -- @since 1.0.0
 class
@@ -134,7 +129,7 @@ class
   -- | Given a value of type @r@, fetch the cached value of type @e@.
   --
   -- @since 1.0.0
-  lookupRef :: r -> m e
+  lookupRef :: r -> m (Maybe e)
 
 -- | @since 1.0.0
 instance (Ord r, Ord e, Bounded r, Enum r, Monad m) => MonadHashCons r e (HashConsT r e m) where

@@ -28,7 +28,7 @@ import Covenant.Internal.TyExpr (TyExpr)
 import Covenant.Ledger (LedgerAccessor, LedgerDestructor)
 import Covenant.Prim (OneArgFunc, SixArgFunc, ThreeArgFunc, TwoArgFunc)
 import Data.Kind (Type)
-import Data.Maybe (mapMaybe)
+import Data.Maybe (fromJust, mapMaybe)
 import Data.Word (Word64)
 
 -- | A unique identifier for a node in a Covenant program.
@@ -243,7 +243,12 @@ refToId = \case
 
 typeOfRef :: forall (m :: Type -> Type). (MonadHashCons Id ASGNode m) => Ref -> m TyASGNode
 typeOfRef = \case
-  AnId anId -> typeOfNode <$> lookupRef anId
+  AnId anId ->
+    typeOfNode
+      .
+      -- This shouldn't fail because the existence of Id implies it's been cached by the HashCons monad.
+      fromJust
+      <$> lookupRef anId
   AnArg (Arg _ ty) -> pure ty
   ABound (Bound _ ty) -> pure ty
 
