@@ -91,6 +91,7 @@ library
   other-modules:
     Covenant.Internal.ASG
     Covenant.Internal.ASGNode
+    Covenant.Internal.PrimType
 
   build-depends:
     QuickCheck ==2.15.0.1,
