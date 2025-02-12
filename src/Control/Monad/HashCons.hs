@@ -31,6 +31,7 @@ import Control.Monad.Trans.Writer.CPS (WriterT)
 import Data.Bimap (Bimap)
 import Data.Bimap qualified as Bimap
 import Data.Kind (Type)
+import Data.Maybe (fromJust)
 
 -- | A transformer implementing hash consing capabilities, with references of
 -- type @r@ and referents of type @e@. It is assumed that values of type @e@
@@ -100,8 +101,12 @@ lookupRef ::
   forall (r :: Type) (e :: Type) (m :: Type -> Type).
   (Monad m, Ord e, Ord r) =>
   r ->
-  HashConsT r e m (Maybe e)
-lookupRef r = HashConsT $ Bimap.lookup r <$> get
+  HashConsT r e m e
+lookupRef r =
+  HashConsT
+    ( -- This shouldn't fail, as long as users of HashConsT don't construct @r@ out of thin air
+      fromJust . Bimap.lookup r <$> get
+    )
 
 -- | An @mtl@-style capability type class for hash consing capability, using
 -- references of type @r@ and values of type @e@.
