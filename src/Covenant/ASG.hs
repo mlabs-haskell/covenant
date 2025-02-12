@@ -324,13 +324,13 @@ pushLetToScope ty (Scope args lets) =
 -- Typing Helpers
 
 liftTypeError ::
-  (MonadHashCons Id ASGNode m, MonadError ASGCompileError m) =>
+  (MonadError ASGCompileError m) =>
   Either TypeError a -> m a
-liftTypeError e =
-  let e' = case e of
-        Left x -> Left $ ATypeError x
-        Right x -> Right x
-   in liftEither e'
+liftTypeError = liftEither . mapLeft ATypeError
+  where
+    mapLeft :: (a -> c) -> Either a b -> Either c b
+    mapLeft f (Left x) = Left (f x)
+    mapLeft _ (Right x) = Right x
 
 typeLit :: AConstant -> Either TypeError TyExpr
 typeLit = \case
