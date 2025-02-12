@@ -9,7 +9,7 @@ module Control.Monad.HashCons
     HashConsT,
     runHashConsT,
     hashCons,
-    lookupRef,
+    lookupRef_,
 
     -- * Capability type class
     MonadHashCons (..),
@@ -97,12 +97,12 @@ hashCons x = HashConsT $ do
 -- | Given a value of type @r@, fetch the cached @e@ value, if it exists.
 --
 -- @since 1.0.0
-lookupRef ::
+lookupRef_ ::
   forall (r :: Type) (e :: Type) (m :: Type -> Type).
   (Monad m, Ord e, Ord r) =>
   r ->
   HashConsT r e m e
-lookupRef r =
+lookupRef_ r =
   HashConsT
     ( -- This shouldn't fail, as long as users of HashConsT don't construct @r@ out of thin air
       fromJust . Bimap.lookup r <$> get
@@ -130,37 +130,56 @@ class
   -- @since 1.0.0
   refTo :: e -> m r
 
+  -- | Given a value of type @r@, fetch the cached value of type @e@.
+  --
+  -- @since 1.0.0
+  lookupRef :: r -> m e
+
 -- | @since 1.0.0
 instance (Ord r, Ord e, Bounded r, Enum r, Monad m) => MonadHashCons r e (HashConsT r e m) where
   {-# INLINEABLE refTo #-}
   refTo = hashCons
+  {-# INLINEABLE lookupRef #-}
+  lookupRef = lookupRef_
 
 -- | @since 1.0.0
-instance (MonadHashCons r e m) => MonadHashCons r e (MaybeT m) where
+instance (Ord r, Ord e, MonadHashCons r e m) => MonadHashCons r e (MaybeT m) where
   {-# INLINEABLE refTo #-}
   refTo e = lift (refTo e)
+  {-# INLINEABLE lookupRef #-}
+  lookupRef r = lift (lookupRef r)
 
 -- | @since 1.0.0
 instance (MonadHashCons r e m) => MonadHashCons r e (ReaderT r' m) where
   {-# INLINEABLE refTo #-}
   refTo e = lift (refTo e)
+  {-# INLINEABLE lookupRef #-}
+  lookupRef r = lift (lookupRef r)
 
 -- | @since 1.0.0
 instance (MonadHashCons r e m) => MonadHashCons r e (StateT s m) where
   {-# INLINEABLE refTo #-}
   refTo e = lift (refTo e)
+  {-# INLINEABLE lookupRef #-}
+  lookupRef r = lift (lookupRef r)
 
 -- | @since 1.0.0
 instance (MonadHashCons r e m) => MonadHashCons r e (WriterT w m) where
   {-# INLINEABLE refTo #-}
   refTo e = lift (refTo e)
+  {-# INLINEABLE lookupRef #-}
+  lookupRef r = lift (lookupRef r)
 
 -- | @since 1.0.0
 instance (MonadHashCons r e m) => MonadHashCons r e (RWST r' w s m) where
   {-# INLINEABLE refTo #-}
   refTo e = lift (refTo e)
+  {-# INLINEABLE lookupRef #-}
+  lookupRef r = lift (lookupRef r)
 
 -- | @since 1.0.0
 instance (MonadHashCons r e m) => MonadHashCons r e (ExceptT e' m) where
   {-# INLINEABLE refTo #-}
   refTo e = lift (refTo e)
+  {-# INLINEABLE lookupRef #-}
+  lookupRef r = lift (lookupRef r)

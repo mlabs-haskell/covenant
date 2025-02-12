@@ -22,7 +22,7 @@ module Covenant.Internal.ASGNode
   )
 where
 
-import Control.Monad.HashCons (HashConsT, lookupRef)
+import Control.Monad.HashCons (MonadHashCons, lookupRef)
 import Covenant.Constant (AConstant)
 import Covenant.Internal.TyExpr (TyExpr)
 import Covenant.Ledger (LedgerAccessor, LedgerDestructor)
@@ -241,7 +241,7 @@ refToId = \case
   AnId i -> pure i
   _ -> Nothing
 
-typeOfRef :: forall (m :: Type -> Type). (Monad m) => Ref -> HashConsT Id ASGNode m TyASGNode
+typeOfRef :: forall (m :: Type -> Type). (MonadHashCons Id ASGNode m) => Ref -> m TyASGNode
 typeOfRef = \case
   AnId anId -> typeOfNode <$> lookupRef anId
   AnArg (Arg _ ty) -> pure ty

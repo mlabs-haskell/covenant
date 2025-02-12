@@ -78,14 +78,12 @@ import Control.Monad.Action
     actionable,
     runUpdateT,
   )
-import Control.Monad.Error.Class (liftEither)
+import Control.Monad.Error.Class (MonadError, liftEither)
 import Control.Monad.HashCons (MonadHashCons (refTo))
-import Control.Monad.Trans (MonadTrans (lift))
 import Covenant.Constant (AConstant (ABoolean, AByteString, AData, AList, APair, AString, AUnit, AnInteger))
 import Covenant.Internal.ASG
   ( ASG,
     ASGCompileError (ATypeError),
-    ASGCompiler (ASGCompiler),
     ASGNeighbourhood,
     ASGZipper,
     TypeError (TyErrAppArgMismatch, TyErrAppNotALambda, TyErrNonHomogenousList, TyErrPrimArgMismatch),
@@ -171,7 +169,10 @@ emptyScope = Scope Vector.empty Vector.empty
 -- | Construct a literal (constant) value.
 --
 -- @since 1.0.0
-lit :: AConstant -> ASGCompiler Id
+lit ::
+  forall (m :: Type -> Type).
+  (MonadHashCons Id ASGNode m, MonadError ASGCompileError m) =>
+  AConstant -> m Id
 lit c = do
   ty <- liftTypeError (typeLit c)
   refTo (LitInternal ty c)
@@ -179,7 +180,10 @@ lit c = do
 -- | Construct a primitive function call.
 --
 -- @since 1.0.0
-prim :: PrimCall -> ASGCompiler Id
+prim ::
+  forall (m :: Type -> Type).
+  (MonadHashCons Id ASGNode m, MonadError ASGCompileError m) =>
+  PrimCall -> m Id
 prim p = do
   ty <- typePrim p
   refTo (PrimInternal ty p)
@@ -189,10 +193,13 @@ prim p = do
 -- to) an argument.
 --
 -- @since 1.0.0
-app :: Ref -> Ref -> ASGCompiler Id
+app ::
+  forall (m :: Type -> Type).
+  (MonadHashCons Id ASGNode m, MonadError ASGCompileError m) =>
+  Ref -> Ref -> m Id
 app f x = do
-  tyFun <- ASGCompiler . lift $ typeOfRef f
-  tyArg <- ASGCompiler . lift $ typeOfRef f
+  tyFun <- typeOfRef f
+  tyArg <- typeOfRef f
   tyRes <- liftTypeError $ typeApp tyFun tyArg
   refTo (AppInternal tyRes f x)
 
@@ -253,16 +260,17 @@ bound (Scope _ lets) =
 --
 -- @since 1.0.0
 lam ::
-  forall (args :: Natural) (binds :: Natural).
+  forall (args :: Natural) (binds :: Natural) (m :: Type -> Type).
+  (MonadHashCons Id ASGNode m, MonadError ASGCompileError m) =>
   -- | The type of the lambda argument
   TyASGNode ->
   Scope args binds ->
-  (Scope (args + 1) binds -> ASGCompiler Ref) ->
-  ASGCompiler Id
+  (Scope (args + 1) binds -> m Ref) ->
+  m Id
 lam argTy scope f = do
   let scope' = pushArgToScope argTy scope
   res <- f scope'
-  resTy <- ASGCompiler $ lift $ typeOfRef res
+  resTy <- typeOfRef res
   let lamTy = TyLam argTy resTy
   refTo (LamInternal lamTy res)
 
@@ -282,13 +290,14 @@ lam argTy scope f = do
 --
 -- @since 1.0.0
 letBind ::
-  forall (args :: Natural) (binds :: Natural).
+  forall (args :: Natural) (binds :: Natural) (m :: Type -> Type).
+  (MonadHashCons Id ASGNode m, MonadError ASGCompileError m) =>
   -- | The type of the let binding
   TyASGNode ->
   Scope args binds ->
   Ref ->
-  (Scope args (binds + 1) -> ASGCompiler Ref) ->
-  ASGCompiler Id
+  (Scope args (binds + 1) -> m Ref) ->
+  m Id
 letBind letTy scope r f = do
   let scope' = pushLetToScope letTy scope
   res <- f scope'
@@ -314,12 +323,14 @@ pushLetToScope ty (Scope args lets) =
 
 -- Typing Helpers
 
-liftTypeError :: Either TypeError a -> ASGCompiler a
+liftTypeError ::
+  (MonadHashCons Id ASGNode m, MonadError ASGCompileError m) =>
+  Either TypeError a -> m a
 liftTypeError e =
   let e' = case e of
         Left x -> Left $ ATypeError x
         Right x -> Right x
-   in ASGCompiler $ liftEither e'
+   in liftEither e'
 
 typeLit :: AConstant -> Either TypeError TyExpr
 typeLit = \case
@@ -350,27 +361,30 @@ typeApp tyFun tyArg = case tyFun of
       else Left $ TyErrAppArgMismatch tyParam tyArg
   _ -> Left $ TyErrAppNotALambda tyFun
 
-typePrim :: PrimCall -> ASGCompiler TyASGNode
+typePrim ::
+  forall (m :: Type -> Type).
+  (MonadHashCons Id ASGNode m, MonadError ASGCompileError m) =>
+  PrimCall -> m TyASGNode
 typePrim p = case p of
   (PrimCallOne fun arg1) -> do
-    ty <- ASGCompiler <$> lift $ typeOfRef arg1
+    ty <- typeOfRef arg1
     liftTypeError $ typeOneArgFunc fun ty
   (PrimCallTwo fun arg1 arg2) -> do
-    ty1 <- ASGCompiler <$> lift $ typeOfRef arg1
-    ty2 <- ASGCompiler <$> lift $ typeOfRef arg2
+    ty1 <- typeOfRef arg1
+    ty2 <- typeOfRef arg2
     liftTypeError $ typeTwoArgFunc fun ty1 ty2
   (PrimCallThree fun arg1 arg2 arg3) -> do
-    ty1 <- ASGCompiler <$> lift $ typeOfRef arg1
-    ty2 <- ASGCompiler <$> lift $ typeOfRef arg2
-    ty3 <- ASGCompiler <$> lift $ typeOfRef arg3
+    ty1 <- typeOfRef arg1
+    ty2 <- typeOfRef arg2
+    ty3 <- typeOfRef arg3
     liftTypeError $ typeThreeArgFunc fun ty1 ty2 ty3
   (PrimCallSix fun arg1 arg2 arg3 arg4 arg5 arg6) -> do
-    ty1 <- ASGCompiler <$> lift $ typeOfRef arg1
-    ty2 <- ASGCompiler <$> lift $ typeOfRef arg2
-    ty3 <- ASGCompiler <$> lift $ typeOfRef arg3
-    ty4 <- ASGCompiler <$> lift $ typeOfRef arg4
-    ty5 <- ASGCompiler <$> lift $ typeOfRef arg5
-    ty6 <- ASGCompiler <$> lift $ typeOfRef arg6
+    ty1 <- typeOfRef arg1
+    ty2 <- typeOfRef arg2
+    ty3 <- typeOfRef arg3
+    ty4 <- typeOfRef arg4
+    ty5 <- typeOfRef arg5
+    ty6 <- typeOfRef arg6
     liftTypeError $ typeSixArgFunc fun ty1 ty2 ty3 ty4 ty5 ty6
 
 typeOneArgFunc :: OneArgFunc -> TyASGNode -> Either TypeError TyASGNode
