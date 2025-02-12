@@ -27,6 +27,7 @@ module Covenant.ASG
     ASGNode (Lit, Lam, Prim, App, Let, LedgerAccess, LedgerDestruct),
     Scope,
     ASG,
+    ASGNeighbourhood,
     ASGZipper,
 
     -- * Functions
@@ -49,6 +50,15 @@ module Covenant.ASG
     compileASG,
 
     -- ** Walking the ASG
+
+    -- *** High-level wrapper
+    ASGMove (..),
+    ASGMoves (..),
+    runASGZipper,
+    moveASGView,
+    currentASGView,
+
+    -- *** Low-level interface
     openASGZipper,
     closeASGZipper,
     viewASGZipper,
@@ -59,10 +69,19 @@ module Covenant.ASG
   )
 where
 
+import Control.Monad.Action
+  ( Action (StateOf, act),
+    Actionable,
+    MonadUpdate (request, update),
+    UpdateT,
+    actionable,
+    runUpdateT,
+  )
 import Control.Monad.HashCons (MonadHashCons (refTo))
 import Covenant.Constant (AConstant)
 import Covenant.Internal.ASG
   ( ASG,
+    ASGNeighbourhood,
     ASGZipper,
     closeASGZipper,
     compileASG,
@@ -98,6 +117,7 @@ import Covenant.Internal.ASGNode
   )
 import Covenant.Ledger (LedgerAccessor, LedgerDestructor)
 import Data.Kind (Type)
+import Data.Monoid (Endo (Endo))
 import Data.Proxy (Proxy (Proxy))
 import GHC.TypeNats (CmpNat, KnownNat, natVal, type (+))
 import Numeric.Natural (Natural)
@@ -260,3 +280,96 @@ ledgerDestruct ::
   Ref ->
   m Id
 ledgerDestruct d rFun = refTo . LedgerDestructInternal d rFun
+
+-- | The possible moves in the 'ASGZipper' wrapper monad. These need to be
+-- wrapped in 'ASGMoves' to make them usable with the update monad
+-- implementation: see 'moveASGView' for a helper avoiding this.
+--
+-- @since 1.0.0
+data ASGMove
+  = ASGMoveLeft
+  | ASGMoveRight
+  | ASGMoveUp
+  | ASGMoveDown
+  deriving stock
+    ( -- | @since 1.0.0
+      Eq,
+      -- | @since 1.0.0
+      Show
+    )
+
+-- | Wrapper needed to make 'ASGMove' a monoid, so that an update monad
+-- implementation of traversing the ASG is possible.
+--
+-- @since 1.0.0
+newtype ASGMoves = ASGMoves (Actionable ASGMove)
+  deriving
+    ( -- | @since 1.0.0
+      Semigroup,
+      -- | @since 1.0.0
+      Monoid
+    )
+    via Actionable ASGMove
+
+-- | @since 1.0.0
+instance Action ASGMoves where
+  type StateOf ASGMoves = ASGZipper
+  {-# INLINEABLE act #-}
+  act (ASGMoves moves) = foldMap go moves
+    where
+      go :: ASGMove -> Endo ASGZipper
+      go =
+        Endo . \case
+          ASGMoveLeft -> leftASGZipper
+          ASGMoveRight -> rightASGZipper
+          ASGMoveDown -> downASGZipper
+          ASGMoveUp -> upASGZipper
+
+-- | Given an 'ASG', open a zipper into it, perform the movements required by
+-- the computation, then reclose the zipper at the end. Also produces the moves
+-- made as part of the computation.
+--
+-- @since 1.0.0
+runASGZipper ::
+  forall (m :: Type -> Type) (a :: Type).
+  (Functor m) =>
+  UpdateT ASGMoves m a ->
+  ASG ->
+  m (ASG, ASGMoves, a)
+runASGZipper comp =
+  fmap (\(z, ms, x) -> (closeASGZipper z, ms, x)) . runUpdateT comp . openASGZipper
+
+-- | Given a direction, attempt to move in that direction. More specifically:
+--
+-- * 'ASGMoveLeft' attempts to move to the rightmost left sibling of the
+-- currently-focused node.
+-- * 'ASGMoveRight' attempts to move to the leftmost right sibling of the
+-- currently-focused node.
+-- * 'ASGMoveDown' moves to the leftmost child of the currently-focused node.
+-- * 'ASGMoveUp' moves to the parent of the currently-focused node. If the node
+-- has multiple parents, the move is a \'reversal\' of whatever move got us
+-- there.
+--
+-- If a move is impossible, nothing happens.
+--
+-- = Note
+--
+-- This mirrors the movement functionality over \'raw\' 'ASGZipper's. See the
+-- descriptions of those functions for more precise information.
+--
+-- @since 1.0.0
+moveASGView ::
+  forall (m :: Type -> Type).
+  (MonadUpdate ASGMoves m) =>
+  ASGMove ->
+  m ()
+moveASGView = update . ASGMoves . actionable
+
+-- | Get the current implicit zipper state.
+--
+-- @since 1.0.0
+currentASGView ::
+  forall (m :: Type -> Type).
+  (MonadUpdate ASGMoves m) =>
+  m ASGZipper
+currentASGView = request
