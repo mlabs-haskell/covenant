@@ -11,6 +11,7 @@ module Covenant.Constant
   ( -- * Types
     AConstant (..),
     PlutusData (..),
+    TyExpr (..),
   )
 where
 
@@ -44,6 +45,30 @@ data PlutusData
   | PlutusList (Vector PlutusData)
   | PlutusI Integer
   | PlutusB ByteString
+  deriving stock
+    ( -- | @since 1.0.0
+      Eq,
+      -- | @since 1.0.0
+      Ord,
+      -- | @since 1.0.0
+      Show
+    )
+
+-- | The type of Plutus expressions.
+--
+-- @since 1.0.0
+data TyExpr
+  = TyUnit
+  | TyBoolean
+  | TyInteger
+  | TyByteString
+  | TyString
+  | TyPair TyExpr TyExpr
+  | TyList TyExpr
+  | TyPlutusData
+  | TyBLS12_381G1Element
+  | TyBLS12_381G2Element
+  | TyBLS12_381PairingMLResult
   deriving stock
     ( -- | @since 1.0.0
       Eq,
@@ -96,7 +121,7 @@ data AConstant
   | AByteString ByteString
   | AString Text
   | APair AConstant AConstant
-  | AList (Vector AConstant)
+  | AList TyExpr (Vector AConstant)
   | AData PlutusData
   deriving stock
     ( -- | @since 1.0.0
@@ -131,7 +156,10 @@ instance Arbitrary AConstant where
                 AByteString <$> arbitrary,
                 AString <$> arbitrary,
                 APair <$> go (size `quot` 2) <*> go (size `quot` 2),
-                AList . Vector.fromList <$> mkVec,
+                do
+                  ty <- arbitrary
+                  v <- Vector.fromList <$> mkVec
+                  pure $ AList ty v,
                 AData <$> arbitrary
               ]
       -- Note (Koz, 23/01/2025): We need this because lists must be homogenous.
@@ -154,5 +182,36 @@ instance Arbitrary AConstant where
     AByteString bs -> AByteString <$> shrink bs
     AString t -> AString <$> shrink t
     APair x y -> (APair x <$> shrink y) <> (APair <$> shrink x <*> pure y)
-    AList v -> AList <$> shrink v
+    AList ty v -> AList ty <$> shrink v
     AData dat -> AData <$> shrink dat
+
+-- | @since 1.0.0
+instance Arbitrary TyExpr where
+  {-# INLINEABLE arbitrary #-}
+  arbitrary = sized go
+    where
+      go :: Int -> Gen TyExpr
+      go size
+        | size <= 0 =
+            oneof
+              [ pure TyUnit,
+                pure TyBoolean,
+                pure TyInteger,
+                pure TyByteString,
+                pure TyString,
+                pure TyPlutusData
+              ]
+        | otherwise =
+            oneof
+              [ pure TyUnit,
+                pure TyBoolean,
+                pure TyInteger,
+                pure TyByteString,
+                pure TyString,
+                pure TyPlutusData,
+                do
+                  a <- go (size `quot` 2)
+                  b <- go (size `quot` 2)
+                  pure $ TyPair a b,
+                TyList <$> go (size - 1)
+              ]
