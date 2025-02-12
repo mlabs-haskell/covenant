@@ -140,6 +140,7 @@ import Covenant.Internal.TyExpr
 import Covenant.Ledger (LedgerAccessor, LedgerDestructor)
 import Covenant.Prim (OneArgFunc, SixArgFunc, ThreeArgFunc, TwoArgFunc)
 import Data.Foldable (traverse_)
+import Data.Kind (Type)
 import Data.Monoid (Endo (Endo))
 import Data.Proxy (Proxy (Proxy))
 import Data.Vector (Vector)
@@ -428,6 +429,8 @@ ledgerDestruct ::
   Ref ->
   m Id
 ledgerDestruct d rFun = refTo . LedgerDestructInternal d rFun
+
+-- ASGZipper
 
 -- | The possible moves in the 'ASGZipper' wrapper monad. These need to be
 -- wrapped in 'ASGMoves' to make them usable with the update monad
