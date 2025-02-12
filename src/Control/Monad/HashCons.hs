@@ -9,6 +9,7 @@ module Control.Monad.HashCons
     HashConsT,
     runHashConsT,
     hashCons,
+    lookupRef,
 
     -- * Capability type class
     MonadHashCons (..),
@@ -91,6 +92,16 @@ hashCons x = HashConsT $ do
           let newRef = succ largestOldRef
           newRef <$ modify (Bimap.insert newRef x)
     Just ref -> pure ref
+
+-- | Given a value of type @r@, fetch the cached @e@ value, if it exists.
+--
+-- @since 1.0.0
+lookupRef ::
+  forall (r :: Type) (e :: Type) (m :: Type -> Type).
+  (Monad m, Ord e, Ord r) =>
+  r ->
+  HashConsT r e m (Maybe e)
+lookupRef r = HashConsT $ Bimap.lookup r <$> get
 
 -- | An @mtl@-style capability type class for hash consing capability, using
 -- references of type @r@ and values of type @e@.
