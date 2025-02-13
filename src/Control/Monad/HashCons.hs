@@ -110,7 +110,7 @@ lookupRef_ r = HashConsT (Bimap.lookup r <$> get)
 --
 -- 1. @'refTo' x '>>' 'refTo' x@ @=@ @'refTo' x@
 -- 2. @'liftA2' ('/=') ('refTo' x) ('refTo' y)@ @=@ @'refTo' x '*>' 'refTo' y '*>' 'pure' (x '/=' y)@
--- 3. @'refTo' x '>>=' \r -> 'lookupRef' r '>>=' \y -> 'pure' (y, r)@ @=@ @('Just' x, ) '<$>' 'refTo' x@
+-- 3. @'refTo' x '>>=' (\\r -> 'lookupRef' r '>>=' (\\y -> 'pure' (y, r)))@ @=@ @('Just' x, ) '<$>' 'refTo' x@
 --
 -- @since 1.0.0
 class
