@@ -7,6 +7,8 @@ module Covenant.Internal.ASGNode
     Ref (..),
     PrimCall (..),
     ASGNode (..),
+    TyASGNode (..),
+    TyLam (..),
     pattern Lit,
     pattern Prim,
     pattern Lam,
@@ -15,13 +17,18 @@ module Covenant.Internal.ASGNode
     pattern LedgerAccess,
     pattern LedgerDestruct,
     childIds,
+    typeOfRef,
+    typeOfNode,
   )
 where
 
+import Control.Monad.HashCons (MonadHashCons, lookupRef)
 import Covenant.Constant (AConstant)
+import Covenant.Internal.TyExpr (TyExpr)
 import Covenant.Ledger (LedgerAccessor, LedgerDestructor)
 import Covenant.Prim (OneArgFunc, SixArgFunc, ThreeArgFunc, TwoArgFunc)
-import Data.Maybe (mapMaybe)
+import Data.Kind (Type)
+import Data.Maybe (fromJust, mapMaybe)
 import Data.Word (Word64)
 
 -- | A unique identifier for a node in a Covenant program.
@@ -49,32 +56,26 @@ newtype Id = Id Word64
 -- | An argument passed to a function in a Covenant program.
 --
 -- @since 1.0.0
-newtype Arg = Arg Word64
-  deriving
+data Arg = Arg Word64 TyASGNode
+  deriving stock
     ( -- | @since 1.0.0
       Eq,
       -- | @since 1.0.0
-      Ord
-    )
-    via Word64
-  deriving stock
-    ( -- | @since 1.0.0
+      Ord,
+      -- | @since 1.0.0
       Show
     )
 
 -- | A @let@-bound variable in a Covenant program.
 --
 -- @since 1.0.0
-newtype Bound = Bound Word64
-  deriving
+data Bound = Bound Word64 TyASGNode
+  deriving stock
     ( -- | @since 1.0.0
       Eq,
       -- | @since 1.0.0
-      Ord
-    )
-    via Word64
-  deriving stock
-    ( -- | @since 1.0.0
+      Ord,
+      -- | @since 1.0.0
       Show
     )
 
@@ -122,11 +123,11 @@ data PrimCall
 --
 -- @since 1.0.0
 data ASGNode
-  = LitInternal AConstant
-  | PrimInternal PrimCall
-  | LamInternal Ref
-  | LetInternal Ref Ref
-  | AppInternal Ref Ref
+  = LitInternal TyExpr AConstant
+  | PrimInternal TyASGNode PrimCall
+  | LamInternal TyLam Ref
+  | LetInternal TyASGNode Ref Ref
+  | AppInternal TyASGNode Ref Ref
   | LedgerAccessInternal LedgerAccessor Ref
   | LedgerDestructInternal LedgerDestructor Ref Ref
   deriving stock
@@ -141,34 +142,34 @@ data ASGNode
 -- | A constant value.
 --
 -- @since 1.0.0
-pattern Lit :: AConstant -> ASGNode
-pattern Lit c <- LitInternal c
+pattern Lit :: TyExpr -> AConstant -> ASGNode
+pattern Lit ty c <- LitInternal ty c
 
 -- | A call to a Plutus builtin.
 --
 -- @since 1.0.0
-pattern Prim :: PrimCall -> ASGNode
-pattern Prim p <- PrimInternal p
+pattern Prim :: TyASGNode -> PrimCall -> ASGNode
+pattern Prim ty p <- PrimInternal ty p
 
 -- | A lambda abstraction: the node contents are its body.
 --
 -- @since 1.0.0
-pattern Lam :: Ref -> ASGNode
-pattern Lam r <- LamInternal r
+pattern Lam :: TyLam -> Ref -> ASGNode
+pattern Lam ty r <- LamInternal ty r
 
 -- | A `let` binding. The first 'Ref' is the binding, while the second is the
 -- body the binding is used in.
 --
 -- @since 1.0.0
-pattern Let :: Ref -> Ref -> ASGNode
-pattern Let rBind rBody <- LetInternal rBind rBody
+pattern Let :: TyASGNode -> Ref -> Ref -> ASGNode
+pattern Let ty rBind rBody <- LetInternal ty rBind rBody
 
 -- | A function application. The first 'Ref' is the function expression, while
 -- the second is the argument to be applied.
 --
 -- @since 1.0.0
-pattern App :: Ref -> Ref -> ASGNode
-pattern App rFun rArg <- AppInternal rFun rArg
+pattern App :: TyASGNode -> Ref -> Ref -> ASGNode
+pattern App ty rFun rArg <- AppInternal ty rFun rArg
 
 -- | An accessor for a ledger type.
 --
@@ -185,18 +186,51 @@ pattern LedgerDestruct d rDest rArg <- LedgerDestructInternal d rDest rArg
 
 {-# COMPLETE Lit, Prim, Lam, Let, App, LedgerAccess, LedgerDestruct #-}
 
+-- | The type of an @ASGNode@.
+--
+-- @since 1.0.0
+data TyASGNode
+  = ATyExpr TyExpr
+  | ATyLam TyLam
+  deriving stock
+    ( -- | @since 1.0.0
+      Eq,
+      -- | @since 1.0.0
+      Ord,
+      -- | @since 1.0.0
+      Show
+    )
+
+-- | The type of a @Lam@.
+--
+-- @since 1.0.0
+data TyLam
+  = TyLam
+      -- | argument type
+      TyASGNode
+      -- | return type
+      TyASGNode
+  deriving stock
+    ( -- | @since 1.0.0
+      Eq,
+      -- | @since 1.0.0
+      Ord,
+      -- | @since 1.0.0
+      Show
+    )
+
 -- | @since 1.0.0
 childIds :: ASGNode -> [Id]
 childIds = \case
-  LitInternal _ -> []
-  PrimInternal p -> case p of
+  LitInternal _ _ -> []
+  PrimInternal _ p -> case p of
     PrimCallOne _ r1 -> mapMaybe refToId [r1]
     PrimCallTwo _ r1 r2 -> mapMaybe refToId [r1, r2]
     PrimCallThree _ r1 r2 r3 -> mapMaybe refToId [r1, r2, r3]
     PrimCallSix _ r1 r2 r3 r4 r5 r6 -> mapMaybe refToId [r1, r2, r3, r4, r5, r6]
-  LamInternal r1 -> mapMaybe refToId [r1]
-  LetInternal r1 r2 -> mapMaybe refToId [r1, r2]
-  AppInternal r1 r2 -> mapMaybe refToId [r1, r2]
+  LamInternal _ r1 -> mapMaybe refToId [r1]
+  LetInternal _ r1 r2 -> mapMaybe refToId [r1, r2]
+  AppInternal _ r1 r2 -> mapMaybe refToId [r1, r2]
   LedgerAccessInternal _ r1 -> mapMaybe refToId [r1]
   LedgerDestructInternal _ r1 r2 -> mapMaybe refToId [r1, r2]
 
@@ -206,3 +240,24 @@ refToId :: Ref -> Maybe Id
 refToId = \case
   AnId i -> pure i
   _ -> Nothing
+
+typeOfRef :: forall (m :: Type -> Type). (MonadHashCons Id ASGNode m) => Ref -> m TyASGNode
+typeOfRef = \case
+  AnId anId ->
+    typeOfNode
+      .
+      -- This shouldn't fail because the existence of Id implies it's been cached by the HashCons monad.
+      fromJust
+      <$> lookupRef anId
+  AnArg (Arg _ ty) -> pure ty
+  ABound (Bound _ ty) -> pure ty
+
+typeOfNode :: ASGNode -> TyASGNode
+typeOfNode = \case
+  LitInternal ty _ -> ATyExpr ty
+  PrimInternal ty _ -> ty
+  LamInternal ty _ -> ATyLam ty
+  LetInternal ty _ _ -> ty
+  AppInternal ty _ _ -> ty
+  LedgerAccessInternal _ _ -> error "TODO"
+  LedgerDestructInternal {} -> error "TODO"

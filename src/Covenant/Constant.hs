@@ -14,6 +14,7 @@ module Covenant.Constant
   )
 where
 
+import Covenant.Internal.TyExpr (TyExpr)
 import Data.ByteString (ByteString)
 import Data.Text (Text)
 import Data.Vector (Vector)
@@ -96,7 +97,7 @@ data AConstant
   | AByteString ByteString
   | AString Text
   | APair AConstant AConstant
-  | AList (Vector AConstant)
+  | AList TyExpr (Vector AConstant)
   | AData PlutusData
   deriving stock
     ( -- | @since 1.0.0
@@ -131,7 +132,10 @@ instance Arbitrary AConstant where
                 AByteString <$> arbitrary,
                 AString <$> arbitrary,
                 APair <$> go (size `quot` 2) <*> go (size `quot` 2),
-                AList . Vector.fromList <$> mkVec,
+                do
+                  ty <- arbitrary
+                  v <- Vector.fromList <$> mkVec
+                  pure $ AList ty v,
                 AData <$> arbitrary
               ]
       -- Note (Koz, 23/01/2025): We need this because lists must be homogenous.
@@ -154,5 +158,5 @@ instance Arbitrary AConstant where
     AByteString bs -> AByteString <$> shrink bs
     AString t -> AString <$> shrink t
     APair x y -> (APair x <$> shrink y) <> (APair <$> shrink x <*> pure y)
-    AList v -> AList <$> shrink v
+    AList ty v -> AList ty <$> shrink v
     AData dat -> AData <$> shrink dat

@@ -69,6 +69,7 @@ module Covenant.ASG
   )
 where
 
+import Control.Monad (unless)
 import Control.Monad.Action
   ( Action (StateOf, act),
     Actionable,
@@ -77,12 +78,15 @@ import Control.Monad.Action
     actionable,
     runUpdateT,
   )
+import Control.Monad.Error.Class (MonadError, liftEither)
 import Control.Monad.HashCons (MonadHashCons (refTo))
-import Covenant.Constant (AConstant)
+import Covenant.Constant (AConstant (ABoolean, AByteString, AData, AList, APair, AString, AUnit, AnInteger))
 import Covenant.Internal.ASG
   ( ASG,
+    ASGCompileError (ATypeError),
     ASGNeighbourhood,
     ASGZipper,
+    TypeError (TyErrAppArgMismatch, TyErrAppNotALambda, TyErrNonHomogenousList, TyErrPrimArgMismatch),
     closeASGZipper,
     compileASG,
     downASGZipper,
@@ -107,6 +111,9 @@ import Covenant.Internal.ASGNode
     Id,
     PrimCall (PrimCallOne, PrimCallSix, PrimCallThree, PrimCallTwo),
     Ref (ABound, AnArg, AnId),
+    TyASGNode (ATyLam),
+    TyLam (TyLam),
+    typeOfRef,
     pattern App,
     pattern Lam,
     pattern LedgerAccess,
@@ -115,10 +122,27 @@ import Covenant.Internal.ASGNode
     pattern Lit,
     pattern Prim,
   )
+import Covenant.Internal.PrimType (typeOfOneArgFunc, typeOfSixArgFunc, typeOfThreeArgFunc, typeOfTwoArgFunc)
+import Covenant.Internal.TyExpr
+  ( TyExpr
+      ( TyBoolean,
+        TyByteString,
+        TyInteger,
+        TyList,
+        TyPair,
+        TyPlutusData,
+        TyString,
+        TyUnit
+      ),
+  )
 import Covenant.Ledger (LedgerAccessor, LedgerDestructor)
+import Covenant.Prim (OneArgFunc, SixArgFunc, ThreeArgFunc, TwoArgFunc)
+import Data.Foldable (traverse_)
 import Data.Kind (Type)
 import Data.Monoid (Endo (Endo))
 import Data.Proxy (Proxy (Proxy))
+import Data.Vector (Vector)
+import Data.Vector qualified as Vector
 import GHC.TypeNats (CmpNat, KnownNat, natVal, type (+))
 import Numeric.Natural (Natural)
 
@@ -128,7 +152,7 @@ import Numeric.Natural (Natural)
 -- bindings (each with a bound variable we can refer to.
 --
 -- @since 1.0.0
-data Scope (args :: Natural) (lets :: Natural) = Scope
+data Scope (args :: Natural) (lets :: Natural) = Scope (Vector TyASGNode) (Vector TyASGNode)
   deriving stock
     ( -- | @since 1.0.0
       Eq,
@@ -140,41 +164,44 @@ data Scope (args :: Natural) (lets :: Natural) = Scope
 --
 -- @since 1.0.0
 emptyScope :: Scope 0 0
-emptyScope = Scope
+emptyScope = Scope Vector.empty Vector.empty
 
 -- | Construct a literal (constant) value.
 --
 -- @since 1.0.0
 lit ::
   forall (m :: Type -> Type).
-  (MonadHashCons Id ASGNode m) =>
+  (MonadHashCons Id ASGNode m, MonadError ASGCompileError m) =>
   AConstant -> m Id
-lit = refTo . LitInternal
+lit c = do
+  ty <- liftTypeError (typeLit c)
+  refTo (LitInternal ty c)
 
 -- | Construct a primitive function call.
 --
 -- @since 1.0.0
 prim ::
   forall (m :: Type -> Type).
-  (MonadHashCons Id ASGNode m) =>
+  (MonadHashCons Id ASGNode m, MonadError ASGCompileError m) =>
   PrimCall -> m Id
-prim = refTo . PrimInternal
+prim p = do
+  ty <- typePrim p
+  refTo (PrimInternal ty p)
 
 -- | Construct a function application. The first argument is (an expression
 -- evaluating to) a function, the second argument is (an expression evaluating
 -- to) an argument.
 --
--- = Important note
---
--- Currently, this does not verify that the first argument is indeed a function,
--- nor that the second argument is appropriate.
---
 -- @since 1.0.0
 app ::
   forall (m :: Type -> Type).
-  (MonadHashCons Id ASGNode m) =>
+  (MonadHashCons Id ASGNode m, MonadError ASGCompileError m) =>
   Ref -> Ref -> m Id
-app f x = refTo (AppInternal f x)
+app f x = do
+  tyFun <- typeOfRef f
+  tyArg <- typeOfRef f
+  tyRes <- liftTypeError $ typeApp tyFun tyArg
+  refTo (AppInternal tyRes f x)
 
 -- | Given a proof of scope, construct one of the arguments in that scope. This
 -- requires use of @TypeApplications@ to select which argument you are
@@ -190,7 +217,11 @@ arg ::
   (KnownNat n, CmpNat n m ~ LT) =>
   Scope m lets ->
   Arg
-arg Scope = Arg . fromIntegral . natVal $ Proxy @n
+arg (Scope args _) =
+  let n = natVal $ Proxy @n
+      -- This cannot fail, but the type system can't show it
+      argTy = (Vector.!) args (fromIntegral n)
+   in Arg (fromIntegral n) argTy
 
 -- | Given a proof of scope, construct one of the @let@-bound variables in that
 -- scope. This requires use of @TypeApplications@ to select which bound variable
@@ -206,10 +237,18 @@ bound ::
   (KnownNat n, CmpNat n m ~ LT) =>
   Scope args m ->
   Bound
-bound Scope = Bound . fromIntegral . natVal $ Proxy @n
+bound (Scope _ lets) =
+  let n = natVal $ Proxy @n
+      -- This cannot fail, but the type system can't show it
+      letTy = (Vector.!) lets (fromIntegral n)
+   in Bound (fromIntegral n) letTy
 
--- | Given a proof of scope, and a function to construct a lambda body using a
--- \'larger\' proof of scope, construct a lambda with that body.
+-- | Given the type of the argument and a proof of scope, and a function
+-- to construct a lambda body using a \'larger\' proof of scope, construct a
+-- lambda with that body.
+--
+-- Note (Farseen, 2025\/02\/11): Update these examples once parametric polymorphism
+-- is implemented.
 --
 -- For example, this is how you define @id@:
 --
@@ -222,13 +261,18 @@ bound Scope = Bound . fromIntegral . natVal $ Proxy @n
 -- @since 1.0.0
 lam ::
   forall (args :: Natural) (binds :: Natural) (m :: Type -> Type).
-  (MonadHashCons Id ASGNode m) =>
+  (MonadHashCons Id ASGNode m, MonadError ASGCompileError m) =>
+  -- | The type of the lambda argument
+  TyASGNode ->
   Scope args binds ->
   (Scope (args + 1) binds -> m Ref) ->
   m Id
-lam Scope f = do
-  res <- f Scope
-  refTo . LamInternal $ res
+lam argTy scope f = do
+  let scope' = pushArgToScope argTy scope
+  res <- f scope'
+  resTy <- typeOfRef res
+  let lamTy = TyLam argTy resTy
+  refTo (LamInternal lamTy res)
 
 -- | Given a proof of scope, a 'Ref' to an expression to bind to, and a function
 -- to construct a @let@-binding body using a \'larger\' proof of scope, construct
@@ -247,14 +291,133 @@ lam Scope f = do
 -- @since 1.0.0
 letBind ::
   forall (args :: Natural) (binds :: Natural) (m :: Type -> Type).
-  (MonadHashCons Id ASGNode m) =>
+  (MonadHashCons Id ASGNode m, MonadError ASGCompileError m) =>
+  -- | The type of the let binding
+  TyASGNode ->
   Scope args binds ->
   Ref ->
   (Scope args (binds + 1) -> m Ref) ->
   m Id
-letBind Scope r f = do
-  res <- f Scope
-  refTo . LetInternal r $ res
+letBind letTy scope r f = do
+  let scope' = pushLetToScope letTy scope
+  res <- f scope'
+  refTo (LetInternal letTy r res)
+
+-- Helpers
+
+pushArgToScope ::
+  forall (n :: Natural) (m :: Natural).
+  TyASGNode ->
+  Scope n m ->
+  Scope (n + 1) m
+pushArgToScope ty (Scope args lets) =
+  Scope (Vector.cons ty args) lets
+
+pushLetToScope ::
+  forall (n :: Natural) (m :: Natural).
+  TyASGNode ->
+  Scope n m ->
+  Scope n (m + 1)
+pushLetToScope ty (Scope args lets) =
+  Scope args (Vector.cons ty lets)
+
+-- Typing Helpers
+
+liftTypeError ::
+  (MonadError ASGCompileError m) =>
+  Either TypeError a -> m a
+liftTypeError = liftEither . mapLeft ATypeError
+  where
+    mapLeft :: (a -> c) -> Either a b -> Either c b
+    mapLeft f (Left x) = Left (f x)
+    mapLeft _ (Right x) = Right x
+
+typeLit :: AConstant -> Either TypeError TyExpr
+typeLit = \case
+  AUnit -> Right TyUnit
+  ABoolean _ -> Right TyBoolean
+  AnInteger _ -> Right TyInteger
+  AByteString _ -> Right TyByteString
+  AString _ -> Right TyString
+  APair a b -> do
+    tyA <- typeLit a
+    tyB <- typeLit b
+    pure $ TyPair tyA tyB
+  AList ty elems -> do
+    traverse_
+      ( \v1 -> do
+          ty' <- typeLit v1
+          unless (ty' == ty) (Left TyErrNonHomogenousList)
+      )
+      elems
+    pure $ TyList ty
+  AData _ -> pure TyPlutusData
+
+typeApp :: TyASGNode -> TyASGNode -> Either TypeError TyASGNode
+typeApp tyFun tyArg = case tyFun of
+  ATyLam (TyLam tyParam tyRes) ->
+    if tyParam == tyArg
+      then Right tyRes
+      else Left $ TyErrAppArgMismatch tyParam tyArg
+  _ -> Left $ TyErrAppNotALambda tyFun
+
+typePrim ::
+  forall (m :: Type -> Type).
+  (MonadHashCons Id ASGNode m, MonadError ASGCompileError m) =>
+  PrimCall -> m TyASGNode
+typePrim p = case p of
+  (PrimCallOne fun arg1) -> do
+    ty <- typeOfRef arg1
+    liftTypeError $ typeOneArgFunc fun ty
+  (PrimCallTwo fun arg1 arg2) -> do
+    ty1 <- typeOfRef arg1
+    ty2 <- typeOfRef arg2
+    liftTypeError $ typeTwoArgFunc fun ty1 ty2
+  (PrimCallThree fun arg1 arg2 arg3) -> do
+    ty1 <- typeOfRef arg1
+    ty2 <- typeOfRef arg2
+    ty3 <- typeOfRef arg3
+    liftTypeError $ typeThreeArgFunc fun ty1 ty2 ty3
+  (PrimCallSix fun arg1 arg2 arg3 arg4 arg5 arg6) -> do
+    ty1 <- typeOfRef arg1
+    ty2 <- typeOfRef arg2
+    ty3 <- typeOfRef arg3
+    ty4 <- typeOfRef arg4
+    ty5 <- typeOfRef arg5
+    ty6 <- typeOfRef arg6
+    liftTypeError $ typeSixArgFunc fun ty1 ty2 ty3 ty4 ty5 ty6
+
+typeOneArgFunc :: OneArgFunc -> TyASGNode -> Either TypeError TyASGNode
+typeOneArgFunc fun tyArg1 =
+  let (tyParam1, tyRes) = typeOfOneArgFunc fun
+   in if tyParam1 == tyArg1
+        then Right tyRes
+        else Left $ TyErrPrimArgMismatch (Vector.fromList [tyParam1]) (Vector.fromList [tyArg1])
+
+typeTwoArgFunc :: TwoArgFunc -> TyASGNode -> TyASGNode -> Either TypeError TyASGNode
+typeTwoArgFunc fun tyArg1 tyArg2 =
+  let (tyParam1, tyParam2, tyRes) = typeOfTwoArgFunc fun
+   in if (tyParam1, tyParam2) == (tyArg1, tyArg2)
+        then Right tyRes
+        else Left $ TyErrPrimArgMismatch (Vector.fromList [tyParam1, tyParam2]) (Vector.fromList [tyArg1, tyArg2])
+
+typeThreeArgFunc :: ThreeArgFunc -> TyASGNode -> TyASGNode -> TyASGNode -> Either TypeError TyASGNode
+typeThreeArgFunc fun tyArg1 tyArg2 tyArg3 =
+  let (tyParam1, tyParam2, tyParam3, tyRes) = typeOfThreeArgFunc fun
+   in if (tyParam1, tyParam2, tyParam3) == (tyArg1, tyArg2, tyArg3)
+        then Right tyRes
+        else Left $ TyErrPrimArgMismatch (Vector.fromList [tyParam1, tyParam2, tyParam3]) (Vector.fromList [tyArg1, tyArg2, tyArg3])
+
+typeSixArgFunc :: SixArgFunc -> TyASGNode -> TyASGNode -> TyASGNode -> TyASGNode -> TyASGNode -> TyASGNode -> Either TypeError TyASGNode
+typeSixArgFunc fun tyArg1 tyArg2 tyArg3 tyArg4 tyArg5 tyArg6 =
+  let (tyParam1, tyParam2, tyParam3, tyParam4, tyParam5, tyParam6, tyRes) = typeOfSixArgFunc fun
+   in if (tyParam1, tyParam2, tyParam3, tyParam4, tyParam5, tyParam6) == (tyArg1, tyArg2, tyArg3, tyArg4, tyArg5, tyArg6)
+        then Right tyRes
+        else
+          Left $
+            TyErrPrimArgMismatch
+              (Vector.fromList [tyParam1, tyParam2, tyParam3, tyParam4, tyParam5, tyParam6])
+              (Vector.fromList [tyArg1, tyArg2, tyArg3, tyArg4, tyArg5, tyArg6])
 
 -- | Construct a ledger type accessor.
 --
@@ -280,6 +443,8 @@ ledgerDestruct ::
   Ref ->
   m Id
 ledgerDestruct d rFun = refTo . LedgerDestructInternal d rFun
+
+-- ASGZipper
 
 -- | The possible moves in the 'ASGZipper' wrapper monad. These need to be
 -- wrapped in 'ASGMoves' to make them usable with the update monad
