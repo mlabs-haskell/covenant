@@ -94,6 +94,7 @@ library
     Covenant.Constant
     Covenant.Ledger
     Covenant.Prim
+    Covenant.Type
 
   other-modules:
     Covenant.Internal.ASG
