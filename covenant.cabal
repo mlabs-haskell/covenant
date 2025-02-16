@@ -91,6 +91,7 @@ library
     Control.Monad.HashCons
     Control.Monad.Unify
     Covenant.ASG
+    Covenant.ASGNode
     Covenant.Constant
     Covenant.Ledger
     Covenant.Prim
