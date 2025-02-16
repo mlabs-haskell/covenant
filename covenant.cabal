@@ -87,6 +87,7 @@ library
     Covenant.Constant
     Covenant.Ledger
     Covenant.Prim
+    Data.Wedge
 
   other-modules:
     Covenant.Internal.ASG
