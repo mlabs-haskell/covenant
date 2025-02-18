@@ -102,7 +102,7 @@ library
     Covenant.Internal.TyExpr
 
   build-depends:
-    QuickCheck ==2.15.0.1,
+    QuickCheck,
     acc ==0.2.0.3,
     bimap ==0.5.0,
     bytestring >=0.12.1.0 && <0.13,

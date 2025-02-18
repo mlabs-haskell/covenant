@@ -15,6 +15,12 @@ import Data.Map.Strict (Map)
 import Data.Map.Strict qualified as Map
 import Data.Set.NonEmpty (NESet)
 import Data.Set.NonEmpty qualified as NESet
+import Test.QuickCheck
+  ( CoArbitrary (coarbitrary),
+    Function (function),
+    functionMap,
+    variant,
+  )
 
 -- | @since 1.0.0
 data UnifyResult (abs :: Type) (conc :: Type)
@@ -27,6 +33,30 @@ data UnifyResult (abs :: Type) (conc :: Type)
       -- | @since 1.0.0
       Show
     )
+
+-- | @since 1.0.0
+instance (CoArbitrary abs, CoArbitrary conc) => CoArbitrary (UnifyResult abs conc) where
+  {-# INLINEABLE coarbitrary #-}
+  coarbitrary res = case res of
+    DoesNotUnify x y -> variant (0 :: Int) . coarbitrary x . coarbitrary y
+    Equivalent -> variant (1 :: Int)
+    UnifiesTo x -> variant (2 :: Int) . coarbitrary x
+
+-- | @since 1.0.0
+instance (Function abs, Function conc) => Function (UnifyResult abs conc) where
+  {-# INLINEABLE function #-}
+  function = functionMap into outOf
+    where
+      into :: UnifyResult abs conc -> Either (abs, Either abs conc) (Maybe conc)
+      into = \case
+        DoesNotUnify x y -> Left (x, y)
+        Equivalent -> Right Nothing
+        UnifiesTo x -> Right (Just x)
+      outOf :: Either (abs, Either abs conc) (Maybe conc) -> UnifyResult abs conc
+      outOf = \case
+        Left (x, y) -> DoesNotUnify x y
+        Right Nothing -> Equivalent
+        Right (Just x) -> UnifiesTo x
 
 newtype UnifyEnv (abs :: Type) (conc :: Type)
   = UnifyEnv (Map abs (Either conc (NESet abs)))
@@ -106,10 +136,11 @@ runUnifyT (UnifyT comp) = runReaderT comp . UnifyEnv $ Map.empty
 
 -- | = Laws
 --
--- 1. @'unify' ('Right' x) ('Right' y) f@ @=@
---    @'if x '==' y then f ('UnifiesTo' x) else f 'DoesNotUnify'@
--- 2. @'unify' x y (\_ -> 'unify' x y f)@ @=@
+-- 1. @'unify' x y (\_ -> 'unify' x y f)@ @=@
 --    @'unify' x y f@
+-- 2. @'unify' v1 ('Left' v2) (\res1 -> unify v2 ('Left' v1) (f res1))@
+--    @=@
+--    @'unify' v2 ('Left' v1) (\res2 -> unify v1 ('Left' v2) (\res1 -> f res1 res2)@
 --
 -- @since 1.0.0
 class (Monad m, Eq conc) => MonadUnify abs conc m | m -> abs conc where
