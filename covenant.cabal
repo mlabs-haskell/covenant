@@ -73,6 +73,12 @@ common test-lang
     -rtsopts
     -with-rtsopts=-N
 
+  build-depends:
+    QuickCheck ==2.15.0.1,
+    covenant,
+    tasty ==1.5.3,
+    tasty-quickcheck ==0.11.1,
+
 common bench-lang
   import: lang
   ghc-options: -O2
@@ -115,4 +121,10 @@ library
   hs-source-dirs: src
 
 -- Tests
+test-suite test-monad-unify
+  import: test-lang
+  type: exitcode-stdio-1.0
+  main-is: Main.hs
+  hs-source-dirs: test/monad-unify
+
 -- Benchmarks
