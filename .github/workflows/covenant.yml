@@ -46,6 +46,7 @@ jobs:
           fail-on: warning
   cabal-gild:
     name: "Check Cabal file with cabal-gild"
+    needs: [ormolu, hlint]
     runs-on: ubuntu-latest
     steps:
       - name: Set up environment
@@ -78,7 +79,7 @@ jobs:
         run: cabal-gild --input=covenant.cabal --mode=check
   tests:
     name: ${{ matrix.ghc }} on ${{ matrix.os }}
-    needs: [generate-matrix, ormolu, hlint, cabal-gild]
+    needs: [generate-matrix, ormolu, hlint]
     runs-on: ${{ matrix.os }}
     strategy:
       matrix: ${{ fromJSON(needs.generate-matrix.outputs.matrix) }}
