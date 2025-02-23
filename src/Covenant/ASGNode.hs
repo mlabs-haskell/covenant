@@ -159,6 +159,8 @@ data TypeError
     ReturnCompType CompT
   | -- Attempt to force a computation type.
     ForceCompType CompT
+  | -- Attempt to force a value type that's not a thunk.
+    ForceNonThunk ValT
   | -- Attempt to bind an expression of computation type.
     LetBindingCompType CompT
   | -- Attempt to use a value type as a @let@ body.
@@ -243,30 +245,19 @@ typePrimitive = \case
   Prim6 p -> typeSixArg p
 
 data CompNode
-  = TyAbsInternal Id
-  | LamInternal (Vector ValT) Id
+  = LamInternal Int (Vector ValT) Id
   | BuiltinInternal Primitive
   | LetInternal ValT Ref Id
   | ForceInternal Ref
   | ReturnInternal Ref
   deriving stock (Eq, Ord, Show)
 
-newtype TyInsts = TyInsts (Vector (Maybe ValT))
-
-freshInst :: TyInsts -> TyInsts
-freshInst (TyInsts v) = TyInsts . Vector.cons Nothing $ v
-
 typeCompNode ::
   forall (m :: Type -> Type).
-  (MonadHashCons Id ASGNode m, MonadError TypeError m, MonadReader TyInsts m) =>
+  (MonadHashCons Id ASGNode m, MonadError TypeError m) =>
   CompNode -> m CompT
 typeCompNode = \case
-  TyAbsInternal i ->
-    local freshInst $
-      typeId i >>= \case
-        Left compT -> pure . ForallT $ compT
-        Right t -> throwError . ForallValType $ t
-  LamInternal argTs i -> _
+  LamInternal abstracts argTs i -> _
   BuiltinInternal p -> pure . typePrimitive $ p
   LetInternal bindingT binding body ->
     typeRef binding >>= \case
@@ -286,7 +277,7 @@ typeCompNode = \case
       Right valT -> pure . ReturnT $ valT
 
 data ValNode
-  = LitInternal AConstant
+  = LitInternal Int AConstant
   | ThunkInternal Id
   | AppInternal Id (Vector Ref)
   | LedgerAccessInternal LedgerAccessor Ref
