@@ -73,6 +73,12 @@ common test-lang
     -rtsopts
     -with-rtsopts=-N
 
+  build-depends:
+    QuickCheck ==2.15.0.1,
+    covenant,
+    tasty ==1.5.3,
+    tasty-quickcheck ==0.11.1,
+
 common bench-lang
   import: lang
   ghc-options: -O2
@@ -83,6 +89,7 @@ library
   exposed-modules:
     Control.Monad.Action
     Control.Monad.HashCons
+    Control.Monad.Unify
     Covenant.ASG
     Covenant.Constant
     Covenant.Ledger
@@ -95,13 +102,14 @@ library
     Covenant.Internal.TyExpr
 
   build-depends:
-    QuickCheck ==2.15.0.1,
+    QuickCheck,
     acc ==0.2.0.3,
     bimap ==0.5.0,
     bytestring >=0.12.1.0 && <0.13,
     containers >=0.6.8 && <0.8,
     enummapset ==0.7.3.0,
     mtl >=2.3.1 && <3,
+    nonempty-containers ==0.3.4.5,
     optics-core ==0.4.1.1,
     optics-th ==0.4.1,
     quickcheck-instances ==0.3.32,
@@ -113,4 +121,10 @@ library
   hs-source-dirs: src
 
 -- Tests
+test-suite test-monad-unify
+  import: test-lang
+  type: exitcode-stdio-1.0
+  main-is: Main.hs
+  hs-source-dirs: test/monad-unify
+
 -- Benchmarks
