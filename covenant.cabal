@@ -73,6 +73,13 @@ common test-lang
     -rtsopts
     -with-rtsopts=-N
 
+  build-depends:
+    QuickCheck ==2.15.0.1,
+    covenant,
+    tasty ==1.5.3,
+    tasty-hunit ==0.10.2,
+    tasty-quickcheck ==0.11.1,
+
 common bench-lang
   import: lang
   ghc-options: -O2
@@ -87,6 +94,7 @@ library
     Covenant.Constant
     Covenant.Ledger
     Covenant.Prim
+    Covenant.Type
 
   other-modules:
     Covenant.Internal.ASG
@@ -113,4 +121,11 @@ library
   hs-source-dirs: src
 
 -- Tests
+test-suite renaming
+  import: test-lang
+  type: exitcode-stdio-1.0
+  main-is: Main.hs
+  build-depends: bimap
+  hs-source-dirs: test/renaming
+
 -- Benchmarks

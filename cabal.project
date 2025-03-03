@@ -1,5 +1,7 @@
 packages: ./covenant.cabal
 
+tests: true
+
 test-show-details: direct
 
 package covenant
