@@ -82,6 +82,8 @@ main =
 
 -- Tests and properties
 
+-- Checks that `forall a . a` renames correctly. Also verifies that there are no
+-- fixed bindings in the tracker afterwards.
 testBareAbs :: IO ()
 testBareAbs = do
   let absTy = Abstraction ForallAA
@@ -91,6 +93,8 @@ testBareAbs = do
   let entry = Bimap.lookup (0, 0) tracker
   assertEqual "" Nothing entry
 
+-- Checks that the given 'flat' type renames to itself. Also verifies that there
+-- are no fixed bindings in the tracker afterwards.
 testFlat :: BuiltinFlatT -> IO ()
 testFlat t = do
   let input = BuiltinFlat t
@@ -98,11 +102,16 @@ testFlat t = do
   assertBool "" (liftEq (\_ _ -> False) input actual)
   assertEqual "" Bimap.empty tracker
 
+-- Checks that for any 'fully concretified' type (nested or not), renaming
+-- changes nothing. Also verifies that there are no fixed bindings in the
+-- tracker afterwards.
 propNestedConcrete :: Property
 propNestedConcrete = forAllShrinkShow arbitrary shrink show $ \(Concrete t) ->
   let (tracker, actual) = runRenameM . renameValT $ t
    in tracker === Bimap.empty .&&. liftEq (\_ _ -> False) t actual
 
+-- Checks that `forall a . a -> !a` correctly renames. Also verifies there are no
+-- fixed bindings in the tracker afterwards.
 testIdT :: IO ()
 testIdT = do
   let absA = BoundAtScope 1 0
@@ -112,6 +121,8 @@ testIdT = do
   assertEqual "" expected actual
   assertEqual "" Bimap.empty tracker
 
+-- Checks that `forall a b . a -> b -> !a` correctly renames. Also verifies that
+-- there are no fixed bindings in the tracker afterwards.
 testConstT :: IO ()
 testConstT = do
   let absA = BoundAtScope 1 0
@@ -122,6 +133,8 @@ testConstT = do
   assertEqual "" expected actual
   assertEqual "" Bimap.empty tracker
 
+-- Checks that `forall a . [a] -> !a` correctly renames. Also verifies that
+-- there are no fixed bindings in the tracker afterwards.
 testHeadListT :: IO ()
 testHeadListT = do
   let absA = BoundAtScope 1 0
@@ -132,6 +145,8 @@ testHeadListT = do
   assertEqual "" expected actual
   assertEqual "" Bimap.empty tracker
 
+-- Checks that `forall a b . (a, b) -> !b` correctly renames. Also verifies that
+-- there are no fixed bindings in the tracker afterwards.
 testSndPairT :: IO ()
 testSndPairT = do
   let sndPairT =
@@ -146,6 +161,9 @@ testSndPairT = do
   assertEqual "" expected actual
   assertEqual "" Bimap.empty tracker
 
+-- Checks that `forall a b . (a -> !b) -> [a] -> !b` correctly renames with
+-- nothing left in the tracker. Also renames the thunk argument type _only_, and
+-- checks that two fixed bindings remain in the tracker afterwards.
 testMapT :: IO ()
 testMapT = do
   let mapThunkT = ThunkT . CompT 0 $ Abstraction (BoundAtScope 2 0) :| [Abstraction (BoundAtScope 2 1)]
@@ -171,6 +189,8 @@ testMapT = do
   assertEqual "" expectedMapT actualMapT
   assertEqual "" Bimap.empty trackerMapT
 
+-- Checks that `forall a b . (a, b)` correctly renames with nothing left in the
+-- tracker.
 testPairTOuterOuter :: IO ()
 testPairTOuterOuter = do
   let pairT =
@@ -181,6 +201,8 @@ testPairTOuterOuter = do
   assertEqual "" expected actual
   assertEqual "" Bimap.empty tracker
 
+-- Checks that `forall b . (forall a . a, b)` renames correctly with nothing
+-- left in the tracker.
 testPairTInnerOuter :: IO ()
 testPairTInnerOuter = do
   let pairT =
@@ -191,6 +213,8 @@ testPairTInnerOuter = do
   assertEqual "" expected actual
   assertEqual "" Bimap.empty tracker
 
+-- Checks that `forall a . (a, forall b . b)` renames correctly with nothing
+-- left in the tracker.
 testPairTOuterInner :: IO ()
 testPairTOuterInner = do
   let pairT =
@@ -201,6 +225,8 @@ testPairTOuterInner = do
   assertEqual "" expected actual
   assertEqual "" Bimap.empty tracker
 
+-- Checks that `(forall a . a, forall b . b)` renames correctly with nothing
+-- left in the tracker. Also verifies that the two fixed renames are distinct.
 testPairTInnerInner :: IO ()
 testPairTInnerInner = do
   let pairT =
