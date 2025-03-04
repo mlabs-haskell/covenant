@@ -12,7 +12,7 @@ module Covenant.Type
   )
 where
 
-import Control.Monad.Reader (ask, local)
+import Control.Monad.Reader (asks, local)
 import Control.Monad.State.Strict (gets, modify)
 import Control.Monad.Trans.RWS.CPS (RWS, runRWS)
 import Data.Bimap (Bimap)
@@ -22,25 +22,17 @@ import Data.Kind (Type)
 import Data.List.NonEmpty (NonEmpty)
 import Data.Word (Word64)
 
--- | A type abstraction.
+-- | A type abstraction, using a DeBruijn index.
 --
 -- = Important note
 --
--- There is an implicit \'scope boundary\' in front of this. Thus, this
--- construction can mean either:
---
--- * An untouchable (effectively @forall a . a@)
--- * A single toplevel variable
--- * A reference to another binding scope and index
---
--- The 'ForallAA' constructor plays the first two roles; which depends on the
--- context. 'BoundAtScope' indicates instead how many scopes away it was bound,
--- and also which binding we're referring to (first, second, etc).
+-- This is a /relative/ representation: @'BoundAt' 1 0@ could refer to different
+-- things at different points in the ASG. Note that only the first field is a
+-- DeBruijn index: the second indicates which type variable bound at that
+-- \'level\' we mean.
 --
 -- @since 1.0.0
-data AbstractTy
-  = ForallAA
-  | BoundAtScope Word64 Word64
+data AbstractTy = BoundAt Word64 Word64
   deriving stock
     ( -- | @since 1.0.0
       Eq,
@@ -220,6 +212,16 @@ newtype RenameM (a :: Type) = RenameM (RWS Int () (Word64, Bimap (Int, Word64) W
     )
     via (RWS Int () (Word64, Bimap (Int, Word64) Word64))
 
+-- Note (Koz, 05/04/2025): We could check that any type abstractions we have in
+-- our view (meaning, not bound higher than us) do not reference tyvars that
+-- don't exist, as every 'type abstraction boundary' specifies how many
+-- variables it binds. This would mean the renamer could fail if it encounters
+-- an impossible situation (such as asking for the index-3 type variable from a
+-- scope that only binds 2). This might not be worth it however, as we would
+-- have no way of checkin anything that comes from 'above us': namely, we would
+-- have to blindly trust any scopes that enclose us and that those type indexes
+-- are sensible.
+
 -- Increase the scope by one level.
 stepDown :: forall (a :: Type). RenameM a -> RenameM a
 stepDown (RenameM comp) = RenameM (local (+ 1) comp)
@@ -227,37 +229,36 @@ stepDown (RenameM comp) = RenameM (local (+ 1) comp)
 -- Given an abstraction in relative form, transform it into an abstraction in
 -- absolute form.
 renameAbstraction :: AbstractTy -> RenameM Renamed
-renameAbstraction absTy = RenameM $ do
-  currLevel <- ask
-  case absTy of
-    ForallAA ->
-      if currLevel == 0
-        then pure . CanSet $ 0
-        else do
-          renaming <- Can'tSet <$> gets fst
-          -- We bump the source of fresh names, but don't record an entry for
-          -- this; all such entries are completely unique, but on restoring
-          -- original names, will be the same.
-          modify $ \(source, tracker) -> (source + 1, tracker)
-          pure renaming
-    -- We need to determine the true level to see if:
-    --
-    -- 1. We can set this at all (aka, whether it's unfixed and touchable); and
-    -- 2. Whether we've seen this before.
-    BoundAtScope scope ix -> do
-      let trueLevel = currLevel - fromIntegral scope
-      if trueLevel == 0
-        then pure . CanSet $ ix
-        else do
-          -- Check if this is something we already renamed previously, and if
-          -- so, rename consistently.
-          priorRename <- gets (Bimap.lookup (trueLevel, ix) . snd)
-          case priorRename of
-            Nothing -> do
-              renaming <- gets fst
-              modify $ \(source, tracker) -> (source + 1, Bimap.insert (trueLevel, ix) renaming tracker)
-              pure . Can'tSet $ renaming
-            Just renameIx -> pure . Can'tSet $ renameIx
+renameAbstraction (BoundAt scope ix) = RenameM $ do
+  -- DeBruijn scope indices are relative to our own position. They could
+  -- potentially refer to stuff bound 'above' us (meaning they're fixed by our
+  -- callers), or stuff bound 'below' us (meaning that they're untouchable). As
+  -- the renamer walks, every time we cross a 'type abstraction barrier', we
+  -- have to take into account that, to reference something, we need an index
+  -- one higher.
+  --
+  -- We thus change the 'relative' indexes to absolute ones, choosing the
+  -- starting point as zero. Thus, we get the following scheme:
+  --
+  -- \* After one forall, scope 0 means 'can change': 1 - 0 = 1
+  -- \* After two foralls, scope 1 means 'can change': 2 - 1 = 1
+  -- \* After three foralls, scope 2 means 'can change': 3 - 2 = 1
+  --
+  -- Thus, we must check whether the difference between the current level and
+  -- the DeBruijn index is exactly 1. We call this the 'true level', although
+  -- it's not the best name.
+  trueLevel <- asks (\currentLevel -> currentLevel - fromIntegral scope)
+  if trueLevel == 1
+    then pure . CanSet $ ix
+    else do
+      -- Check if we already renamed this thing, and if so, rename consistently.
+      priorRename <- gets (Bimap.lookup (trueLevel, ix) . snd)
+      case priorRename of
+        Nothing -> do
+          renaming <- gets fst
+          modify $ \(source, tracker) -> (source + 1, Bimap.insert (trueLevel, ix) renaming tracker)
+          pure . Can'tSet $ renaming
+        Just renameIx -> pure . Can'tSet $ renameIx
 
 -- | Run a renaming computation, while also producing the mapping of any fixed
 -- abstractions to their original (non-relative) scope and position.

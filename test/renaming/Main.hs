@@ -1,7 +1,7 @@
 module Main (main) where
 
 import Covenant.Type
-  ( AbstractTy (BoundAtScope, ForallAA),
+  ( AbstractTy (BoundAt),
     BuiltinFlatT
       ( BLS12_381_G1_ElementT,
         BLS12_381_G2_ElementT,
@@ -45,8 +45,7 @@ import Test.Tasty.QuickCheck (QuickCheckTests, testProperty)
 main :: IO ()
 main =
   defaultMain . adjustOption moreTests . testGroup "Renaming" $
-    [ testCase "bare abstraction" testBareAbs,
-      testGroup
+    [ testGroup
         "Builtin flat types"
         [ testCase "UnitT" $ testFlat UnitT,
           testCase "BoolT" $ testFlat BoolT,
@@ -59,18 +58,13 @@ main =
           testCase "DataT" $ testFlat DataT
         ],
       testProperty "Nested concrete types" propNestedConcrete,
-      testCase "Rename id type" testIdT,
-      testCase "Rename const type" testConstT,
-      testCase "Rename HeadList type" testHeadListT,
-      testCase "Rename SndPair type" testSndPairT,
-      testCase "Rename map function over lists" testMapT,
-      testGroup
-        "Nested foralls"
-        [ testCase "forall a b . (a, b)" testPairTOuterOuter,
-          testCase "forall a . (a, forall b . b)" testPairTOuterInner,
-          testCase "forall b . (forall a . a, b)" testPairTInnerOuter,
-          testCase "(forall a . a, forall b . b)" testPairTInnerInner
-        ]
+      testCase "forall a . a -> !a" testIdT,
+      testCase "forall a b . a -> b -> !a" testConstT,
+      testCase "forall a . a -> !(forall b . b -> a)" testConstT2,
+      testCase "forall a . [a] -> !a" testHeadListT,
+      testCase "forall a b . (a, b) -> !b" testSndPairT,
+      testCase "forall a b . (a -> !b) -> [a] -> ![b]" testMapT,
+      testCase "forall a b . (a, b)" testPairT
     ]
   where
     -- Note (Koz, 26/02/2025): By default, QuickCheck runs only 100 tests per
@@ -81,17 +75,6 @@ main =
     moreTests = max 10_000
 
 -- Tests and properties
-
--- Checks that `forall a . a` renames correctly. Also verifies that there are no
--- fixed bindings in the tracker afterwards.
-testBareAbs :: IO ()
-testBareAbs = do
-  let absTy = Abstraction ForallAA
-  let expected = Abstraction (CanSet 0)
-  let (tracker, actual) = runRenameM . renameValT $ absTy
-  assertEqual "" expected actual
-  let entry = Bimap.lookup (0, 0) tracker
-  assertEqual "" Nothing entry
 
 -- Checks that the given 'flat' type renames to itself. Also verifies that there
 -- are no fixed bindings in the tracker afterwards.
@@ -114,7 +97,7 @@ propNestedConcrete = forAllShrinkShow arbitrary shrink show $ \(Concrete t) ->
 -- fixed bindings in the tracker afterwards.
 testIdT :: IO ()
 testIdT = do
-  let absA = BoundAtScope 1 0
+  let absA = BoundAt 0 0
   let idT = CompT 1 $ Abstraction absA :| [Abstraction absA]
   let expected = CompT 1 $ Abstraction (CanSet 0) :| [Abstraction (CanSet 0)]
   let (tracker, actual) = runRenameM . renameCompT $ idT
@@ -125,20 +108,38 @@ testIdT = do
 -- there are no fixed bindings in the tracker afterwards.
 testConstT :: IO ()
 testConstT = do
-  let absA = BoundAtScope 1 0
-  let absB = BoundAtScope 1 1
+  let absA = BoundAt 0 0
+  let absB = BoundAt 0 1
   let constT = CompT 2 $ Abstraction absA :| [Abstraction absB, Abstraction absA]
   let expected = CompT 2 $ Abstraction (CanSet 0) :| [Abstraction (CanSet 1), Abstraction (CanSet 0)]
   let (tracker, actual) = runRenameM . renameCompT $ constT
   assertEqual "" expected actual
   assertEqual "" Bimap.empty tracker
 
+-- Checks that `forall a . a -> !(forall b . b -> !a)` correctly renames. Also verifies that
+-- there are no fixed bindings in the tracker afterwards.
+testConstT2 :: IO ()
+testConstT2 = do
+  let constT =
+        CompT 1 $
+          Abstraction (BoundAt 0 0)
+            :| [ ThunkT . CompT 1 $ Abstraction (BoundAt 0 0) :| [Abstraction (BoundAt 1 0)]
+               ]
+  let expected =
+        CompT 1 $
+          Abstraction (CanSet 0)
+            :| [ ThunkT . CompT 1 $ Abstraction (Can'tSet 0) :| [Abstraction (CanSet 0)]
+               ]
+  let (tracker, actual) = runRenameM . renameCompT $ constT
+  assertEqual "" expected actual
+  assertEqual "" (Bimap.singleton (2, 0) 0) tracker
+
 -- Checks that `forall a . [a] -> !a` correctly renames. Also verifies that
 -- there are no fixed bindings in the tracker afterwards.
 testHeadListT :: IO ()
 testHeadListT = do
-  let absA = BoundAtScope 1 0
-  let absAInner = BoundAtScope 2 0
+  let absA = BoundAt 0 0
+  let absAInner = BoundAt 1 0
   let headListT = CompT 1 $ BuiltinNested (ListT 0 (Abstraction absAInner)) :| [Abstraction absA]
   let expected = CompT 1 $ BuiltinNested (ListT 0 (Abstraction (CanSet 0))) :| [Abstraction (CanSet 0)]
   let (tracker, actual) = runRenameM . renameCompT $ headListT
@@ -151,8 +152,8 @@ testSndPairT :: IO ()
 testSndPairT = do
   let sndPairT =
         CompT 2 $
-          BuiltinNested (PairT 0 (Abstraction (BoundAtScope 2 0)) (Abstraction (BoundAtScope 2 1)))
-            :| [Abstraction (BoundAtScope 1 1)]
+          BuiltinNested (PairT 0 (Abstraction (BoundAt 1 0)) (Abstraction (BoundAt 1 1)))
+            :| [Abstraction (BoundAt 0 1)]
   let expected =
         CompT 2 $
           BuiltinNested (PairT 0 (Abstraction (CanSet 0)) (Abstraction (CanSet 1)))
@@ -166,12 +167,12 @@ testSndPairT = do
 -- checks that two fixed bindings remain in the tracker afterwards.
 testMapT :: IO ()
 testMapT = do
-  let mapThunkT = ThunkT . CompT 0 $ Abstraction (BoundAtScope 2 0) :| [Abstraction (BoundAtScope 2 1)]
+  let mapThunkT = ThunkT . CompT 0 $ Abstraction (BoundAt 1 0) :| [Abstraction (BoundAt 1 1)]
   let mapT =
         CompT 2 $
           mapThunkT
-            :| [ BuiltinNested (ListT 0 (Abstraction (BoundAtScope 2 0))),
-                 BuiltinNested (ListT 0 (Abstraction (BoundAtScope 2 1)))
+            :| [ BuiltinNested (ListT 0 (Abstraction (BoundAt 1 0))),
+                 BuiltinNested (ListT 0 (Abstraction (BoundAt 1 1)))
                ]
   let expectedMapThunkT = ThunkT . CompT 0 $ Abstraction (Can'tSet 0) :| [Abstraction (Can'tSet 1)]
   let expectedThunkT = ThunkT . CompT 0 $ Abstraction (CanSet 0) :| [Abstraction (CanSet 1)]
@@ -183,7 +184,7 @@ testMapT = do
                ]
   let (trackerThunkT, actualThunkT) = runRenameM . renameValT $ mapThunkT
   assertEqual "" expectedMapThunkT actualThunkT
-  let expectedThunkTracker = Bimap.fromList [((-1, 0), 0), ((-1, 1), 1)]
+  let expectedThunkTracker = Bimap.fromList [((0, 0), 0), ((0, 1), 1)]
   assertEqual "" expectedThunkTracker trackerThunkT
   let (trackerMapT, actualMapT) = runRenameM . renameCompT $ mapT
   assertEqual "" expectedMapT actualMapT
@@ -191,52 +192,15 @@ testMapT = do
 
 -- Checks that `forall a b . (a, b)` correctly renames with nothing left in the
 -- tracker.
-testPairTOuterOuter :: IO ()
-testPairTOuterOuter = do
+testPairT :: IO ()
+testPairT = do
   let pairT =
-        BuiltinNested . PairT 2 (Abstraction (BoundAtScope 1 0)) . Abstraction . BoundAtScope 1 $ 1
+        BuiltinNested . PairT 2 (Abstraction (BoundAt 0 0)) . Abstraction . BoundAt 0 $ 1
   let expected =
         BuiltinNested . PairT 2 (Abstraction (CanSet 0)) . Abstraction . CanSet $ 1
   let (tracker, actual) = runRenameM . renameValT $ pairT
   assertEqual "" expected actual
   assertEqual "" Bimap.empty tracker
-
--- Checks that `forall b . (forall a . a, b)` renames correctly with nothing
--- left in the tracker.
-testPairTInnerOuter :: IO ()
-testPairTInnerOuter = do
-  let pairT =
-        BuiltinNested . PairT 1 (Abstraction ForallAA) . Abstraction . BoundAtScope 1 $ 0
-  let expected =
-        BuiltinNested . PairT 1 (Abstraction (Can'tSet 0)) . Abstraction . CanSet $ 0
-  let (tracker, actual) = runRenameM . renameValT $ pairT
-  assertEqual "" expected actual
-  assertEqual "" Bimap.empty tracker
-
--- Checks that `forall a . (a, forall b . b)` renames correctly with nothing
--- left in the tracker.
-testPairTOuterInner :: IO ()
-testPairTOuterInner = do
-  let pairT =
-        BuiltinNested . PairT 1 (Abstraction (BoundAtScope 1 0)) . Abstraction $ ForallAA
-  let expected =
-        BuiltinNested . PairT 1 (Abstraction (CanSet 0)) . Abstraction . Can'tSet $ 0
-  let (tracker, actual) = runRenameM . renameValT $ pairT
-  assertEqual "" expected actual
-  assertEqual "" Bimap.empty tracker
-
--- Checks that `(forall a . a, forall b . b)` renames correctly with nothing
--- left in the tracker. Also verifies that the two fixed renames are distinct.
-testPairTInnerInner :: IO ()
-testPairTInnerInner = do
-  let pairT =
-        BuiltinNested . PairT 0 (Abstraction ForallAA) . Abstraction $ ForallAA
-  let expected =
-        BuiltinNested . PairT 0 (Abstraction (Can'tSet 0)) . Abstraction . Can'tSet $ 1
-  let (tracker, actual) = runRenameM . renameValT $ pairT
-  assertEqual "" expected actual
-  let expectedTracker = Bimap.empty
-  assertEqual "" expectedTracker tracker
 
 -- Helpers
 
