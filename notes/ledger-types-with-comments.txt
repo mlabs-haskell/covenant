@@ -1,0 +1,328 @@
+newtype ColdCommitteeCredential = ColdCommitteeCredential Credential
+
+newtype HotCommitteeCredential = HotCommitteeCredential Credential
+
+newtype DRepCredential = DRepCredential Credential
+
+data DRep
+  = DRep DRepCredential
+  | DRepAlwaysAbstain
+  | DRepAlwaysNoConfidence
+
+data Delegatee
+  = DelegStake PubKeyHash
+  | DelegVote DRep
+  | DelegStakeVote PubKeyHash DRep
+
+data TxCert
+  = -- | Register staking credential with an optional deposit amount
+    TxCertRegStaking Credential (Haskell.Maybe Lovelace)
+  | -- | Un-Register staking credential with an optional refund amount
+    TxCertUnRegStaking Credential (Haskell.Maybe Lovelace)
+  | -- | Delegate staking credential to a Delegatee
+    TxCertDelegStaking Credential Delegatee
+  | -- | Register and delegate staking credential to a Delegatee in one certificate. Note that
+    -- deposit is mandatory.
+    TxCertRegDeleg Credential Delegatee Lovelace
+  | -- | Register a DRep with a deposit value. The optional anchor is omitted.
+    TxCertRegDRep DRepCredential Lovelace
+  | -- | Update a DRep. The optional anchor is omitted.
+    TxCertUpdateDRep DRepCredential
+  | -- | UnRegister a DRep with mandatory refund value
+    TxCertUnRegDRep DRepCredential Lovelace
+  | -- | A digest of the PoolParams
+    TxCertPoolRegister
+      -- | poolId
+      PubKeyHash
+      -- | pool VFR
+      PubKeyHash
+  | -- | The retirement certificate and the Epoch in which the retirement will take place
+    TxCertPoolRetire PubKeyHash Haskell.Integer
+  | -- | Authorize a Hot credential for a specific Committee member's cold credential
+    TxCertAuthHotCommittee ColdCommitteeCredential HotCommitteeCredential
+  | TxCertResignColdCommittee ColdCommitteeCredential
+
+data Voter
+  = CommitteeVoter HotCommitteeCredential
+  | DRepVoter DRepCredential
+  | StakePoolVoter PubKeyHash
+
+-- | A vote. The optional anchor is omitted.
+data Vote
+  = VoteNo
+  | VoteYes
+  | Abstain
+
+-- | Similar to TxOutRef, but for GovActions
+data GovernanceActionId = GovernanceActionId
+  { gaidTxId        :: TxId
+  , gaidGovActionIx :: Haskell.Integer
+  }
+
+data Committee = Committee
+  { committeeMembers :: Map ColdCommitteeCredential Haskell.Integer
+  -- ^ Committee members with epoch number when each of them expires
+  , committeeQuorum  :: PlutusTx.Rational
+  -- ^ Quorum of the committee that is necessary for a successful vote
+  }
+
+-- | A constitution. The optional anchor is omitted.
+newtype Constitution = Constitution
+  { constitutionScript :: Haskell.Maybe ScriptHash
+  }
+
+data ProtocolVersion = ProtocolVersion
+  { pvMajor :: Haskell.Integer
+  , pvMinor :: Haskell.Integer
+  }
+
+{- | A Plutus Data object containing proposed parameter changes. The Data object contains
+a @Map@ with one entry per changed parameter, from the parameter ID to the new value.
+Unchanged parameters are not included.
+
+The mapping from parameter IDs to parameters can be found in
+[conway.cddl](https://github.com/IntersectMBO/cardano-ledger/blob/master/eras/conway/impl/cddl-files/conway.cddl).
+
+/Invariant:/ This map is non-empty, and the keys are stored in ascending order.
+
+This `Data` object has the following format (in pseudocode):
+
+ChangedParametersData = Map ChangedIdData ChangedManyValueData
+ChangedIdData = I Integer
+ChangedManyValueData =
+     ChangedSingleValueData
+   | List[ChangedSingleValueData...]
+   -- ^ an arbitrary-length, heterogeneous (integer or ratio) list of values (to support sub-parameters)
+
+ChangedSingleValueData =
+     I Integer  -- a proposed integer value
+   | List[I Integer, I Integer] -- a proposed numerator,denominator (ratio value)
+   -- ^ a 2-exact element list; *BE CAREFUL* because this can be alternatively (ambiguously) interpreted
+   -- as a many-value data (sub-parameter) of two integer single-value data.
+
+, where Map,I,List are the constructors of `PlutusCore.Data`
+and Integer is the usual arbitrary-precision PlutusTx/Haskell Integer.
+-}
+newtype ChangedParameters = ChangedParameters {getChangedParameters :: PlutusTx.BuiltinData}
+
+data GovernanceAction
+  = -- | Hash of the constitution script
+    ParameterChange
+      (Haskell.Maybe GovernanceActionId)
+      ChangedParameters
+      (Haskell.Maybe ScriptHash)
+  | -- | proposal to update protocol version
+    HardForkInitiation (Haskell.Maybe GovernanceActionId) ProtocolVersion
+  | -- | Hash of the constitution script
+    TreasuryWithdrawals
+      (Map Credential Lovelace)
+      (Haskell.Maybe ScriptHash)
+  | NoConfidence (Haskell.Maybe GovernanceActionId)
+  | UpdateCommittee
+      (Haskell.Maybe GovernanceActionId)
+      -- | Committee members to be removed
+      [ColdCommitteeCredential]
+      -- | Committee members to be added
+      (Map ColdCommitteeCredential Haskell.Integer)
+      -- | New quorum
+      Rational
+  | NewConstitution (Haskell.Maybe GovernanceActionId) Constitution
+  | InfoAction
+
+-- | A proposal procedure. The optional anchor is omitted.
+data ProposalProcedure = ProposalProcedure
+  { ppDeposit          :: Lovelace
+  , ppReturnAddr       :: Credential
+  , ppGovernanceAction :: GovernanceAction
+  }
+
+-- | A `ScriptPurpose` uniquely identifies a Plutus script within a transaction.
+data ScriptPurpose
+  = Minting CurrencySymbol
+  | Spending TxOutRef
+  | Rewarding Credential
+  | Certifying
+      -- | 0-based index of the given `TxCert` in `txInfoTxCerts`
+      Haskell.Integer
+      TxCert
+  | Voting Voter
+  | Proposing
+      -- | 0-based index of the given `ProposalProcedure` in `txInfoProposalProcedures`
+      Haskell.Integer
+      ProposalProcedure
+
+-- | Like `ScriptPurpose` but with an optional datum for spending scripts.
+data ScriptInfo
+  = MintingScript CurrencySymbol
+  | SpendingScript TxOutRef (Haskell.Maybe Datum)
+  | RewardingScript Credential
+  | CertifyingScript
+      -- | 0-based index of the given `TxCert` in `txInfoTxCerts`
+      Haskell.Integer
+      TxCert
+  | VotingScript Voter
+  | ProposingScript
+      -- | 0-based index of the given `ProposalProcedure` in `txInfoProposalProcedures`
+      Haskell.Integer
+      ProposalProcedure
+
+-- | An input of a pending transaction.
+data TxInInfo = TxInInfo
+  { txInInfoOutRef   :: TxOutRef
+  , txInInfoResolved :: TxOut
+  }
+
+-- | TxInfo for PlutusV3
+data TxInfo = TxInfo
+  { txInfoInputs                :: [TxInInfo]
+  , txInfoReferenceInputs       :: [TxInInfo]
+  , txInfoOutputs               :: [TxOut]
+  , txInfoFee                   :: Lovelace
+  , txInfoMint                  :: MintValue
+  -- ^ The 'Value' minted by this transaction.
+  --
+  -- /Invariant:/ This field does not contain Ada with zero quantity, unlike
+  -- their namesakes in Plutus V1 and V2's ScriptContexts.
+  , txInfoTxCerts               :: [TxCert]
+  , txInfoWdrl                  :: Map Credential Lovelace
+  , txInfoValidRange            :: POSIXTimeRange
+  , txInfoSignatories           :: [PubKeyHash]
+  , txInfoRedeemers             :: Map ScriptPurpose Redeemer
+  , txInfoData                  :: Map DatumHash Datum
+  , txInfoId                    :: TxId
+  , txInfoVotes                 :: Map Voter (Map GovernanceActionId Vote)
+  , txInfoProposalProcedures    :: [ProposalProcedure]
+  , txInfoCurrentTreasuryAmount :: Haskell.Maybe Lovelace
+  , txInfoTreasuryDonation      :: Haskell.Maybe Lovelace
+  }
+
+-- | The context that the currently-executing script can access.
+data ScriptContext = ScriptContext
+  { scriptContextTxInfo     :: TxInfo
+  -- ^ information about the transaction the currently-executing script is included in
+  , scriptContextRedeemer   :: Redeemer
+  -- ^ Redeemer for the currently-executing script
+  , scriptContextScriptInfo :: ScriptInfo
+  -- ^ the purpose of the currently-executing script, along with information associated
+  -- with the purpose
+  }
+
+---- V1/Credential.hs
+-- Credential
+-- | Credentials required to unlock a transaction output.
+data Credential
+  =
+    -- | The transaction that spends this output must be signed by the private key.
+    -- See `Crypto.PubKeyHash`.
+    PubKeyCredential PubKeyHash
+    -- | The transaction that spends this output must include the validator script and
+    -- be accepted by the validator. See `ScriptHash`.
+  | ScriptCredential ScriptHash
+
+-- | Staking credential used to assign rewards.
+data StakingCredential
+    -- | The staking hash is the `Credential` required to unlock a transaction output. Either
+    -- a public key credential (`Crypto.PubKeyHash`) or
+    -- a script credential (`ScriptHash`). Both are hashed with /BLAKE2b-244/. 28 byte.
+    = StakingHash Credential
+    -- | The certificate pointer, constructed by the given
+    -- slot number, transaction and certificate indices.
+    -- NB: The fields should really be all `Word64`, as they are implemented in `Word64`,
+    -- but 'Integer' is our only integral type so we need to use it instead.
+    | StakingPtr
+        Integer -- ^ the slot number
+        Integer -- ^ the transaction index (within the block)
+        Integer -- ^ the certificate index (within the transaction)
+
+---- V1/Crypto.hs
+newtype PubKeyHash = PubKeyHash {getPubKeyHash :: PlutusTx.BuiltinByteString}
+
+---- V1/Value.hs
+newtype Lovelace = Lovelace { getLovelace :: Integer }
+newtype CurrencySymbol = CurrencySymbol {unCurrencySymbol :: PlutusTx.BuiltinByteString}
+newtype TokenName = TokenName {unTokenName :: PlutusTx.BuiltinByteString}
+newtype Value = Value { getValue :: Map CurrencySymbol (Map TokenName Integer) }
+
+---- V1/Scripts.hs
+newtype ScriptHash = ScriptHash {getScriptHash :: Builtins.BuiltinByteString}
+newtype DatumHash = DatumHash Builtins.BuiltinByteString
+newtype Datum = Datum {getDatum :: BuiltinData}
+newtype Redeemer = Redeemer {getRedeemer :: BuiltinData}
+
+---- V1/Time.hs
+type POSIXTimeRange = Interval POSIXTime
+newtype POSIXTime = POSIXTime {getPOSIXTime :: Integer}
+
+---- V1/Address.hs
+data Address = Address
+  { addressCredential        :: Credential
+  -- ^ the payment credential
+  , addressStakingCredential :: Maybe StakingCredential
+  -- ^ the staking credential
+  }
+
+---- V2/Tx.hs
+{- | The datum attached to an output:
+        either nothing;
+        a datum hash;
+        or the datum itself (an "inline datum").
+-}
+data OutputDatum = NoOutputDatum | OutputDatumHash DatumHash | OutputDatum Datum
+
+{- | A transaction output, consisting of a target address, a value,
+optionally a datum/datum hash, and optionally a reference script.
+-}
+data TxOut = TxOut
+  { txOutAddress         :: Address
+  , txOutValue           :: Value
+  , txOutDatum           :: OutputDatum
+  , txOutReferenceScript :: Maybe ScriptHash
+  }
+
+---- V3/Tx.hs
+{- | A transaction ID, i.e. the hash of a transaction. Hashed with BLAKE2b-256. 32 byte.
+
+This is a simple type without any validation, __use with caution__.
+You may want to add checks for its invariants. See the Shelley ledger specification.
+-}
+newtype TxId = TxId {getTxId :: PlutusTx.BuiltinByteString}
+
+{- | A reference to a transaction output. This is a
+pair of a transaction ID (`TxId`), and an index indicating which of the outputs
+of that transaction we are referring to.
+-}
+data TxOutRef = TxOutRef
+  { txOutRefId  :: TxId
+  -- ^ The transaction ID.
+  , txOutRefIdx :: Integer
+  -- ^ Index into the referenced transaction's outputs
+  }
+
+---- V3/MintValue.hs
+
+{- Note [MintValue vs Value]
+
+'MintValue' differs conceptually from 'Value' in how negative quantities are interpreted:
+
+In 'MintValue', negative quantities are interpreted as assets being burned. For 'Value',
+negative quantities are either don't make sense (e.g. in a transaction output) or interpreted
+as a negative balance.
+
+We want to distinguish these at the type level to avoid using 'MintValue' where 'Value' is assumed.
+Users should project 'MintValue' into 'Value' using 'mintValueMinted' or 'mintValueBurned'.
+-}
+
+-- | A 'MintValue' represents assets that are minted and burned in a transaction.
+newtype MintValue = UnsafeMintValue (Map CurrencySymbol (Map TokenName Integer))
+
+---- V1/Interval.hs
+data Interval a = Interval { ivFrom :: LowerBound a, ivTo :: UpperBound a }
+data UpperBound a = UpperBound (Extended a) Closure
+data LowerBound a = LowerBound (Extended a) Closure
+
+-- See Note [Enumerable Intervals]
+-- | Whether a bound is inclusive or not.
+type Closure = Bool
+
+-- | A set extended with a positive and negative infinity.
+data Extended a = NegInf | Finite a | PosInf
