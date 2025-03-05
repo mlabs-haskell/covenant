@@ -84,7 +84,7 @@ data LedgerRecord
   | TxInfo
   | ScriptContext
   | Address
-  | Interval
+  | Interval TyLedger
   | TxOut
   | TxOutRef
   deriving stock
@@ -164,8 +164,8 @@ data LedgerData
   | Credential
   | StakingCredential
   | OutputDatum
-  | UpperBound
-  | LowerBound
+  | UpperBound TyLedger
+  | LowerBound TyLedger
   | Extended
   deriving stock
     ( -- | @since 1.0.0
