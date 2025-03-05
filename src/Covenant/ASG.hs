@@ -518,10 +518,10 @@ ledgerAccess acc x = do
   resTy <- liftTypeError $ case acc of
     LedgerUnwrap -> case tyArg of
       ATyLedger (ALedgerNewtype tyArgInner) -> Right (typeLedgerUnwrap tyArgInner)
-      _ -> Left $ TyErrNotANewtype
+      _ -> Left TyErrNotANewtype
     LedgerField field -> case tyArg of
       ATyLedger (ALedgerRecord tyArgInner) -> typeLedgerFieldAccess tyArgInner field
-      _ -> Left $ TyErrNotARecord
+      _ -> Left TyErrNotARecord
   refTo (LedgerAccessInternal resTy acc x)
 
 -- | Construct a ledger sum type destructor. The first 'Ref' must be a
@@ -542,87 +542,87 @@ ledgerDestruct d rFun = refTo . LedgerDestructInternal d rFun
 
 typeLedgerUnwrap :: LedgerNewtype -> TyASGNode
 typeLedgerUnwrap = \case
-  ColdCommitteeCredential -> ATyLedger (ALedgerData Credential)
-  HotCommitteeCredential -> ATyLedger (ALedgerData Credential)
-  DRepCredential -> ATyLedger (ALedgerData Credential)
-  ChangedParameters -> ATyExpr TyPlutusData
-  PubKeyHash -> ATyExpr TyByteString
-  Lovelace -> ATyExpr TyInteger
-  CurrencySymbol -> ATyExpr TyByteString
-  TokenName -> ATyExpr TyByteString
-  Value -> ATyExpr TyPlutusData
-  ScriptHash -> ATyExpr TyByteString
-  DatumHash -> ATyExpr TyByteString
-  Datum -> ATyExpr TyPlutusData
-  Redeemer -> ATyExpr TyPlutusData
-  Constitution -> error "TODO: Maybe a"
-  POSIXTime -> ATyExpr TyInteger
-  TxId -> ATyExpr TyByteString
-  MintValue -> ATyExpr TyPlutusData
+  ColdCommitteeCredential -> ATyLedger (ALedgerData Credential) -- Credential
+  HotCommitteeCredential -> ATyLedger (ALedgerData Credential) -- Credential
+  DRepCredential -> ATyLedger (ALedgerData Credential) -- Credential
+  ChangedParameters -> ATyExpr TyPlutusData -- BuiltinData
+  PubKeyHash -> ATyExpr TyByteString -- BuiltinByteString
+  Lovelace -> ATyExpr TyInteger -- Integer
+  CurrencySymbol -> ATyExpr TyByteString -- BuiltinByteString
+  TokenName -> ATyExpr TyByteString -- BuiltinByteString
+  Value -> ATyExpr TyPlutusData -- Map CurrencySymbol (Map TokenName Integer) **
+  ScriptHash -> ATyExpr TyByteString -- BuiltinByteString
+  DatumHash -> ATyExpr TyByteString -- BuiltinByteString
+  Datum -> ATyExpr TyPlutusData -- BuiltinData
+  Redeemer -> ATyExpr TyPlutusData -- BuiltinData
+  Constitution -> ATyExpr TyPlutusData -- Maybe ScriptHash **
+  POSIXTime -> ATyExpr TyInteger -- Integer
+  TxId -> ATyExpr TyByteString -- BuiltinByteString
+  MintValue -> ATyExpr TyPlutusData -- Map CurrencySymbol (Map TokenName Integer) **
 
 typeLedgerFieldAccess :: LedgerRecord -> LedgerFieldName -> Either TypeError TyASGNode
 typeLedgerFieldAccess = \case
   GovernanceActionId -> \case
-    GaidTxId -> Right $ ATyLedger (ALedgerNewtype TxId)
-    GaidGovActionIx -> Right $ ATyExpr TyInteger
+    GaidTxId -> Right $ ATyLedger (ALedgerNewtype TxId) -- TxId
+    GaidGovActionIx -> Right $ ATyExpr TyInteger -- Integer
     field -> Left $ TyErrInvalidField GovernanceActionId field
   Committee -> \case
-    CommitteeMembers -> Right $ ATyExpr TyPlutusData
-    CommitteeQuorum -> error "TODO: PlutusTx.Rational"
+    CommitteeMembers -> Right $ ATyExpr TyPlutusData -- Map ColdCommitteeCredential Integer **
+    CommitteeQuorum -> Right $ ATyExpr TyPlutusData -- Rational
     field -> Left $ TyErrInvalidField Committee field
   ProtocolVersion -> \case
-    PvMajor -> Right $ ATyExpr TyInteger
-    PvMinor -> Right $ ATyExpr TyInteger
+    PvMajor -> Right $ ATyExpr TyInteger -- Integer
+    PvMinor -> Right $ ATyExpr TyInteger -- Integer
     field -> Left $ TyErrInvalidField ProtocolVersion field
   ProposalProcedure -> \case
-    PpDeposit -> Right $ ATyLedger (ALedgerNewtype Lovelace)
-    PpReturnAddr -> Right $ ATyLedger (ALedgerData Credential)
-    PpGovernanceAction -> Right $ ATyLedger (ALedgerData GovernanceAction)
+    PpDeposit -> Right $ ATyLedger (ALedgerNewtype Lovelace) -- Lovelace
+    PpReturnAddr -> Right $ ATyLedger (ALedgerData Credential) -- Credential
+    PpGovernanceAction -> Right $ ATyLedger (ALedgerData GovernanceAction) -- GovernanceAction
     field -> Left $ TyErrInvalidField ProposalProcedure field
   TxInInfo -> \case
-    TxInInfoOutRef -> Right $ ATyLedger (ALedgerRecord TxOutRef)
-    TxInInfoResolved -> Right $ ATyLedger (ALedgerRecord TxOut)
+    TxInInfoOutRef -> Right $ ATyLedger (ALedgerRecord TxOutRef) --  TxOutRef
+    TxInInfoResolved -> Right $ ATyLedger (ALedgerRecord TxOut) -- TxOut
     field -> Left $ TyErrInvalidField TxInInfo field
   TxInfo -> \case
-    TxInfoInputs -> Right $ listOf (ATyLedger (ALedgerRecord TxInInfo)) -- TODO: Is this TyExpr.List or PlutusData.List?
-    TxInfoReferenceInputs -> Right $ listOf (ATyLedger (ALedgerRecord TxInInfo)) -- TODO: Is this TyExpr.List or PlutusData.List?
-    TxInfoOutputs -> Right $ listOf (ATyLedger (ALedgerRecord TxOut)) -- TODO: Is this TyExpr.List or PlutusData.List?
-    TxInfoFee -> Right $ ATyLedger (ALedgerNewtype Lovelace)
-    TxInfoMint -> Right $ ATyLedger (ALedgerNewtype MintValue)
-    TxInfoTxCerts -> Right $ listOf (ATyLedger (ALedgerData TxCert)) -- TODO: Is this TyExpr.List or PlutusData.List?
-    TxInfoWdrl -> Right $ ATyExpr TyPlutusData
-    TxInfoValidRange -> Right $ (ATyLedger (ALedgerRecord Interval))
-    TxInfoSignatories -> Right $ listOf (ATyLedger (ALedgerNewtype PubKeyHash)) -- TODO: Is this TyExpr.List or PlutusData.List?
-    TxInfoRedeemers -> Right $ ATyExpr TyPlutusData
-    TxInfoData -> Right $ ATyExpr TyPlutusData
-    TxInfoId -> Right $ (ATyLedger (ALedgerNewtype TxId))
-    TxInfoVotes -> Right $ ATyExpr TyPlutusData
-    TxInfoProposalProcedures -> Right $ listOf (ATyLedger (ALedgerRecord ProposalProcedure)) -- TODO: Is this TyExpr.List or PlutusData.List?
-    TxInfoCurrentTreasuryAmount -> error "TODO: Maybe a"
-    TxInfoTreasuryDonation -> error "TODO: Maybe a"
+    TxInfoInputs -> Right $ listOf (ATyLedger (ALedgerRecord TxInInfo)) -- [TxInInfo] **
+    TxInfoReferenceInputs -> Right $ listOf (ATyLedger (ALedgerRecord TxInInfo)) -- [TxInInfo] **
+    TxInfoOutputs -> Right $ listOf (ATyLedger (ALedgerRecord TxOut)) -- [TxOut] **
+    TxInfoFee -> Right $ ATyLedger (ALedgerNewtype Lovelace) -- Lovelace
+    TxInfoMint -> Right $ ATyLedger (ALedgerNewtype MintValue) -- MintValue
+    TxInfoTxCerts -> Right $ listOf (ATyLedger (ALedgerData TxCert)) -- [TxCert] **
+    TxInfoWdrl -> Right $ ATyExpr TyPlutusData -- Map Credential Lovelace **
+    TxInfoValidRange -> Right $ ATyLedger (ALedgerRecord (Interval $ ALedgerNewtype POSIXTime)) -- type POSIXTimeRange = Interval POSIXTime **
+    TxInfoSignatories -> Right $ listOf (ATyLedger (ALedgerNewtype PubKeyHash)) -- [PubKeyHash] **
+    TxInfoRedeemers -> Right $ ATyExpr TyPlutusData -- Map ScriptPurpose Redeemer **
+    TxInfoData -> Right $ ATyExpr TyPlutusData -- Map DatumHash Datum **
+    TxInfoId -> Right $ ATyLedger (ALedgerNewtype TxId) -- TxId
+    TxInfoVotes -> Right $ ATyExpr TyPlutusData -- Map Voter (Map GovernanceActionId Vote) **
+    TxInfoProposalProcedures -> Right $ listOf (ATyLedger (ALedgerRecord ProposalProcedure)) -- [ProposalProcedure] **
+    TxInfoCurrentTreasuryAmount -> Right $ ATyExpr TyPlutusData -- Maybe Lovelace **
+    TxInfoTreasuryDonation -> Right $ ATyExpr TyPlutusData -- Maybe Lovelace **
     field -> Left $ TyErrInvalidField TxInfo field
   ScriptContext -> \case
-    ScriptContextTxInfo -> Right $ ATyLedger (ALedgerRecord TxInfo)
-    ScriptContextRedeemer -> Right $ ATyLedger (ALedgerNewtype Redeemer)
-    ScriptContextScriptInfo -> Right $ ATyLedger (ALedgerData ScriptInfo)
+    ScriptContextTxInfo -> Right $ ATyLedger (ALedgerRecord TxInfo) -- TxInfo
+    ScriptContextRedeemer -> Right $ ATyLedger (ALedgerNewtype Redeemer) -- ScriptInfo
+    ScriptContextScriptInfo -> Right $ ATyLedger (ALedgerData ScriptInfo) -- Credential
     field -> Left $ TyErrInvalidField ScriptContext field
   Address -> \case
-    AddressCredential -> Right $ ATyLedger (ALedgerData Credential)
-    AddressStakingCredential -> error "TODO: Maybe a"
+    AddressCredential -> Right $ ATyLedger (ALedgerData Credential) -- Credential
+    AddressStakingCredential -> Right $ ATyExpr TyPlutusData -- Maybe StakingCredential **
     field -> Left $ TyErrInvalidField Address field
-  Interval -> \case
-    IvFrom -> Right $ ATyLedger (ALedgerData LowerBound)
-    IvTo -> Right $ ATyLedger (ALedgerData UpperBound)
-    field -> Left $ TyErrInvalidField Interval field
+  Interval ty -> \case
+    IvFrom -> Right $ ATyLedger (ALedgerData $ LowerBound ty) -- LowerBound ty **
+    IvTo -> Right $ ATyLedger (ALedgerData $ UpperBound ty) -- UpperBound ty **
+    field -> Left $ TyErrInvalidField (Interval ty) field
   TxOut -> \case
-    TxOutAddress -> Right $ ATyLedger (ALedgerRecord Address)
-    TxOutValue -> Right $ ATyLedger (ALedgerNewtype Value)
-    TxOutDatum -> Right $ ATyLedger (ALedgerData OutputDatum)
-    TxOutReferenceScript -> Right $ ATyLedger (error "TODO: Maybe a")
+    TxOutAddress -> Right $ ATyLedger (ALedgerRecord Address) -- Address
+    TxOutValue -> Right $ ATyLedger (ALedgerNewtype Value) -- Value
+    TxOutDatum -> Right $ ATyLedger (ALedgerData OutputDatum) -- OutputDatum
+    TxOutReferenceScript -> Right $ ATyExpr TyPlutusData -- Maybe ScriptHash **
     field -> Left $ TyErrInvalidField TxOut field
   TxOutRef -> \case
-    TxOutRefId -> Right $ ATyLedger (ALedgerNewtype TxId)
-    TxOutRefIdx -> Right $ ATyExpr TyInteger
+    TxOutRefId -> Right $ ATyLedger (ALedgerNewtype TxId) -- TxId
+    TxOutRefIdx -> Right $ ATyExpr TyInteger -- Integer
     field -> Left $ TyErrInvalidField TxOutRef field
   where
     listOf :: TyASGNode -> TyASGNode
