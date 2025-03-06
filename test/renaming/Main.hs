@@ -1,3 +1,5 @@
+{-# LANGUAGE OverloadedLists #-}
+
 module Main (main) where
 
 import Covenant.Type
@@ -15,29 +17,29 @@ import Covenant.Type
       ),
     BuiltinNestedT (ListT, PairT),
     CompT (CompT),
-    Renamed (Can'tSet, CanSet),
+    RenameError (InvalidAbstractionReference, IrrelevantAbstraction),
+    Renamed (Rigid, Unifiable, Wildcard),
     ValT (Abstraction, BuiltinFlat, BuiltinNested, ThunkT),
     renameCompT,
     renameValT,
     runRenameM,
   )
-import Data.Bimap qualified as Bimap
 import Data.Coerce (coerce)
 import Data.Functor.Classes (liftEq)
-import Data.List.NonEmpty (NonEmpty ((:|)))
-import Data.List.NonEmpty qualified as NonEmpty
+import Data.Kind (Type)
+import Data.Vector qualified as Vector
+import Data.Vector.NonEmpty qualified as NonEmpty
 import Test.QuickCheck
   ( Arbitrary (arbitrary, shrink),
     Gen,
     Property,
     elements,
     forAllShrinkShow,
-    listOf,
+    liftArbitrary,
     oneof,
     sized,
-    (.&&.),
-    (===),
   )
+import Test.QuickCheck.Instances.Vector ()
 import Test.Tasty (adjustOption, defaultMain, testGroup)
 import Test.Tasty.HUnit (assertBool, assertEqual, testCase)
 import Test.Tasty.QuickCheck (QuickCheckTests, testProperty)
@@ -60,11 +62,20 @@ main =
       testProperty "Nested concrete types" propNestedConcrete,
       testCase "forall a . a -> !a" testIdT,
       testCase "forall a b . a -> b -> !a" testConstT,
-      testCase "forall a . a -> !(forall b . b -> a)" testConstT2,
+      testCase "forall a . a -> !(forall b . b -> !a)" testConstT2,
       testCase "forall a . [a] -> !a" testHeadListT,
       testCase "forall a b . (a, b) -> !b" testSndPairT,
       testCase "forall a b . (a -> !b) -> [a] -> ![b]" testMapT,
-      testCase "forall a b . (a, b)" testPairT
+      testCase "forall a b . (a, b)" testPairT,
+      testGroup
+        "Irrelevance"
+        [ testCase "forall a b . a -> !a" testDodgyIdT,
+          testCase "forall a b . a -> !(b -> !a)" testDodgyConstT
+        ],
+      testGroup
+        "Non-existent abstractions"
+        [ testCase "forall a . b -> !a" testIndexingIdT
+        ]
     ]
   where
     -- Note (Koz, 26/02/2025): By default, QuickCheck runs only 100 tests per
@@ -76,133 +87,179 @@ main =
 
 -- Tests and properties
 
--- Checks that the given 'flat' type renames to itself. Also verifies that there
--- are no fixed bindings in the tracker afterwards.
+-- Checks that the given 'flat' type renames to itself.
 testFlat :: BuiltinFlatT -> IO ()
 testFlat t = do
   let input = BuiltinFlat t
-  let (tracker, actual) = runRenameM . renameValT $ input
-  assertBool "" (liftEq (\_ _ -> False) input actual)
-  assertEqual "" Bimap.empty tracker
+  let result = runRenameM . renameValT $ input
+  assertRight (assertBool "" . liftEq (\_ _ -> False) input) result
 
 -- Checks that for any 'fully concretified' type (nested or not), renaming
--- changes nothing. Also verifies that there are no fixed bindings in the
--- tracker afterwards.
+-- changes nothing.
 propNestedConcrete :: Property
 propNestedConcrete = forAllShrinkShow arbitrary shrink show $ \(Concrete t) ->
-  let (tracker, actual) = runRenameM . renameValT $ t
-   in tracker === Bimap.empty .&&. liftEq (\_ _ -> False) t actual
+  let result = runRenameM . renameValT $ t
+   in case result of
+        Left _ -> False
+        Right actual -> liftEq (\_ _ -> False) t actual
 
--- Checks that `forall a . a -> !a` correctly renames. Also verifies there are no
--- fixed bindings in the tracker afterwards.
+-- Checks that `forall a . a -> !a` correctly renames.
 testIdT :: IO ()
 testIdT = do
-  let absA = BoundAt 0 0
-  let idT = CompT 1 $ Abstraction absA :| [Abstraction absA]
-  let expected = CompT 1 $ Abstraction (CanSet 0) :| [Abstraction (CanSet 0)]
-  let (tracker, actual) = runRenameM . renameCompT $ idT
-  assertEqual "" expected actual
-  assertEqual "" Bimap.empty tracker
+  let idT = CompT 1 . NonEmpty.consV (Abstraction (BoundAt 0 0)) $ [Abstraction (BoundAt 0 0)]
+  let expected = CompT 1 . NonEmpty.consV (Abstraction (Unifiable 0)) $ [Abstraction (Unifiable 0)]
+  let result = runRenameM . renameCompT $ idT
+  assertRight (assertEqual "" expected) result
 
--- Checks that `forall a b . a -> b -> !a` correctly renames. Also verifies that
--- there are no fixed bindings in the tracker afterwards.
+-- Checks that `forall a b . a -> b -> !a` correctly renames.
 testConstT :: IO ()
 testConstT = do
   let absA = BoundAt 0 0
   let absB = BoundAt 0 1
-  let constT = CompT 2 $ Abstraction absA :| [Abstraction absB, Abstraction absA]
-  let expected = CompT 2 $ Abstraction (CanSet 0) :| [Abstraction (CanSet 1), Abstraction (CanSet 0)]
-  let (tracker, actual) = runRenameM . renameCompT $ constT
-  assertEqual "" expected actual
-  assertEqual "" Bimap.empty tracker
+  let constT = CompT 2 . NonEmpty.consV (Abstraction absA) $ [Abstraction absB, Abstraction absA]
+  let expected = CompT 2 . NonEmpty.consV (Abstraction (Unifiable 0)) $ [Abstraction (Unifiable 1), Abstraction (Unifiable 0)]
+  let result = runRenameM . renameCompT $ constT
+  assertRight (assertEqual "" expected) result
 
--- Checks that `forall a . a -> !(forall b . b -> !a)` correctly renames. Also verifies that
--- there are no fixed bindings in the tracker afterwards.
+-- Checks that `forall a . a -> !(forall b . b -> !a)` correctly renames.
 testConstT2 :: IO ()
 testConstT2 = do
   let constT =
-        CompT 1 $
-          Abstraction (BoundAt 0 0)
-            :| [ ThunkT . CompT 1 $ Abstraction (BoundAt 0 0) :| [Abstraction (BoundAt 1 0)]
-               ]
+        CompT 1
+          . NonEmpty.consV
+            (Abstraction (BoundAt 0 0))
+          $ [ ThunkT . CompT 1 . NonEmpty.consV (Abstraction (BoundAt 0 0)) $ [Abstraction (BoundAt 1 0)]
+            ]
   let expected =
-        CompT 1 $
-          Abstraction (CanSet 0)
-            :| [ ThunkT . CompT 1 $ Abstraction (Can'tSet 0) :| [Abstraction (CanSet 0)]
-               ]
-  let (tracker, actual) = runRenameM . renameCompT $ constT
-  assertEqual "" expected actual
-  assertEqual "" (Bimap.singleton (2, 0) 0) tracker
+        CompT 1
+          . NonEmpty.consV
+            (Abstraction (Unifiable 0))
+          $ [ ThunkT . CompT 1 . NonEmpty.consV (Abstraction (Wildcard 1 0)) $ [Abstraction (Unifiable 0)]
+            ]
+  let result = runRenameM . renameCompT $ constT
+  assertRight (assertEqual "" expected) result
 
--- Checks that `forall a . [a] -> !a` correctly renames. Also verifies that
--- there are no fixed bindings in the tracker afterwards.
+-- Checks that `forall a . [a] -> !a` correctly renames.
 testHeadListT :: IO ()
 testHeadListT = do
   let absA = BoundAt 0 0
   let absAInner = BoundAt 1 0
-  let headListT = CompT 1 $ BuiltinNested (ListT 0 (Abstraction absAInner)) :| [Abstraction absA]
-  let expected = CompT 1 $ BuiltinNested (ListT 0 (Abstraction (CanSet 0))) :| [Abstraction (CanSet 0)]
-  let (tracker, actual) = runRenameM . renameCompT $ headListT
-  assertEqual "" expected actual
-  assertEqual "" Bimap.empty tracker
+  let headListT =
+        CompT 1
+          . NonEmpty.consV (BuiltinNested (ListT 0 (Abstraction absAInner)))
+          $ [Abstraction absA]
+  let expected =
+        CompT 1
+          . NonEmpty.consV (BuiltinNested (ListT 0 (Abstraction (Unifiable 0))))
+          $ [Abstraction (Unifiable 0)]
+  let result = runRenameM . renameCompT $ headListT
+  assertRight (assertEqual "" expected) result
 
--- Checks that `forall a b . (a, b) -> !b` correctly renames. Also verifies that
--- there are no fixed bindings in the tracker afterwards.
+-- Checks that `forall a b . (a, b) -> !b` correctly renames.
 testSndPairT :: IO ()
 testSndPairT = do
   let sndPairT =
-        CompT 2 $
-          BuiltinNested (PairT 0 (Abstraction (BoundAt 1 0)) (Abstraction (BoundAt 1 1)))
-            :| [Abstraction (BoundAt 0 1)]
+        CompT 2
+          . NonEmpty.consV
+            (BuiltinNested (PairT 0 (Abstraction (BoundAt 1 0)) (Abstraction (BoundAt 1 1))))
+          $ [Abstraction (BoundAt 0 1)]
   let expected =
-        CompT 2 $
-          BuiltinNested (PairT 0 (Abstraction (CanSet 0)) (Abstraction (CanSet 1)))
-            :| [Abstraction (CanSet 1)]
-  let (tracker, actual) = runRenameM . renameCompT $ sndPairT
-  assertEqual "" expected actual
-  assertEqual "" Bimap.empty tracker
+        CompT 2
+          . NonEmpty.consV
+            (BuiltinNested (PairT 0 (Abstraction (Unifiable 0)) (Abstraction (Unifiable 1))))
+          $ [Abstraction (Unifiable 1)]
+  let result = runRenameM . renameCompT $ sndPairT
+  assertRight (assertEqual "" expected) result
 
--- Checks that `forall a b . (a -> !b) -> [a] -> !b` correctly renames with
--- nothing left in the tracker. Also renames the thunk argument type _only_, and
--- checks that two fixed bindings remain in the tracker afterwards.
+-- Checks that `forall a b . (a -> !b) -> [a] -> !b` correctly renames.
+-- Also renames the thunk argument type _only_, to check that rigid arguments
+-- behave as expected.
 testMapT :: IO ()
 testMapT = do
-  let mapThunkT = ThunkT . CompT 0 $ Abstraction (BoundAt 1 0) :| [Abstraction (BoundAt 1 1)]
+  let mapThunkT =
+        ThunkT
+          . CompT 0
+          . NonEmpty.consV (Abstraction (BoundAt 1 0))
+          $ [Abstraction (BoundAt 1 1)]
   let mapT =
-        CompT 2 $
-          mapThunkT
-            :| [ BuiltinNested (ListT 0 (Abstraction (BoundAt 1 0))),
-                 BuiltinNested (ListT 0 (Abstraction (BoundAt 1 1)))
-               ]
-  let expectedMapThunkT = ThunkT . CompT 0 $ Abstraction (Can'tSet 0) :| [Abstraction (Can'tSet 1)]
-  let expectedThunkT = ThunkT . CompT 0 $ Abstraction (CanSet 0) :| [Abstraction (CanSet 1)]
+        CompT 2
+          . NonEmpty.consV
+            mapThunkT
+          $ [ BuiltinNested (ListT 0 (Abstraction (BoundAt 1 0))),
+              BuiltinNested (ListT 0 (Abstraction (BoundAt 1 1)))
+            ]
+  let expectedMapThunkT =
+        ThunkT
+          . CompT 0
+          . NonEmpty.consV (Abstraction (Rigid 0 0))
+          $ [Abstraction (Rigid 0 1)]
   let expectedMapT =
-        CompT 2 $
-          expectedThunkT
-            :| [ BuiltinNested (ListT 0 (Abstraction (CanSet 0))),
-                 BuiltinNested (ListT 0 (Abstraction (CanSet 1)))
-               ]
-  let (trackerThunkT, actualThunkT) = runRenameM . renameValT $ mapThunkT
-  assertEqual "" expectedMapThunkT actualThunkT
-  let expectedThunkTracker = Bimap.fromList [((0, 0), 0), ((0, 1), 1)]
-  assertEqual "" expectedThunkTracker trackerThunkT
-  let (trackerMapT, actualMapT) = runRenameM . renameCompT $ mapT
-  assertEqual "" expectedMapT actualMapT
-  assertEqual "" Bimap.empty trackerMapT
+        CompT 2
+          . NonEmpty.consV
+            (ThunkT . CompT 0 . NonEmpty.consV (Abstraction (Unifiable 0)) $ [Abstraction (Unifiable 1)])
+          $ [ BuiltinNested (ListT 0 (Abstraction (Unifiable 0))),
+              BuiltinNested (ListT 0 (Abstraction (Unifiable 1)))
+            ]
+  let resultThunkT = runRenameM . renameValT $ mapThunkT
+  assertRight (assertEqual "" expectedMapThunkT) resultThunkT
+  let resultMapT = runRenameM . renameCompT $ mapT
+  assertRight (assertEqual "" expectedMapT) resultMapT
 
--- Checks that `forall a b . (a, b)` correctly renames with nothing left in the
--- tracker.
+-- Checks that `forall a b . (a, b)` correctly renames.
 testPairT :: IO ()
 testPairT = do
   let pairT =
         BuiltinNested . PairT 2 (Abstraction (BoundAt 0 0)) . Abstraction . BoundAt 0 $ 1
   let expected =
-        BuiltinNested . PairT 2 (Abstraction (CanSet 0)) . Abstraction . CanSet $ 1
-  let (tracker, actual) = runRenameM . renameValT $ pairT
-  assertEqual "" expected actual
-  assertEqual "" Bimap.empty tracker
+        BuiltinNested . PairT 2 (Abstraction (Unifiable 0)) . Abstraction . Unifiable $ 1
+  let result = runRenameM . renameValT $ pairT
+  assertRight (assertEqual "" expected) result
+
+-- Checks that `forall a b . a -> !a` triggers the irrelevance checker.
+testDodgyIdT :: IO ()
+testDodgyIdT = do
+  let idT = CompT 2 . NonEmpty.consV (Abstraction (BoundAt 0 0)) $ [Abstraction (BoundAt 0 0)]
+  let result = runRenameM . renameCompT $ idT
+  case result of
+    Left IrrelevantAbstraction -> assertBool "" True
+    Left _ -> assertBool "wrong renaming error" False
+    _ -> assertBool "renaming succeeded when it should have failed" False
+
+-- Checks that `forall a b. a -> !(b -> !a)` triggers the irrelevance checker.
+testDodgyConstT :: IO ()
+testDodgyConstT = do
+  let constT =
+        CompT 2 . NonEmpty.consV (Abstraction (BoundAt 0 0)) $
+          [ ThunkT (CompT 0 . NonEmpty.consV (Abstraction (BoundAt 1 1)) $ [Abstraction (BoundAt 1 0)])
+          ]
+  let result = runRenameM . renameCompT $ constT
+  case result of
+    Left IrrelevantAbstraction -> assertBool "" True
+    Left _ -> assertBool "wrong renaming error" False
+    _ -> assertBool "renaming succeeded when it should have failed" False
+
+-- Checks that `forall a . b -> !a` triggers the variable indexing checker.
+testIndexingIdT :: IO ()
+testIndexingIdT = do
+  let t = CompT 1 . NonEmpty.consV (Abstraction (BoundAt 0 0)) $ [Abstraction (BoundAt 0 1)]
+  let result = runRenameM . renameCompT $ t
+  case result of
+    Left (InvalidAbstractionReference trueLevel ix) -> do
+      assertEqual "" trueLevel 1
+      assertEqual "" ix 1
+    Left _ -> assertBool "wrong renaming error" False
+    _ -> assertBool "renaming succeeded when it should have failed" False
 
 -- Helpers
+
+assertRight ::
+  forall (a :: Type) (b :: Type).
+  (b -> IO ()) ->
+  Either a b ->
+  IO ()
+assertRight f = \case
+  Left _ -> assertBool "renamer errored" False
+  Right actual -> f actual
 
 -- A newtype wrapper which generates only 'fully concrete' ValTs
 newtype Concrete = Concrete (ValT AbstractTy)
@@ -241,7 +298,7 @@ instance Arbitrary Concrete where
                 pure . BuiltinFlat $ DataT,
                 BuiltinNested . ListT 0 <$> go (size `quot` 4),
                 BuiltinNested <$> (PairT 0 <$> go (size `quot` 4) <*> go (size `quot` 4)),
-                ThunkT . CompT 0 <$> ((:|) <$> go (size `quot` 4) <*> listOf (go (size `quot` 4)))
+                ThunkT . CompT 0 <$> (NonEmpty.consV <$> go (size `quot` 4) <*> liftArbitrary (go (size `quot` 4)))
               ]
   {-# INLINEABLE shrink #-}
   shrink (Concrete v) =
@@ -249,14 +306,14 @@ instance Arbitrary Concrete where
       -- impossible
       Abstraction _ -> []
       ThunkT (CompT _ ts) ->
-        -- Note (Koz, 26/02/2025): This is needed because, for some weird
-        -- reason, NonEmpty lacks an Arbitrary instance.
+        -- Note (Koz, 06/04/2025): This is needed because non-empty Vectors
+        -- don't have Arbitrary instances.
         ThunkT . CompT 0 <$> do
           let asList = NonEmpty.toList ts
           shrunk <- fmap coerce . shrink . fmap Concrete $ asList
           case shrunk of
             [] -> []
-            x : xs -> pure (x :| xs)
+            x : xs -> pure (NonEmpty.consV x . Vector.fromList $ xs)
       -- Can't shrink this
       BuiltinFlat _ -> []
       BuiltinNested t ->

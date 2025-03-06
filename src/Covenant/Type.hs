@@ -5,6 +5,7 @@ module Covenant.Type
     ValT (..),
     BuiltinFlatT (..),
     BuiltinNestedT (..),
+    RenameError (..),
     renameValT,
     renameCompT,
     RenameM,
@@ -12,14 +13,16 @@ module Covenant.Type
   )
 where
 
-import Control.Monad.Reader (asks, local)
-import Control.Monad.State.Strict (gets, modify)
-import Control.Monad.Trans.RWS.CPS (RWS, runRWS)
-import Data.Bimap (Bimap)
-import Data.Bimap qualified as Bimap
+import Control.Monad (unless)
+import Control.Monad.Except (ExceptT, MonadError (throwError), runExceptT)
+import Control.Monad.State.Strict (State, evalState, gets, modify)
+import Data.Coerce (coerce)
 import Data.Functor.Classes (Eq1 (liftEq))
 import Data.Kind (Type)
-import Data.List.NonEmpty (NonEmpty)
+import Data.Vector (Vector)
+import Data.Vector qualified as Vector
+import Data.Vector.NonEmpty (NonEmptyVector)
+import Data.Vector.NonEmpty qualified as NonEmpty
 import Data.Word (Word64)
 
 -- | A type abstraction, using a DeBruijn index.
@@ -40,18 +43,18 @@ data AbstractTy = BoundAt Word64 Word64
       Show
     )
 
--- | A renamed type abstraction. We separate them into two kinds:
---
--- * Ones we can decide on (that is, variables in the context of unification);
--- and
--- * Ones we /cannot/ decide on (either fixed in higher scopes than ours, or
--- untouchable).
---
--- We use 'CanSet' plus an index for the first case; the second case is a unique
--- index assigned by the renamer.
---
--- @since 1.0.0
-data Renamed = CanSet Word64 | Can'tSet Word64
+-- | @since 1.0.0
+data Renamed
+  = -- | Set by an enclosing scope, and thus is essentially a
+    -- concrete type, we just don't know which. First field is its \'true
+    -- level\', second field is the index.
+    Rigid Int Word64
+  | -- | Can be unified with something, but must be consistent: that is, only one
+    -- unification for every instance. Field is this variable's positional index.
+    Unifiable Word64
+  | -- | /Must/ unify with everything, except with other distinct wildcards in the
+    -- same scope. First field is a unique /scope/ identifier, second is index.
+    Wildcard Word64 Word64
   deriving stock
     ( -- | @since 1.0.0
       Eq,
@@ -73,7 +76,7 @@ data Renamed = CanSet Word64 | Can'tSet Word64
 -- The /last/ entry in the 'NonEmpty' indicates the return type.
 --
 -- @since 1.0.0
-data CompT (a :: Type) = CompT Word64 (NonEmpty (ValT a))
+data CompT (a :: Type) = CompT Word64 (NonEmptyVector (ValT a))
   deriving stock
     ( -- | @since 1.0.0
       Eq,
@@ -180,6 +183,14 @@ instance Eq1 BuiltinNestedT where
       PairT abses2 t21 t22 -> abses1 == abses2 && liftEq f t11 t21 && liftEq f t12 t22
       _ -> False
 
+data RenameState = RenameState Word64 (Vector (Vector Bool, Word64))
+  deriving stock (Eq, Show)
+
+data RenameError
+  = InvalidAbstractionReference Int Word64
+  | IrrelevantAbstraction
+  deriving stock (Eq, Show)
+
 -- | A \'renaming monad\' which allows us to convert type representations from
 -- ones that use /relative/ abstraction labelling to /absolute/ abstraction
 -- labelling.
@@ -201,7 +212,8 @@ instance Eq1 BuiltinNestedT where
 -- constant or fixed.
 --
 -- @since 1.0.0
-newtype RenameM (a :: Type) = RenameM (RWS Int () (Word64, Bimap (Int, Word64) Word64) a)
+newtype RenameM (a :: Type)
+  = RenameM (ExceptT RenameError (State RenameState) a)
   deriving
     ( -- | @since 1.0.0
       Functor,
@@ -210,87 +222,101 @@ newtype RenameM (a :: Type) = RenameM (RWS Int () (Word64, Bimap (Int, Word64) W
       -- | @since 1.0.0
       Monad
     )
-    via (RWS Int () (Word64, Bimap (Int, Word64) Word64))
+    via (ExceptT RenameError (State RenameState))
 
--- Note (Koz, 05/04/2025): We could check that any type abstractions we have in
--- our view (meaning, not bound higher than us) do not reference tyvars that
--- don't exist, as every 'type abstraction boundary' specifies how many
--- variables it binds. This would mean the renamer could fail if it encounters
--- an impossible situation (such as asking for the index-3 type variable from a
--- scope that only binds 2). This might not be worth it however, as we would
--- have no way of checkin anything that comes from 'above us': namely, we would
--- have to blindly trust any scopes that enclose us and that those type indexes
--- are sensible.
-
--- Increase the scope by one level.
-stepDown :: forall (a :: Type). RenameM a -> RenameM a
-stepDown (RenameM comp) = RenameM (local (+ 1) comp)
-
--- Given an abstraction in relative form, transform it into an abstraction in
--- absolute form.
-renameAbstraction :: AbstractTy -> RenameM Renamed
-renameAbstraction (BoundAt scope ix) = RenameM $ do
-  -- DeBruijn scope indices are relative to our own position. They could
-  -- potentially refer to stuff bound 'above' us (meaning they're fixed by our
-  -- callers), or stuff bound 'below' us (meaning that they're untouchable). As
-  -- the renamer walks, every time we cross a 'type abstraction barrier', we
-  -- have to take into account that, to reference something, we need an index
-  -- one higher.
-  --
-  -- We thus change the 'relative' indexes to absolute ones, choosing the
-  -- starting point as zero. Thus, we get the following scheme:
-  --
-  -- \* After one forall, scope 0 means 'can change': 1 - 0 = 1
-  -- \* After two foralls, scope 1 means 'can change': 2 - 1 = 1
-  -- \* After three foralls, scope 2 means 'can change': 3 - 2 = 1
-  --
-  -- Thus, we must check whether the difference between the current level and
-  -- the DeBruijn index is exactly 1. We call this the 'true level', although
-  -- it's not the best name.
-  trueLevel <- asks (\currentLevel -> currentLevel - fromIntegral scope)
-  if trueLevel == 1
-    then pure . CanSet $ ix
-    else do
-      -- Check if we already renamed this thing, and if so, rename consistently.
-      priorRename <- gets (Bimap.lookup (trueLevel, ix) . snd)
-      case priorRename of
-        Nothing -> do
-          renaming <- gets fst
-          modify $ \(source, tracker) -> (source + 1, Bimap.insert (trueLevel, ix) renaming tracker)
-          pure . Can'tSet $ renaming
-        Just renameIx -> pure . Can'tSet $ renameIx
-
--- | Run a renaming computation, while also producing the mapping of any fixed
--- abstractions to their original (non-relative) scope and position.
---
--- @since 1.0.0
 runRenameM ::
   forall (a :: Type).
-  RenameM a -> (Bimap (Int, Word64) Word64, a)
-runRenameM (RenameM comp) = case runRWS comp 0 (0, Bimap.empty) of
-  (res, (_, tracker), ()) -> (tracker, res)
+  RenameM a -> Either RenameError a
+runRenameM (RenameM comp) = evalState (runExceptT comp) . RenameState 0 $ Vector.empty
 
--- | Given a value type with relative abstractions, produce the same value type,
--- but with absolute abstractions.
---
--- @since 1.0.0
+renameCompT :: CompT AbstractTy -> RenameM (CompT Renamed)
+renameCompT (CompT abses xs) = RenameM $ do
+  -- Step up a scope
+  modify
+    ( \(RenameState fresh tracker) ->
+        RenameState
+          (fresh + 1)
+          (Vector.cons (Vector.replicate (fromIntegral abses) False, fresh) tracker)
+    )
+  -- Rename, but only the arguments
+  renamedArgs <- Vector.generateM (NonEmpty.length xs - 1) (\i -> coerce . renameValT $ xs NonEmpty.! i)
+  -- Check the relevance condition is met
+  ourAbstractions <- gets (\(RenameState _ tracker) -> fst . Vector.head $ tracker)
+  unless (Vector.and ourAbstractions) (throwError IrrelevantAbstraction)
+  -- Check result type
+  renamedResult <- coerce . renameValT . NonEmpty.last $ xs
+  -- Roll back state
+  modify (\(RenameState fresh tracker) -> RenameState fresh (Vector.tail tracker))
+  -- Rebuild and return
+  pure . CompT abses . NonEmpty.snocV renamedArgs $ renamedResult
+
 renameValT :: ValT AbstractTy -> RenameM (ValT Renamed)
 renameValT = \case
-  Abstraction absTy -> Abstraction <$> renameAbstraction absTy
-  -- We're crossing a type abstraction boundary, so bump the level
+  Abstraction (BoundAt scope ix) ->
+    Abstraction
+      <$> RenameM
+        ( do
+            trueLevel <- gets (\(RenameState _ tracker) -> Vector.length tracker - fromIntegral scope)
+            scopeInfo <- gets (\(RenameState _ tracker) -> tracker Vector.!? fromIntegral scope)
+            case scopeInfo of
+              -- This variable is bound at a scope that encloses our starting
+              -- point. Thus, this variable is rigid.
+              Nothing -> pure . Rigid trueLevel $ ix
+              Just (varTracker, uniqueScopeId) -> case varTracker Vector.!? fromIntegral ix of
+                Nothing -> throwError . InvalidAbstractionReference trueLevel $ ix
+                Just beenUsed -> do
+                  -- Note that we've seen this particular variable
+                  unless
+                    beenUsed
+                    ( modify $ \(RenameState fresh tracker) ->
+                        let varTracker' = varTracker Vector.// [(fromIntegral ix, True)]
+                         in RenameState fresh $ tracker Vector.// [(fromIntegral scope, (varTracker', uniqueScopeId))]
+                    )
+                  pure $
+                    if trueLevel == 1
+                      -- If the true level is 1, this is a unifiable
+                      then Unifiable ix
+                      -- This variable is a wildcard
+                      else Wildcard uniqueScopeId ix
+        )
   ThunkT t -> ThunkT <$> renameCompT t
   BuiltinFlat t -> pure . BuiltinFlat $ t
   BuiltinNested t ->
     BuiltinNested <$> case t of
-      -- We're crossing a type abstraction boundary, so bump the level
-      ListT abses t' -> ListT abses <$> stepDown (renameValT t')
-      PairT abses t1 t2 ->
-        PairT abses
-          <$> stepDown (renameValT t1)
-          <*> stepDown (renameValT t2)
-
--- | As 'renameValT', but for computation types.
---
--- @since 1.0.0
-renameCompT :: CompT AbstractTy -> RenameM (CompT Renamed)
-renameCompT (CompT abses xs) = CompT abses <$> stepDown (traverse renameValT xs)
+      ListT abses t' -> RenameM $ do
+        -- Step up a scope
+        modify
+          ( \(RenameState fresh tracker) ->
+              RenameState
+                (fresh + 1)
+                (Vector.cons (Vector.replicate (fromIntegral abses) False, fresh) tracker)
+          )
+        -- Rename the inner type
+        renamed <- coerce . renameValT $ t'
+        -- Check the use condition is met
+        ourAbstractions <- gets (\(RenameState _ tracker) -> fst . Vector.head $ tracker)
+        unless (Vector.and ourAbstractions) (throwError IrrelevantAbstraction)
+        -- Roll back state
+        modify
+          (\(RenameState fresh tracker) -> RenameState fresh (Vector.tail tracker))
+        -- Rebuild and return
+        pure . ListT abses $ renamed
+      PairT abses t1 t2 -> RenameM $ do
+        -- Step up a scope
+        modify
+          ( \(RenameState fresh tracker) ->
+              RenameState
+                (fresh + 1)
+                (Vector.cons (Vector.replicate (fromIntegral abses) False, fresh) tracker)
+          )
+        -- Rename t1, then t2, without any scope shifts
+        renamed1 <- coerce . renameValT $ t1
+        renamed2 <- coerce . renameValT $ t2
+        -- Check the use condition is met
+        ourAbstractions <- gets (\(RenameState _ tracker) -> fst . Vector.head $ tracker)
+        unless (Vector.and ourAbstractions) (throwError IrrelevantAbstraction)
+        -- Roll back state
+        modify
+          (\(RenameState fresh tracker) -> RenameState fresh (Vector.tail tracker))
+        -- Rebuild and return
+        pure . PairT abses renamed1 $ renamed2
