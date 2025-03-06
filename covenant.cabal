@@ -93,6 +93,7 @@ library
     Covenant.ASG
     Covenant.Constant
     Covenant.DeBruijn
+    Covenant.Index
     Covenant.Ledger
     Covenant.Prim
     Covenant.Type

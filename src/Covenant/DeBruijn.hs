@@ -32,7 +32,11 @@ newtype DeBruijn = DeBruijn Word32
       Show
     )
 
--- | @since 1.0.0
+-- | Enables some manner of arithmetic with 'DeBruijn's. In this case, '<>' is
+-- analogous to '+', while @'stimes' b@ is analogous to scalar multiplication by
+-- @b@. Note that 'DeBruijn's cannot be scaled by negative numbers.
+--
+-- @since 1.0.0
 instance Semigroup DeBruijn where
   {-# INLINEABLE (<>) #-}
   DeBruijn x <> DeBruijn y = DeBruijn (x + y)

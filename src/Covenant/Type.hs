@@ -17,6 +17,7 @@ import Control.Monad (unless)
 import Control.Monad.Except (ExceptT, MonadError (throwError), runExceptT)
 import Control.Monad.State.Strict (State, evalState, gets, modify)
 import Covenant.DeBruijn (DeBruijn, asInt)
+import Covenant.Index (Index, intIndex)
 import Data.Coerce (coerce)
 import Data.Functor.Classes (Eq1 (liftEq))
 import Data.Kind (Type)
@@ -31,18 +32,23 @@ import Optics.Getter (to, view)
 import Optics.Label (LabelOptic (labelOptic))
 import Optics.Lens (A_Lens, lens)
 import Optics.Optic ((%))
+import Optics.Review (review)
 import Optics.Setter (over, set)
 
--- | A type abstraction, using a DeBruijn index.
+-- | A type abstraction, using a combination of a DeBruijn index (to indicate
+-- which scope it refers to) and a positional index (to indicate which bound
+-- variable in that scope it refers to).
 --
 -- = Important note
 --
--- This is a /relative/ representation: @'BoundAt' ('S' 'Z') 0@ could refer to different
--- things at different points in the ASG. The second field indicates which type variable
--- bound at that \'level\' we mean.
+-- This is a /relative/ representation: any given 'AbstractTy' could refer to
+-- different things when placed in different positions in the ASG. This stems
+-- from how DeBruijn indices behave: 'Z' refers to \'our immediate enclosing
+-- scope\', @'S' 'Z'@ to \'one scope outside our immediate enclosing scope\',
+-- etc. This can mean different things depending on what these scope(s) are.
 --
 -- @since 1.0.0
-data AbstractTy = BoundAt DeBruijn Word64
+data AbstractTy = BoundAt DeBruijn Index
   deriving stock
     ( -- | @since 1.0.0
       Eq,
@@ -54,14 +60,19 @@ data AbstractTy = BoundAt DeBruijn Word64
 data Renamed
   = -- | Set by an enclosing scope, and thus is essentially a
     -- concrete type, we just don't know which. First field is its \'true
-    -- level\', second field is the index.
-    Rigid Int Word64
+    -- level\', second field is the positional index in that scope.
+    Rigid Int Index
   | -- | Can be unified with something, but must be consistent: that is, only one
-    -- unification for every instance. Field is this variable's positional index.
-    Unifiable Word64
+    -- unification for every instance. Field is this variable's positional index;
+    -- we don't need to track the scope, as only one scope contains unifiable
+    -- bindings.
+    Unifiable Index
   | -- | /Must/ unify with everything, except with other distinct wildcards in the
-    -- same scope. First field is a unique /scope/ identifier, second is index.
-    Wildcard Word64 Word64
+    -- same scope. First field is a unique /scope/ identifier, second is the
+    -- positional index within that scope. We must have unique identifiers for
+    -- wildcard scopes, as wildcards unify with everything /except/ other
+    -- wildcards in the same scope.
+    Wildcard Word64 Index
   deriving stock
     ( -- | @since 1.0.0
       Eq,
@@ -162,7 +173,9 @@ data BuiltinFlatT
 -- = Important note
 --
 -- Both \'arms\' of this type have \'type abstraction boundaries\' just before
--- them: their first field indicates how many type variables they bind.
+-- them: their first field indicates how many type variables they bind. Note
+-- that 'PairT' has /one/ such boundary for both of its types, rather than one
+-- boundary per type.
 --
 -- While in truth, these types aren't /really/ polymorphic (as they cannot hold
 -- thunks, for example), we define them this way for now.
@@ -233,19 +246,20 @@ dropDownScope = over #tracker Vector.tail
 
 -- Given a pair of DeBruijn index and positional index for a variable, note that
 -- we've seen this variable.
-noteUsed :: DeBruijn -> Word64 -> RenameState -> RenameState
+noteUsed :: DeBruijn -> Index -> RenameState -> RenameState
 noteUsed scope index =
-  set (#tracker % ix (asInt scope) % _1 % ix (fromIntegral index)) True
+  set (#tracker % ix (asInt scope) % _1 % ix (review intIndex index)) True
 
 -- | Ways in which the renamer can fail.
 --
 -- @since 1.0.0
 data RenameError
   = -- | An attempt to reference an abstraction in a scope where this
-    -- abstraction doesn't exist.
+    -- abstraction doesn't exist. First field is the true level, second is
+    -- the index that was requested.
     --
     -- @since 1.0.0
-    InvalidAbstractionReference Int Word64
+    InvalidAbstractionReference Int Index
   | -- | A value type specifies an abstraction that never gets used
     -- anywhere. For example, the type @forall a b . [a]@ has @b@
     -- irrelevant.
@@ -334,11 +348,12 @@ renameValT = \case
         ( do
             trueLevel <- gets (\x -> view (#tracker % to Vector.length) x - asInt scope)
             scopeInfo <- gets (\x -> view #tracker x Vector.!? asInt scope)
+            let asIntIx = review intIndex index
             case scopeInfo of
               -- This variable is bound at a scope that encloses our starting
               -- point. Thus, this variable is rigid.
               Nothing -> pure . Rigid trueLevel $ index
-              Just (varTracker, uniqueScopeId) -> case varTracker Vector.!? fromIntegral index of
+              Just (varTracker, uniqueScopeId) -> case varTracker Vector.!? asIntIx of
                 Nothing -> throwError . InvalidAbstractionReference trueLevel $ index
                 Just beenUsed -> do
                   -- Note that we've seen this particular variable

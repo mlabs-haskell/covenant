@@ -3,6 +3,7 @@
 module Main (main) where
 
 import Covenant.DeBruijn (DeBruijn (S, Z))
+import Covenant.Index (ix0, ix1)
 import Covenant.Type
   ( AbstractTy (BoundAt),
     BuiltinFlatT
@@ -115,18 +116,20 @@ propNestedConcrete = forAllShrinkShow arbitrary shrink show $ \(Concrete t) ->
 -- Checks that `forall a . a -> !a` correctly renames.
 testIdT :: IO ()
 testIdT = do
-  let idT = CompT 1 . NonEmpty.consV (Abstraction (BoundAt Z 0)) $ [Abstraction (BoundAt Z 0)]
-  let expected = CompT 1 . NonEmpty.consV (Abstraction (Unifiable 0)) $ [Abstraction (Unifiable 0)]
+  let idT = CompT 1 . NonEmpty.consV (Abstraction (BoundAt Z ix0)) $ [Abstraction (BoundAt Z ix0)]
+  let expected = CompT 1 . NonEmpty.consV (Abstraction (Unifiable ix0)) $ [Abstraction (Unifiable ix0)]
   let result = runRenameM . renameCompT $ idT
   assertRight (assertEqual "" expected) result
 
 -- Checks that `forall a b . a -> b -> !a` correctly renames.
 testConstT :: IO ()
 testConstT = do
-  let absA = BoundAt Z 0
-  let absB = BoundAt Z 1
+  let absA = BoundAt Z ix0
+  let absB = BoundAt Z ix1
   let constT = CompT 2 . NonEmpty.consV (Abstraction absA) $ [Abstraction absB, Abstraction absA]
-  let expected = CompT 2 . NonEmpty.consV (Abstraction (Unifiable 0)) $ [Abstraction (Unifiable 1), Abstraction (Unifiable 0)]
+  let expected =
+        CompT 2 . NonEmpty.consV (Abstraction (Unifiable ix0)) $
+          [Abstraction (Unifiable ix1), Abstraction (Unifiable ix0)]
   let result = runRenameM . renameCompT $ constT
   assertRight (assertEqual "" expected) result
 
@@ -136,14 +139,14 @@ testConstT2 = do
   let constT =
         CompT 1
           . NonEmpty.consV
-            (Abstraction (BoundAt Z 0))
-          $ [ ThunkT . CompT 1 . NonEmpty.consV (Abstraction (BoundAt Z 0)) $ [Abstraction (BoundAt (S Z) 0)]
+            (Abstraction (BoundAt Z ix0))
+          $ [ ThunkT . CompT 1 . NonEmpty.consV (Abstraction (BoundAt Z ix0)) $ [Abstraction (BoundAt (S Z) ix0)]
             ]
   let expected =
         CompT 1
           . NonEmpty.consV
-            (Abstraction (Unifiable 0))
-          $ [ ThunkT . CompT 1 . NonEmpty.consV (Abstraction (Wildcard 1 0)) $ [Abstraction (Unifiable 0)]
+            (Abstraction (Unifiable ix0))
+          $ [ ThunkT . CompT 1 . NonEmpty.consV (Abstraction (Wildcard 1 ix0)) $ [Abstraction (Unifiable ix0)]
             ]
   let result = runRenameM . renameCompT $ constT
   assertRight (assertEqual "" expected) result
@@ -151,16 +154,16 @@ testConstT2 = do
 -- Checks that `forall a . [a] -> !a` correctly renames.
 testHeadListT :: IO ()
 testHeadListT = do
-  let absA = BoundAt Z 0
-  let absAInner = BoundAt (S Z) 0
+  let absA = BoundAt Z ix0
+  let absAInner = BoundAt (S Z) ix0
   let headListT =
         CompT 1
           . NonEmpty.consV (BuiltinNested (ListT 0 (Abstraction absAInner)))
           $ [Abstraction absA]
   let expected =
         CompT 1
-          . NonEmpty.consV (BuiltinNested (ListT 0 (Abstraction (Unifiable 0))))
-          $ [Abstraction (Unifiable 0)]
+          . NonEmpty.consV (BuiltinNested (ListT 0 (Abstraction (Unifiable ix0))))
+          $ [Abstraction (Unifiable ix0)]
   let result = runRenameM . renameCompT $ headListT
   assertRight (assertEqual "" expected) result
 
@@ -170,13 +173,13 @@ testSndPairT = do
   let sndPairT =
         CompT 2
           . NonEmpty.consV
-            (BuiltinNested (PairT 0 (Abstraction (BoundAt (S Z) 0)) (Abstraction (BoundAt (S Z) 1))))
-          $ [Abstraction (BoundAt Z 1)]
+            (BuiltinNested (PairT 0 (Abstraction (BoundAt (S Z) ix0)) (Abstraction (BoundAt (S Z) ix1))))
+          $ [Abstraction (BoundAt Z ix1)]
   let expected =
         CompT 2
           . NonEmpty.consV
-            (BuiltinNested (PairT 0 (Abstraction (Unifiable 0)) (Abstraction (Unifiable 1))))
-          $ [Abstraction (Unifiable 1)]
+            (BuiltinNested (PairT 0 (Abstraction (Unifiable ix0)) (Abstraction (Unifiable ix1))))
+          $ [Abstraction (Unifiable ix1)]
   let result = runRenameM . renameCompT $ sndPairT
   assertRight (assertEqual "" expected) result
 
@@ -188,26 +191,26 @@ testMapT = do
   let mapThunkT =
         ThunkT
           . CompT 0
-          . NonEmpty.consV (Abstraction (BoundAt (S Z) 0))
-          $ [Abstraction (BoundAt (S Z) 1)]
+          . NonEmpty.consV (Abstraction (BoundAt (S Z) ix0))
+          $ [Abstraction (BoundAt (S Z) ix1)]
   let mapT =
         CompT 2
           . NonEmpty.consV
             mapThunkT
-          $ [ BuiltinNested (ListT 0 (Abstraction (BoundAt (S Z) 0))),
-              BuiltinNested (ListT 0 (Abstraction (BoundAt (S Z) 1)))
+          $ [ BuiltinNested (ListT 0 (Abstraction (BoundAt (S Z) ix0))),
+              BuiltinNested (ListT 0 (Abstraction (BoundAt (S Z) ix1)))
             ]
   let expectedMapThunkT =
         ThunkT
           . CompT 0
-          . NonEmpty.consV (Abstraction (Rigid 0 0))
-          $ [Abstraction (Rigid 0 1)]
+          . NonEmpty.consV (Abstraction (Rigid 0 ix0))
+          $ [Abstraction (Rigid 0 ix1)]
   let expectedMapT =
         CompT 2
           . NonEmpty.consV
-            (ThunkT . CompT 0 . NonEmpty.consV (Abstraction (Unifiable 0)) $ [Abstraction (Unifiable 1)])
-          $ [ BuiltinNested (ListT 0 (Abstraction (Unifiable 0))),
-              BuiltinNested (ListT 0 (Abstraction (Unifiable 1)))
+            (ThunkT . CompT 0 . NonEmpty.consV (Abstraction (Unifiable ix0)) $ [Abstraction (Unifiable ix1)])
+          $ [ BuiltinNested (ListT 0 (Abstraction (Unifiable ix0))),
+              BuiltinNested (ListT 0 (Abstraction (Unifiable ix1)))
             ]
   let resultThunkT = runRenameM . renameValT $ mapThunkT
   assertRight (assertEqual "" expectedMapThunkT) resultThunkT
@@ -218,16 +221,16 @@ testMapT = do
 testPairT :: IO ()
 testPairT = do
   let pairT =
-        BuiltinNested . PairT 2 (Abstraction (BoundAt Z 0)) . Abstraction . BoundAt Z $ 1
+        BuiltinNested . PairT 2 (Abstraction (BoundAt Z ix0)) . Abstraction . BoundAt Z $ ix1
   let expected =
-        BuiltinNested . PairT 2 (Abstraction (Unifiable 0)) . Abstraction . Unifiable $ 1
+        BuiltinNested . PairT 2 (Abstraction (Unifiable ix0)) . Abstraction . Unifiable $ ix1
   let result = runRenameM . renameValT $ pairT
   assertRight (assertEqual "" expected) result
 
 -- Checks that `forall a b . [a]` triggers the irrelevance checker.
 testDodgyListT :: IO ()
 testDodgyListT = do
-  let listT = BuiltinNested . ListT 2 $ Abstraction (BoundAt Z 0)
+  let listT = BuiltinNested . ListT 2 $ Abstraction (BoundAt Z ix0)
   let result = runRenameM . renameValT $ listT
   case result of
     Left IrrelevantAbstraction -> assertBool "" True
@@ -237,7 +240,7 @@ testDodgyListT = do
 -- Checks that `forall a b . a -> !a` triggers the overdeterminance checker.
 testDodgyIdT :: IO ()
 testDodgyIdT = do
-  let idT = CompT 2 . NonEmpty.consV (Abstraction (BoundAt Z 0)) $ [Abstraction (BoundAt Z 0)]
+  let idT = CompT 2 . NonEmpty.consV (Abstraction (BoundAt Z ix0)) $ [Abstraction (BoundAt Z ix0)]
   let result = runRenameM . renameCompT $ idT
   case result of
     Left OverdeterminateAbstraction -> assertBool "" True
@@ -248,8 +251,8 @@ testDodgyIdT = do
 testDodgyConstT :: IO ()
 testDodgyConstT = do
   let constT =
-        CompT 2 . NonEmpty.consV (Abstraction (BoundAt Z 0)) $
-          [ ThunkT (CompT 0 . NonEmpty.consV (Abstraction (BoundAt (S Z) 1)) $ [Abstraction (BoundAt (S Z) 0)])
+        CompT 2 . NonEmpty.consV (Abstraction (BoundAt Z ix0)) $
+          [ ThunkT (CompT 0 . NonEmpty.consV (Abstraction (BoundAt (S Z) ix1)) $ [Abstraction (BoundAt (S Z) ix0)])
           ]
   let result = runRenameM . renameCompT $ constT
   case result of
@@ -260,12 +263,12 @@ testDodgyConstT = do
 -- Checks that `forall a . b -> !a` triggers the variable indexing checker.
 testIndexingIdT :: IO ()
 testIndexingIdT = do
-  let t = CompT 1 . NonEmpty.consV (Abstraction (BoundAt Z 0)) $ [Abstraction (BoundAt Z 1)]
+  let t = CompT 1 . NonEmpty.consV (Abstraction (BoundAt Z ix0)) $ [Abstraction (BoundAt Z ix1)]
   let result = runRenameM . renameCompT $ t
   case result of
     Left (InvalidAbstractionReference trueLevel ix) -> do
       assertEqual "" trueLevel 1
-      assertEqual "" ix 1
+      assertEqual "" ix ix1
     Left _ -> assertBool "wrong renaming error" False
     _ -> assertBool "renaming succeeded when it should have failed" False
 
