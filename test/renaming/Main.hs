@@ -18,7 +18,11 @@ import Covenant.Type
       ),
     BuiltinNestedT (ListT, PairT),
     CompT (CompT),
-    RenameError (InvalidAbstractionReference, IrrelevantAbstraction),
+    RenameError
+      ( InvalidAbstractionReference,
+        IrrelevantAbstraction,
+        OverdeterminateAbstraction
+      ),
     Renamed (Rigid, Unifiable, Wildcard),
     ValT (Abstraction, BuiltinFlat, BuiltinNested, ThunkT),
     renameCompT,
@@ -70,8 +74,12 @@ main =
       testCase "forall a b . (a, b)" testPairT,
       testGroup
         "Irrelevance"
-        [ testCase "forall a b . a -> !a" testDodgyIdT,
-          testCase "forall a b . a -> !(b -> !a)" testDodgyConstT
+        [ testCase "forall a b . [a]" testDodgyListT
+        ],
+      testGroup
+        "Overdeterminance"
+        [ testCase "forall a b . a -> !(b -> !a)" testDodgyConstT,
+          testCase "forall a b . a -> !a" testDodgyIdT
         ],
       testGroup
         "Non-existent abstractions"
@@ -216,17 +224,27 @@ testPairT = do
   let result = runRenameM . renameValT $ pairT
   assertRight (assertEqual "" expected) result
 
--- Checks that `forall a b . a -> !a` triggers the irrelevance checker.
-testDodgyIdT :: IO ()
-testDodgyIdT = do
-  let idT = CompT 2 . NonEmpty.consV (Abstraction (BoundAt Z 0)) $ [Abstraction (BoundAt Z 0)]
-  let result = runRenameM . renameCompT $ idT
+-- Checks that `forall a b . [a]` triggers the irrelevance checker.
+testDodgyListT :: IO ()
+testDodgyListT = do
+  let listT = BuiltinNested . ListT 2 $ Abstraction (BoundAt Z 0)
+  let result = runRenameM . renameValT $ listT
   case result of
     Left IrrelevantAbstraction -> assertBool "" True
     Left _ -> assertBool "wrong renaming error" False
     _ -> assertBool "renaming succeeded when it should have failed" False
 
--- Checks that `forall a b. a -> !(b -> !a)` triggers the irrelevance checker.
+-- Checks that `forall a b . a -> !a` triggers the overdeterminance checker.
+testDodgyIdT :: IO ()
+testDodgyIdT = do
+  let idT = CompT 2 . NonEmpty.consV (Abstraction (BoundAt Z 0)) $ [Abstraction (BoundAt Z 0)]
+  let result = runRenameM . renameCompT $ idT
+  case result of
+    Left OverdeterminateAbstraction -> assertBool "" True
+    Left _ -> assertBool "wrong renaming error" False
+    _ -> assertBool "renaming succeeded when it should have failed" False
+
+-- Checks that `forall a b. a -> !(b -> !a)` triggers the overdeterminance checker.
 testDodgyConstT :: IO ()
 testDodgyConstT = do
   let constT =
@@ -235,7 +253,7 @@ testDodgyConstT = do
           ]
   let result = runRenameM . renameCompT $ constT
   case result of
-    Left IrrelevantAbstraction -> assertBool "" True
+    Left OverdeterminateAbstraction -> assertBool "" True
     Left _ -> assertBool "wrong renaming error" False
     _ -> assertBool "renaming succeeded when it should have failed" False
 

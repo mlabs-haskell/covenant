@@ -20,11 +20,18 @@ import Covenant.DeBruijn (DeBruijn, asInt)
 import Data.Coerce (coerce)
 import Data.Functor.Classes (Eq1 (liftEq))
 import Data.Kind (Type)
+import Data.Tuple.Optics (_1)
 import Data.Vector (Vector)
 import Data.Vector qualified as Vector
 import Data.Vector.NonEmpty (NonEmptyVector)
 import Data.Vector.NonEmpty qualified as NonEmpty
 import Data.Word (Word64)
+import Optics.At (ix)
+import Optics.Getter (to, view)
+import Optics.Label (LabelOptic (labelOptic))
+import Optics.Lens (A_Lens, lens)
+import Optics.Optic ((%))
+import Optics.Setter (over, set)
 
 -- | A type abstraction, using a DeBruijn index.
 --
@@ -183,12 +190,74 @@ instance Eq1 BuiltinNestedT where
       PairT abses2 t21 t22 -> abses1 == abses2 && liftEq f t11 t21 && liftEq f t12 t22
       _ -> False
 
+-- Used during renaming. Contains a source of fresh indices for wildcards, as
+-- well as tracking:
+--
+-- 1. How many variables are bound by each scope;
+-- 2. Which of these variables have been noted as used; and
+-- 3. A unique identifier for each scope (for wildcards).
 data RenameState = RenameState Word64 (Vector (Vector Bool, Word64))
   deriving stock (Eq, Show)
 
+instance
+  (k ~ A_Lens, a ~ Word64, b ~ Word64) =>
+  LabelOptic "idSource" k RenameState RenameState a b
+  where
+  {-# INLINEABLE labelOptic #-}
+  labelOptic =
+    lens
+      (\(RenameState x _) -> x)
+      (\(RenameState _ y) x' -> RenameState x' y)
+
+instance
+  (k ~ A_Lens, a ~ Vector (Vector Bool, Word64), b ~ Vector (Vector Bool, Word64)) =>
+  LabelOptic "tracker" k RenameState RenameState a b
+  where
+  {-# INLINEABLE labelOptic #-}
+  labelOptic =
+    lens
+      (\(RenameState _ y) -> y)
+      (\(RenameState x _) y' -> RenameState x y')
+
+-- Given a number of abstractions bound by a scope, modify the state to track
+-- that scope.
+stepUpScope :: Word64 -> RenameState -> RenameState
+stepUpScope abses x =
+  let fresh = view #idSource x
+      entry = (Vector.replicate (fromIntegral abses) False, fresh)
+   in over #tracker (Vector.cons entry) . set #idSource (fresh + 1) $ x
+
+-- Stop tracking the last scope we added.
+dropDownScope :: RenameState -> RenameState
+dropDownScope = over #tracker Vector.tail
+
+-- Given a pair of DeBruijn index and positional index for a variable, note that
+-- we've seen this variable.
+noteUsed :: DeBruijn -> Word64 -> RenameState -> RenameState
+noteUsed scope index =
+  set (#tracker % ix (asInt scope) % _1 % ix (fromIntegral index)) True
+
+-- | Ways in which the renamer can fail.
+--
+-- @since 1.0.0
 data RenameError
-  = InvalidAbstractionReference Int Word64
-  | IrrelevantAbstraction
+  = -- | An attempt to reference an abstraction in a scope where this
+    -- abstraction doesn't exist.
+    --
+    -- @since 1.0.0
+    InvalidAbstractionReference Int Word64
+  | -- | A value type specifies an abstraction that never gets used
+    -- anywhere. For example, the type @forall a b . [a]@ has @b@
+    -- irrelevant.
+    --
+    -- @since 1.0.0
+    IrrelevantAbstraction
+  | -- | A computation type specifies an abstraction which is not used
+    -- by any argument. For example, the type @forall a b . a -> !(b -> !a)@
+    -- has @b@ overdeterminate.
+    --
+    -- @since 1.0.0
+    OverdeterminateAbstraction
   deriving stock (Eq, Show)
 
 -- | A \'renaming monad\' which allows us to convert type representations from
@@ -224,60 +293,62 @@ newtype RenameM (a :: Type)
     )
     via (ExceptT RenameError (State RenameState))
 
+-- | Execute a renaming computation.
+--
+-- @since 1.0.0
 runRenameM ::
   forall (a :: Type).
   RenameM a -> Either RenameError a
 runRenameM (RenameM comp) = evalState (runExceptT comp) . RenameState 0 $ Vector.empty
 
+-- | Rename a computation type.
+--
+-- @since 1.0.0
 renameCompT :: CompT AbstractTy -> RenameM (CompT Renamed)
 renameCompT (CompT abses xs) = RenameM $ do
   -- Step up a scope
-  modify
-    ( \(RenameState fresh tracker) ->
-        RenameState
-          (fresh + 1)
-          (Vector.cons (Vector.replicate (fromIntegral abses) False, fresh) tracker)
-    )
+  modify (stepUpScope abses)
   -- Rename, but only the arguments
-  renamedArgs <- Vector.generateM (NonEmpty.length xs - 1) (\i -> coerce . renameValT $ xs NonEmpty.! i)
-  -- Check the relevance condition is met
-  ourAbstractions <- gets (\(RenameState _ tracker) -> fst . Vector.head $ tracker)
-  unless (Vector.and ourAbstractions) (throwError IrrelevantAbstraction)
+  renamedArgs <-
+    Vector.generateM
+      (NonEmpty.length xs - 1)
+      (\i -> coerce . renameValT $ xs NonEmpty.! i)
+  -- Check that we don't overdetermine anything
+  ourAbstractions <- gets (view (#tracker % to Vector.head % _1))
+  unless (Vector.and ourAbstractions) (throwError OverdeterminateAbstraction)
   -- Check result type
   renamedResult <- coerce . renameValT . NonEmpty.last $ xs
   -- Roll back state
-  modify (\(RenameState fresh tracker) -> RenameState fresh (Vector.tail tracker))
+  modify dropDownScope
   -- Rebuild and return
   pure . CompT abses . NonEmpty.snocV renamedArgs $ renamedResult
 
+-- | Rename a value type.
+--
+-- @since 1.0.0
 renameValT :: ValT AbstractTy -> RenameM (ValT Renamed)
 renameValT = \case
-  Abstraction (BoundAt scope ix) ->
+  Abstraction (BoundAt scope index) ->
     Abstraction
       <$> RenameM
         ( do
-            trueLevel <- gets (\(RenameState _ tracker) -> Vector.length tracker - asInt scope)
-            scopeInfo <- gets (\(RenameState _ tracker) -> tracker Vector.!? asInt scope)
+            trueLevel <- gets (\x -> view (#tracker % to Vector.length) x - asInt scope)
+            scopeInfo <- gets (\x -> view #tracker x Vector.!? asInt scope)
             case scopeInfo of
               -- This variable is bound at a scope that encloses our starting
               -- point. Thus, this variable is rigid.
-              Nothing -> pure . Rigid trueLevel $ ix
-              Just (varTracker, uniqueScopeId) -> case varTracker Vector.!? fromIntegral ix of
-                Nothing -> throwError . InvalidAbstractionReference trueLevel $ ix
+              Nothing -> pure . Rigid trueLevel $ index
+              Just (varTracker, uniqueScopeId) -> case varTracker Vector.!? fromIntegral index of
+                Nothing -> throwError . InvalidAbstractionReference trueLevel $ index
                 Just beenUsed -> do
                   -- Note that we've seen this particular variable
-                  unless
-                    beenUsed
-                    ( modify $ \(RenameState fresh tracker) ->
-                        let varTracker' = varTracker Vector.// [(fromIntegral ix, True)]
-                         in RenameState fresh $ tracker Vector.// [(asInt scope, (varTracker', uniqueScopeId))]
-                    )
+                  unless beenUsed (modify (noteUsed scope index))
                   pure $
                     if trueLevel == 1
                       -- If the true level is 1, this is a unifiable
-                      then Unifiable ix
+                      then Unifiable index
                       -- This variable is a wildcard
-                      else Wildcard uniqueScopeId ix
+                      else Wildcard uniqueScopeId index
         )
   ThunkT t -> ThunkT <$> renameCompT t
   BuiltinFlat t -> pure . BuiltinFlat $ t
@@ -285,38 +356,26 @@ renameValT = \case
     BuiltinNested <$> case t of
       ListT abses t' -> RenameM $ do
         -- Step up a scope
-        modify
-          ( \(RenameState fresh tracker) ->
-              RenameState
-                (fresh + 1)
-                (Vector.cons (Vector.replicate (fromIntegral abses) False, fresh) tracker)
-          )
+        modify (stepUpScope abses)
         -- Rename the inner type
         renamed <- coerce . renameValT $ t'
-        -- Check the use condition is met
-        ourAbstractions <- gets (\(RenameState _ tracker) -> fst . Vector.head $ tracker)
+        -- Check that we don't have anything irrelevant
+        ourAbstractions <- gets (view (#tracker % to Vector.head % _1))
         unless (Vector.and ourAbstractions) (throwError IrrelevantAbstraction)
         -- Roll back state
-        modify
-          (\(RenameState fresh tracker) -> RenameState fresh (Vector.tail tracker))
+        modify dropDownScope
         -- Rebuild and return
         pure . ListT abses $ renamed
       PairT abses t1 t2 -> RenameM $ do
         -- Step up a scope
-        modify
-          ( \(RenameState fresh tracker) ->
-              RenameState
-                (fresh + 1)
-                (Vector.cons (Vector.replicate (fromIntegral abses) False, fresh) tracker)
-          )
+        modify (stepUpScope abses)
         -- Rename t1, then t2, without any scope shifts
         renamed1 <- coerce . renameValT $ t1
         renamed2 <- coerce . renameValT $ t2
-        -- Check the use condition is met
-        ourAbstractions <- gets (\(RenameState _ tracker) -> fst . Vector.head $ tracker)
+        -- Check we don't have anything irrelevant
+        ourAbstractions <- gets (view (#tracker % to Vector.head % _1))
         unless (Vector.and ourAbstractions) (throwError IrrelevantAbstraction)
         -- Roll back state
-        modify
-          (\(RenameState fresh tracker) -> RenameState fresh (Vector.tail tracker))
+        modify dropDownScope
         -- Rebuild and return
         pure . PairT abses renamed1 $ renamed2
