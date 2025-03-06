@@ -92,6 +92,7 @@ library
     Control.Monad.HashCons
     Covenant.ASG
     Covenant.Constant
+    Covenant.DeBruijn
     Covenant.Ledger
     Covenant.Prim
     Covenant.Type

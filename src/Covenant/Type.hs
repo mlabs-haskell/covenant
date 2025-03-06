@@ -16,6 +16,7 @@ where
 import Control.Monad (unless)
 import Control.Monad.Except (ExceptT, MonadError (throwError), runExceptT)
 import Control.Monad.State.Strict (State, evalState, gets, modify)
+import Covenant.DeBruijn (DeBruijn, asInt)
 import Data.Coerce (coerce)
 import Data.Functor.Classes (Eq1 (liftEq))
 import Data.Kind (Type)
@@ -29,13 +30,12 @@ import Data.Word (Word64)
 --
 -- = Important note
 --
--- This is a /relative/ representation: @'BoundAt' 1 0@ could refer to different
--- things at different points in the ASG. Note that only the first field is a
--- DeBruijn index: the second indicates which type variable bound at that
--- \'level\' we mean.
+-- This is a /relative/ representation: @'BoundAt' ('S' 'Z') 0@ could refer to different
+-- things at different points in the ASG. The second field indicates which type variable
+-- bound at that \'level\' we mean.
 --
 -- @since 1.0.0
-data AbstractTy = BoundAt Word64 Word64
+data AbstractTy = BoundAt DeBruijn Word64
   deriving stock
     ( -- | @since 1.0.0
       Eq,
@@ -256,8 +256,8 @@ renameValT = \case
     Abstraction
       <$> RenameM
         ( do
-            trueLevel <- gets (\(RenameState _ tracker) -> Vector.length tracker - fromIntegral scope)
-            scopeInfo <- gets (\(RenameState _ tracker) -> tracker Vector.!? fromIntegral scope)
+            trueLevel <- gets (\(RenameState _ tracker) -> Vector.length tracker - asInt scope)
+            scopeInfo <- gets (\(RenameState _ tracker) -> tracker Vector.!? asInt scope)
             case scopeInfo of
               -- This variable is bound at a scope that encloses our starting
               -- point. Thus, this variable is rigid.
@@ -270,7 +270,7 @@ renameValT = \case
                     beenUsed
                     ( modify $ \(RenameState fresh tracker) ->
                         let varTracker' = varTracker Vector.// [(fromIntegral ix, True)]
-                         in RenameState fresh $ tracker Vector.// [(fromIntegral scope, (varTracker', uniqueScopeId))]
+                         in RenameState fresh $ tracker Vector.// [(asInt scope, (varTracker', uniqueScopeId))]
                     )
                   pure $
                     if trueLevel == 1

@@ -2,6 +2,7 @@
 
 module Main (main) where
 
+import Covenant.DeBruijn (DeBruijn (S, Z))
 import Covenant.Type
   ( AbstractTy (BoundAt),
     BuiltinFlatT
@@ -106,7 +107,7 @@ propNestedConcrete = forAllShrinkShow arbitrary shrink show $ \(Concrete t) ->
 -- Checks that `forall a . a -> !a` correctly renames.
 testIdT :: IO ()
 testIdT = do
-  let idT = CompT 1 . NonEmpty.consV (Abstraction (BoundAt 0 0)) $ [Abstraction (BoundAt 0 0)]
+  let idT = CompT 1 . NonEmpty.consV (Abstraction (BoundAt Z 0)) $ [Abstraction (BoundAt Z 0)]
   let expected = CompT 1 . NonEmpty.consV (Abstraction (Unifiable 0)) $ [Abstraction (Unifiable 0)]
   let result = runRenameM . renameCompT $ idT
   assertRight (assertEqual "" expected) result
@@ -114,8 +115,8 @@ testIdT = do
 -- Checks that `forall a b . a -> b -> !a` correctly renames.
 testConstT :: IO ()
 testConstT = do
-  let absA = BoundAt 0 0
-  let absB = BoundAt 0 1
+  let absA = BoundAt Z 0
+  let absB = BoundAt Z 1
   let constT = CompT 2 . NonEmpty.consV (Abstraction absA) $ [Abstraction absB, Abstraction absA]
   let expected = CompT 2 . NonEmpty.consV (Abstraction (Unifiable 0)) $ [Abstraction (Unifiable 1), Abstraction (Unifiable 0)]
   let result = runRenameM . renameCompT $ constT
@@ -127,8 +128,8 @@ testConstT2 = do
   let constT =
         CompT 1
           . NonEmpty.consV
-            (Abstraction (BoundAt 0 0))
-          $ [ ThunkT . CompT 1 . NonEmpty.consV (Abstraction (BoundAt 0 0)) $ [Abstraction (BoundAt 1 0)]
+            (Abstraction (BoundAt Z 0))
+          $ [ ThunkT . CompT 1 . NonEmpty.consV (Abstraction (BoundAt Z 0)) $ [Abstraction (BoundAt (S Z) 0)]
             ]
   let expected =
         CompT 1
@@ -142,8 +143,8 @@ testConstT2 = do
 -- Checks that `forall a . [a] -> !a` correctly renames.
 testHeadListT :: IO ()
 testHeadListT = do
-  let absA = BoundAt 0 0
-  let absAInner = BoundAt 1 0
+  let absA = BoundAt Z 0
+  let absAInner = BoundAt (S Z) 0
   let headListT =
         CompT 1
           . NonEmpty.consV (BuiltinNested (ListT 0 (Abstraction absAInner)))
@@ -161,8 +162,8 @@ testSndPairT = do
   let sndPairT =
         CompT 2
           . NonEmpty.consV
-            (BuiltinNested (PairT 0 (Abstraction (BoundAt 1 0)) (Abstraction (BoundAt 1 1))))
-          $ [Abstraction (BoundAt 0 1)]
+            (BuiltinNested (PairT 0 (Abstraction (BoundAt (S Z) 0)) (Abstraction (BoundAt (S Z) 1))))
+          $ [Abstraction (BoundAt Z 1)]
   let expected =
         CompT 2
           . NonEmpty.consV
@@ -179,14 +180,14 @@ testMapT = do
   let mapThunkT =
         ThunkT
           . CompT 0
-          . NonEmpty.consV (Abstraction (BoundAt 1 0))
-          $ [Abstraction (BoundAt 1 1)]
+          . NonEmpty.consV (Abstraction (BoundAt (S Z) 0))
+          $ [Abstraction (BoundAt (S Z) 1)]
   let mapT =
         CompT 2
           . NonEmpty.consV
             mapThunkT
-          $ [ BuiltinNested (ListT 0 (Abstraction (BoundAt 1 0))),
-              BuiltinNested (ListT 0 (Abstraction (BoundAt 1 1)))
+          $ [ BuiltinNested (ListT 0 (Abstraction (BoundAt (S Z) 0))),
+              BuiltinNested (ListT 0 (Abstraction (BoundAt (S Z) 1)))
             ]
   let expectedMapThunkT =
         ThunkT
@@ -209,7 +210,7 @@ testMapT = do
 testPairT :: IO ()
 testPairT = do
   let pairT =
-        BuiltinNested . PairT 2 (Abstraction (BoundAt 0 0)) . Abstraction . BoundAt 0 $ 1
+        BuiltinNested . PairT 2 (Abstraction (BoundAt Z 0)) . Abstraction . BoundAt Z $ 1
   let expected =
         BuiltinNested . PairT 2 (Abstraction (Unifiable 0)) . Abstraction . Unifiable $ 1
   let result = runRenameM . renameValT $ pairT
@@ -218,7 +219,7 @@ testPairT = do
 -- Checks that `forall a b . a -> !a` triggers the irrelevance checker.
 testDodgyIdT :: IO ()
 testDodgyIdT = do
-  let idT = CompT 2 . NonEmpty.consV (Abstraction (BoundAt 0 0)) $ [Abstraction (BoundAt 0 0)]
+  let idT = CompT 2 . NonEmpty.consV (Abstraction (BoundAt Z 0)) $ [Abstraction (BoundAt Z 0)]
   let result = runRenameM . renameCompT $ idT
   case result of
     Left IrrelevantAbstraction -> assertBool "" True
@@ -229,8 +230,8 @@ testDodgyIdT = do
 testDodgyConstT :: IO ()
 testDodgyConstT = do
   let constT =
-        CompT 2 . NonEmpty.consV (Abstraction (BoundAt 0 0)) $
-          [ ThunkT (CompT 0 . NonEmpty.consV (Abstraction (BoundAt 1 1)) $ [Abstraction (BoundAt 1 0)])
+        CompT 2 . NonEmpty.consV (Abstraction (BoundAt Z 0)) $
+          [ ThunkT (CompT 0 . NonEmpty.consV (Abstraction (BoundAt (S Z) 1)) $ [Abstraction (BoundAt (S Z) 0)])
           ]
   let result = runRenameM . renameCompT $ constT
   case result of
@@ -241,7 +242,7 @@ testDodgyConstT = do
 -- Checks that `forall a . b -> !a` triggers the variable indexing checker.
 testIndexingIdT :: IO ()
 testIndexingIdT = do
-  let t = CompT 1 . NonEmpty.consV (Abstraction (BoundAt 0 0)) $ [Abstraction (BoundAt 0 1)]
+  let t = CompT 1 . NonEmpty.consV (Abstraction (BoundAt Z 0)) $ [Abstraction (BoundAt Z 1)]
   let result = runRenameM . renameCompT $ t
   case result of
     Left (InvalidAbstractionReference trueLevel ix) -> do
