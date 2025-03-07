@@ -3,7 +3,7 @@
 module Main (main) where
 
 import Covenant.DeBruijn (DeBruijn (S, Z))
-import Covenant.Index (ix0, ix1)
+import Covenant.Index (count0, count1, count2, ix0, ix1)
 import Covenant.Type
   ( AbstractTy (BoundAt),
     BuiltinFlatT
@@ -116,8 +116,14 @@ propNestedConcrete = forAllShrinkShow arbitrary shrink show $ \(Concrete t) ->
 -- Checks that `forall a . a -> !a` correctly renames.
 testIdT :: IO ()
 testIdT = do
-  let idT = CompT 1 . NonEmpty.consV (Abstraction (BoundAt Z ix0)) $ [Abstraction (BoundAt Z ix0)]
-  let expected = CompT 1 . NonEmpty.consV (Abstraction (Unifiable ix0)) $ [Abstraction (Unifiable ix0)]
+  let idT =
+        CompT count1
+          . NonEmpty.consV (Abstraction (BoundAt Z ix0))
+          $ [Abstraction (BoundAt Z ix0)]
+  let expected =
+        CompT count1
+          . NonEmpty.consV (Abstraction (Unifiable ix0))
+          $ [Abstraction (Unifiable ix0)]
   let result = runRenameM . renameCompT $ idT
   assertRight (assertEqual "" expected) result
 
@@ -126,10 +132,14 @@ testConstT :: IO ()
 testConstT = do
   let absA = BoundAt Z ix0
   let absB = BoundAt Z ix1
-  let constT = CompT 2 . NonEmpty.consV (Abstraction absA) $ [Abstraction absB, Abstraction absA]
+  let constT =
+        CompT count2
+          . NonEmpty.consV (Abstraction absA)
+          $ [Abstraction absB, Abstraction absA]
   let expected =
-        CompT 2 . NonEmpty.consV (Abstraction (Unifiable ix0)) $
-          [Abstraction (Unifiable ix1), Abstraction (Unifiable ix0)]
+        CompT count2
+          . NonEmpty.consV (Abstraction (Unifiable ix0))
+          $ [Abstraction (Unifiable ix1), Abstraction (Unifiable ix0)]
   let result = runRenameM . renameCompT $ constT
   assertRight (assertEqual "" expected) result
 
@@ -137,16 +147,16 @@ testConstT = do
 testConstT2 :: IO ()
 testConstT2 = do
   let constT =
-        CompT 1
+        CompT count1
           . NonEmpty.consV
             (Abstraction (BoundAt Z ix0))
-          $ [ ThunkT . CompT 1 . NonEmpty.consV (Abstraction (BoundAt Z ix0)) $ [Abstraction (BoundAt (S Z) ix0)]
+          $ [ ThunkT . CompT count1 . NonEmpty.consV (Abstraction (BoundAt Z ix0)) $ [Abstraction (BoundAt (S Z) ix0)]
             ]
   let expected =
-        CompT 1
+        CompT count1
           . NonEmpty.consV
             (Abstraction (Unifiable ix0))
-          $ [ ThunkT . CompT 1 . NonEmpty.consV (Abstraction (Wildcard 1 ix0)) $ [Abstraction (Unifiable ix0)]
+          $ [ ThunkT . CompT count1 . NonEmpty.consV (Abstraction (Wildcard 1 ix0)) $ [Abstraction (Unifiable ix0)]
             ]
   let result = runRenameM . renameCompT $ constT
   assertRight (assertEqual "" expected) result
@@ -157,12 +167,12 @@ testHeadListT = do
   let absA = BoundAt Z ix0
   let absAInner = BoundAt (S Z) ix0
   let headListT =
-        CompT 1
-          . NonEmpty.consV (BuiltinNested (ListT 0 (Abstraction absAInner)))
+        CompT count1
+          . NonEmpty.consV (BuiltinNested (ListT count0 (Abstraction absAInner)))
           $ [Abstraction absA]
   let expected =
-        CompT 1
-          . NonEmpty.consV (BuiltinNested (ListT 0 (Abstraction (Unifiable ix0))))
+        CompT count1
+          . NonEmpty.consV (BuiltinNested (ListT count0 (Abstraction (Unifiable ix0))))
           $ [Abstraction (Unifiable ix0)]
   let result = runRenameM . renameCompT $ headListT
   assertRight (assertEqual "" expected) result
@@ -171,14 +181,14 @@ testHeadListT = do
 testSndPairT :: IO ()
 testSndPairT = do
   let sndPairT =
-        CompT 2
+        CompT count2
           . NonEmpty.consV
-            (BuiltinNested (PairT 0 (Abstraction (BoundAt (S Z) ix0)) (Abstraction (BoundAt (S Z) ix1))))
+            (BuiltinNested (PairT count0 (Abstraction (BoundAt (S Z) ix0)) (Abstraction (BoundAt (S Z) ix1))))
           $ [Abstraction (BoundAt Z ix1)]
   let expected =
-        CompT 2
+        CompT count2
           . NonEmpty.consV
-            (BuiltinNested (PairT 0 (Abstraction (Unifiable ix0)) (Abstraction (Unifiable ix1))))
+            (BuiltinNested (PairT count0 (Abstraction (Unifiable ix0)) (Abstraction (Unifiable ix1))))
           $ [Abstraction (Unifiable ix1)]
   let result = runRenameM . renameCompT $ sndPairT
   assertRight (assertEqual "" expected) result
@@ -190,27 +200,27 @@ testMapT :: IO ()
 testMapT = do
   let mapThunkT =
         ThunkT
-          . CompT 0
+          . CompT count0
           . NonEmpty.consV (Abstraction (BoundAt (S Z) ix0))
           $ [Abstraction (BoundAt (S Z) ix1)]
   let mapT =
-        CompT 2
+        CompT count2
           . NonEmpty.consV
             mapThunkT
-          $ [ BuiltinNested (ListT 0 (Abstraction (BoundAt (S Z) ix0))),
-              BuiltinNested (ListT 0 (Abstraction (BoundAt (S Z) ix1)))
+          $ [ BuiltinNested (ListT count0 (Abstraction (BoundAt (S Z) ix0))),
+              BuiltinNested (ListT count0 (Abstraction (BoundAt (S Z) ix1)))
             ]
   let expectedMapThunkT =
         ThunkT
-          . CompT 0
+          . CompT count0
           . NonEmpty.consV (Abstraction (Rigid 0 ix0))
           $ [Abstraction (Rigid 0 ix1)]
   let expectedMapT =
-        CompT 2
+        CompT count2
           . NonEmpty.consV
-            (ThunkT . CompT 0 . NonEmpty.consV (Abstraction (Unifiable ix0)) $ [Abstraction (Unifiable ix1)])
-          $ [ BuiltinNested (ListT 0 (Abstraction (Unifiable ix0))),
-              BuiltinNested (ListT 0 (Abstraction (Unifiable ix1)))
+            (ThunkT . CompT count0 . NonEmpty.consV (Abstraction (Unifiable ix0)) $ [Abstraction (Unifiable ix1)])
+          $ [ BuiltinNested (ListT count0 (Abstraction (Unifiable ix0))),
+              BuiltinNested (ListT count0 (Abstraction (Unifiable ix1)))
             ]
   let resultThunkT = runRenameM . renameValT $ mapThunkT
   assertRight (assertEqual "" expectedMapThunkT) resultThunkT
@@ -221,16 +231,24 @@ testMapT = do
 testPairT :: IO ()
 testPairT = do
   let pairT =
-        BuiltinNested . PairT 2 (Abstraction (BoundAt Z ix0)) . Abstraction . BoundAt Z $ ix1
+        BuiltinNested
+          . PairT count2 (Abstraction (BoundAt Z ix0))
+          . Abstraction
+          . BoundAt Z
+          $ ix1
   let expected =
-        BuiltinNested . PairT 2 (Abstraction (Unifiable ix0)) . Abstraction . Unifiable $ ix1
+        BuiltinNested
+          . PairT count2 (Abstraction (Unifiable ix0))
+          . Abstraction
+          . Unifiable
+          $ ix1
   let result = runRenameM . renameValT $ pairT
   assertRight (assertEqual "" expected) result
 
 -- Checks that `forall a b . [a]` triggers the irrelevance checker.
 testDodgyListT :: IO ()
 testDodgyListT = do
-  let listT = BuiltinNested . ListT 2 $ Abstraction (BoundAt Z ix0)
+  let listT = BuiltinNested . ListT count2 $ Abstraction (BoundAt Z ix0)
   let result = runRenameM . renameValT $ listT
   case result of
     Left IrrelevantAbstraction -> assertBool "" True
@@ -240,7 +258,10 @@ testDodgyListT = do
 -- Checks that `forall a b . a -> !a` triggers the overdeterminance checker.
 testDodgyIdT :: IO ()
 testDodgyIdT = do
-  let idT = CompT 2 . NonEmpty.consV (Abstraction (BoundAt Z ix0)) $ [Abstraction (BoundAt Z ix0)]
+  let idT =
+        CompT count2
+          . NonEmpty.consV (Abstraction (BoundAt Z ix0))
+          $ [Abstraction (BoundAt Z ix0)]
   let result = runRenameM . renameCompT $ idT
   case result of
     Left OverdeterminateAbstraction -> assertBool "" True
@@ -251,8 +272,8 @@ testDodgyIdT = do
 testDodgyConstT :: IO ()
 testDodgyConstT = do
   let constT =
-        CompT 2 . NonEmpty.consV (Abstraction (BoundAt Z ix0)) $
-          [ ThunkT (CompT 0 . NonEmpty.consV (Abstraction (BoundAt (S Z) ix1)) $ [Abstraction (BoundAt (S Z) ix0)])
+        CompT count2 . NonEmpty.consV (Abstraction (BoundAt Z ix0)) $
+          [ ThunkT (CompT count0 . NonEmpty.consV (Abstraction (BoundAt (S Z) ix1)) $ [Abstraction (BoundAt (S Z) ix0)])
           ]
   let result = runRenameM . renameCompT $ constT
   case result of
@@ -263,7 +284,10 @@ testDodgyConstT = do
 -- Checks that `forall a . b -> !a` triggers the variable indexing checker.
 testIndexingIdT :: IO ()
 testIndexingIdT = do
-  let t = CompT 1 . NonEmpty.consV (Abstraction (BoundAt Z ix0)) $ [Abstraction (BoundAt Z ix1)]
+  let t =
+        CompT count1
+          . NonEmpty.consV (Abstraction (BoundAt Z ix0))
+          $ [Abstraction (BoundAt Z ix1)]
   let result = runRenameM . renameCompT $ t
   case result of
     Left (InvalidAbstractionReference trueLevel ix) -> do
@@ -318,9 +342,9 @@ instance Arbitrary Concrete where
                 pure . BuiltinFlat $ BLS12_381_G2_ElementT,
                 pure . BuiltinFlat $ BLS12_381_MlResultT,
                 pure . BuiltinFlat $ DataT,
-                BuiltinNested . ListT 0 <$> go (size `quot` 4),
-                BuiltinNested <$> (PairT 0 <$> go (size `quot` 4) <*> go (size `quot` 4)),
-                ThunkT . CompT 0 <$> (NonEmpty.consV <$> go (size `quot` 4) <*> liftArbitrary (go (size `quot` 4)))
+                BuiltinNested . ListT count0 <$> go (size `quot` 4),
+                BuiltinNested <$> (PairT count0 <$> go (size `quot` 4) <*> go (size `quot` 4)),
+                ThunkT . CompT count0 <$> (NonEmpty.consV <$> go (size `quot` 4) <*> liftArbitrary (go (size `quot` 4)))
               ]
   {-# INLINEABLE shrink #-}
   shrink (Concrete v) =
@@ -330,7 +354,7 @@ instance Arbitrary Concrete where
       ThunkT (CompT _ ts) ->
         -- Note (Koz, 06/04/2025): This is needed because non-empty Vectors
         -- don't have Arbitrary instances.
-        ThunkT . CompT 0 <$> do
+        ThunkT . CompT count0 <$> do
           let asList = NonEmpty.toList ts
           shrunk <- fmap coerce . shrink . fmap Concrete $ asList
           case shrunk of
@@ -342,8 +366,8 @@ instance Arbitrary Concrete where
         BuiltinNested <$> case t of
           ListT _ t' -> do
             Concrete shrunk <- shrink (Concrete t')
-            pure . ListT 0 $ shrunk
+            pure . ListT count0 $ shrunk
           PairT _ t1 t2 -> do
             Concrete shrunkT1 <- shrink (Concrete t1)
             Concrete shrunkT2 <- shrink (Concrete t2)
-            [PairT 0 shrunkT1 t2, PairT 0 t1 shrunkT2]
+            [PairT count0 shrunkT1 t2, PairT count0 t1 shrunkT2]

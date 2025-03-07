@@ -17,7 +17,7 @@ import Control.Monad (unless)
 import Control.Monad.Except (ExceptT, MonadError (throwError), runExceptT)
 import Control.Monad.State.Strict (State, evalState, gets, modify)
 import Covenant.DeBruijn (DeBruijn, asInt)
-import Covenant.Index (Index, intIndex)
+import Covenant.Index (Count, Index, intCount, intIndex)
 import Data.Coerce (coerce)
 import Data.Functor.Classes (Eq1 (liftEq))
 import Data.Kind (Type)
@@ -48,7 +48,7 @@ import Optics.Setter (over, set)
 -- etc. This can mean different things depending on what these scope(s) are.
 --
 -- @since 1.0.0
-data AbstractTy = BoundAt DeBruijn Index
+data AbstractTy = BoundAt DeBruijn (Index "tyvar")
   deriving stock
     ( -- | @since 1.0.0
       Eq,
@@ -61,18 +61,18 @@ data Renamed
   = -- | Set by an enclosing scope, and thus is essentially a
     -- concrete type, we just don't know which. First field is its \'true
     -- level\', second field is the positional index in that scope.
-    Rigid Int Index
+    Rigid Int (Index "tyvar")
   | -- | Can be unified with something, but must be consistent: that is, only one
     -- unification for every instance. Field is this variable's positional index;
     -- we don't need to track the scope, as only one scope contains unifiable
     -- bindings.
-    Unifiable Index
+    Unifiable (Index "tyvar")
   | -- | /Must/ unify with everything, except with other distinct wildcards in the
     -- same scope. First field is a unique /scope/ identifier, second is the
     -- positional index within that scope. We must have unique identifiers for
     -- wildcard scopes, as wildcards unify with everything /except/ other
     -- wildcards in the same scope.
-    Wildcard Word64 Index
+    Wildcard Word64 (Index "tyvar")
   deriving stock
     ( -- | @since 1.0.0
       Eq,
@@ -94,7 +94,7 @@ data Renamed
 -- The /last/ entry in the 'NonEmpty' indicates the return type.
 --
 -- @since 1.0.0
-data CompT (a :: Type) = CompT Word64 (NonEmptyVector (ValT a))
+data CompT (a :: Type) = CompT (Count "tyvar") (NonEmptyVector (ValT a))
   deriving stock
     ( -- | @since 1.0.0
       Eq,
@@ -182,8 +182,8 @@ data BuiltinFlatT
 --
 -- @since 1.0.0
 data BuiltinNestedT (a :: Type)
-  = ListT Word64 (ValT a)
-  | PairT Word64 (ValT a) (ValT a)
+  = ListT (Count "tyvar") (ValT a)
+  | PairT (Count "tyvar") (ValT a) (ValT a)
   deriving stock
     ( -- | @since 1.0.0
       Eq,
@@ -234,10 +234,11 @@ instance
 
 -- Given a number of abstractions bound by a scope, modify the state to track
 -- that scope.
-stepUpScope :: Word64 -> RenameState -> RenameState
+stepUpScope :: Count "tyvar" -> RenameState -> RenameState
 stepUpScope abses x =
   let fresh = view #idSource x
-      entry = (Vector.replicate (fromIntegral abses) False, fresh)
+      absesI = review intCount abses
+      entry = (Vector.replicate absesI False, fresh)
    in over #tracker (Vector.cons entry) . set #idSource (fresh + 1) $ x
 
 -- Stop tracking the last scope we added.
@@ -246,7 +247,7 @@ dropDownScope = over #tracker Vector.tail
 
 -- Given a pair of DeBruijn index and positional index for a variable, note that
 -- we've seen this variable.
-noteUsed :: DeBruijn -> Index -> RenameState -> RenameState
+noteUsed :: DeBruijn -> Index "tyvar" -> RenameState -> RenameState
 noteUsed scope index =
   set (#tracker % ix (asInt scope) % _1 % ix (review intIndex index)) True
 
@@ -259,7 +260,7 @@ data RenameError
     -- the index that was requested.
     --
     -- @since 1.0.0
-    InvalidAbstractionReference Int Index
+    InvalidAbstractionReference Int (Index "tyvar")
   | -- | A value type specifies an abstraction that never gets used
     -- anywhere. For example, the type @forall a b . [a]@ has @b@
     -- irrelevant.
