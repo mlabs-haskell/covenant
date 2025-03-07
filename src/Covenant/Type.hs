@@ -1,3 +1,6 @@
+{-# LANGUAGE PatternSynonyms #-}
+{-# LANGUAGE ViewPatterns #-}
+
 module Covenant.Type
   ( AbstractTy (..),
     Renamed (..),
@@ -10,6 +13,8 @@ module Covenant.Type
     renameCompT,
     RenameM,
     runRenameM,
+    pattern ReturnT,
+    pattern (:--:>),
   )
 where
 
@@ -108,6 +113,36 @@ instance Eq1 CompT where
   {-# INLINEABLE liftEq #-}
   liftEq f (CompT abses1 xs) (CompT abses2 ys) =
     abses1 == abses2 && liftEq (liftEq f) xs ys
+
+-- | Helper for defining the \'bodies\' of computation types, without having to
+-- use 'NonEmptyVector' functions.
+--
+-- @since 1.0.0
+pattern ReturnT :: forall (a :: Type). ValT a -> NonEmptyVector (ValT a)
+pattern ReturnT x <- (returnHelper -> Just x)
+  where
+    ReturnT x = NonEmpty.singleton x
+
+-- | Helper for defining the \'bodies\' of computation types, without having to
+-- use 'NonEmptyVector' for functions. Together with 'ReturnT', we can write:
+--
+-- @'CompT' count0 ('BuiltinFlat' 'IntT' ':--:>' 'ReturnT' ('BuiltinFlat' 'IntT'))@
+--
+-- instead of:
+--
+-- @'CompT' count0 ('NonEmpty.consV' ('BuiltinFlat' 'IntT') ('Vector.singleton' ('BuiltinFlat' 'IntT')))@
+--
+-- @since 1.0.0
+pattern (:--:>) ::
+  forall (a :: Type).
+  ValT a ->
+  NonEmptyVector (ValT a) ->
+  NonEmptyVector (ValT a)
+pattern x :--:> xs <- (NonEmpty.uncons -> traverse NonEmpty.fromVector -> Just (x, xs))
+  where
+    x :--:> xs = NonEmpty.cons x xs
+
+infixr 1 :--:>
 
 -- | A value type, with abstractions indicated by the type argument. In pretty
 -- much any case imaginable, this would be either 'AbstractTy' (in the ASG) or
@@ -395,3 +430,14 @@ renameValT = \case
         modify dropDownScope
         -- Rebuild and return
         pure . PairT abses renamed1 $ renamed2
+
+-- Helpers
+
+returnHelper ::
+  forall (a :: Type).
+  NonEmptyVector (ValT a) -> Maybe (ValT a)
+returnHelper xs = case NonEmpty.uncons xs of
+  (y, ys) ->
+    if Vector.length ys == 0
+      then pure y
+      else Nothing

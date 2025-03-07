@@ -1,4 +1,5 @@
 {-# LANGUAGE OverloadedLists #-}
+{-# LANGUAGE PatternSynonyms #-}
 
 module Main (main) where
 
@@ -29,6 +30,8 @@ import Covenant.Type
     renameCompT,
     renameValT,
     runRenameM,
+    pattern ReturnT,
+    pattern (:--:>),
   )
 import Data.Coerce (coerce)
 import Data.Functor.Classes (liftEq)
@@ -117,13 +120,13 @@ propNestedConcrete = forAllShrinkShow arbitrary shrink show $ \(Concrete t) ->
 testIdT :: IO ()
 testIdT = do
   let idT =
-        CompT count1
-          . NonEmpty.consV (Abstraction (BoundAt Z ix0))
-          $ [Abstraction (BoundAt Z ix0)]
+        CompT count1 $
+          Abstraction (BoundAt Z ix0)
+            :--:> ReturnT (Abstraction (BoundAt Z ix0))
   let expected =
-        CompT count1
-          . NonEmpty.consV (Abstraction (Unifiable ix0))
-          $ [Abstraction (Unifiable ix0)]
+        CompT count1 $
+          Abstraction (Unifiable ix0)
+            :--:> ReturnT (Abstraction (Unifiable ix0))
   let result = runRenameM . renameCompT $ idT
   assertRight (assertEqual "" expected) result
 
@@ -133,13 +136,15 @@ testConstT = do
   let absA = BoundAt Z ix0
   let absB = BoundAt Z ix1
   let constT =
-        CompT count2
-          . NonEmpty.consV (Abstraction absA)
-          $ [Abstraction absB, Abstraction absA]
+        CompT count2 $
+          Abstraction absA
+            :--:> Abstraction absB
+            :--:> ReturnT (Abstraction absA)
   let expected =
-        CompT count2
-          . NonEmpty.consV (Abstraction (Unifiable ix0))
-          $ [Abstraction (Unifiable ix1), Abstraction (Unifiable ix0)]
+        CompT count2 $
+          Abstraction (Unifiable ix0)
+            :--:> Abstraction (Unifiable ix1)
+            :--:> ReturnT (Abstraction (Unifiable ix0))
   let result = runRenameM . renameCompT $ constT
   assertRight (assertEqual "" expected) result
 
@@ -147,17 +152,21 @@ testConstT = do
 testConstT2 :: IO ()
 testConstT2 = do
   let constT =
-        CompT count1
-          . NonEmpty.consV
-            (Abstraction (BoundAt Z ix0))
-          $ [ ThunkT . CompT count1 . NonEmpty.consV (Abstraction (BoundAt Z ix0)) $ [Abstraction (BoundAt (S Z) ix0)]
-            ]
+        CompT count1 $
+          Abstraction (BoundAt Z ix0)
+            :--:> ReturnT
+              ( ThunkT . CompT count1 $
+                  Abstraction (BoundAt Z ix0)
+                    :--:> ReturnT (Abstraction (BoundAt (S Z) ix0))
+              )
   let expected =
-        CompT count1
-          . NonEmpty.consV
-            (Abstraction (Unifiable ix0))
-          $ [ ThunkT . CompT count1 . NonEmpty.consV (Abstraction (Wildcard 1 ix0)) $ [Abstraction (Unifiable ix0)]
-            ]
+        CompT count1 $
+          Abstraction (Unifiable ix0)
+            :--:> ReturnT
+              ( ThunkT . CompT count1 $
+                  Abstraction (Wildcard 1 ix0)
+                    :--:> ReturnT (Abstraction (Unifiable ix0))
+              )
   let result = runRenameM . renameCompT $ constT
   assertRight (assertEqual "" expected) result
 
