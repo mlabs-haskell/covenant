@@ -247,6 +247,23 @@ instance Eq1 BuiltinNestedT where
 data RenameState = RenameState Word64 (Vector (Vector Bool, Word64))
   deriving stock (Eq, Show)
 
+-- Note (Koz, 11/04/2025): We need this field as a source of unique identifiers
+-- when renaming wildcards. Wildcards are special in that they can unify with
+-- anything (possibly _several_ anythings) except different wildcards in the
+-- same scope as each other. For example, consider the computation type below:
+--
+-- (forall a b . a -> b -> !Int) -> (forall c . c -> !Int) -> String -> !Int
+--
+-- In particular, `a` and `c` would be defined the same way: `BoundAt Z ix0`.
+-- However, while `c` and `b` could unify just fine, `a` and `b` could not.
+-- Furthermore, they are identically scoped (in the sense that they're both
+-- enclosed the same way), which means that, unlike rigid variables, we cannot
+-- uniquely identify them just by their scoping.
+--
+-- Thus, we have to have to have a way to uniquely label any wildcard in such a
+-- way that wildcards in the same scope, at the same level, are tagged
+-- separately from wildcards in a _different_ scope at the same level. See the
+-- functions `stepUpScope` and `dropDownScope` to see how we achieve this.
 instance
   (k ~ A_Lens, a ~ Word64, b ~ Word64) =>
   LabelOptic "idSource" k RenameState RenameState a b
@@ -257,6 +274,10 @@ instance
       (\(RenameState x _) -> x)
       (\(RenameState _ y) x' -> RenameState x' y)
 
+-- The 'outer' vector represents a stack of scopes. Each entry is a combination
+-- of a vector of used variables (length is equal to the number of variables
+-- bound by that scope), together with a unique identifier not only for that
+-- scope, but also the `step` into that scope, as required by wildcard renaming.
 instance
   (k ~ A_Lens, a ~ Vector (Vector Bool, Word64), b ~ Vector (Vector Bool, Word64)) =>
   LabelOptic "tracker" k RenameState RenameState a b
@@ -273,10 +294,17 @@ stepUpScope :: Count "tyvar" -> RenameState -> RenameState
 stepUpScope abses x =
   let fresh = view #idSource x
       absesI = review intCount abses
+      -- Label (speculatively) the current scope 'step' with a unique value.
       entry = (Vector.replicate absesI False, fresh)
-   in over #tracker (Vector.cons entry) . set #idSource (fresh + 1) $ x
+   in -- Ensure that our source of fresh identifiers is incremented
+      over #tracker (Vector.cons entry) . set #idSource (fresh + 1) $ x
 
 -- Stop tracking the last scope we added.
+--
+-- Note that, while we 'throw away' the information about (used) variables in
+-- the scope, we do _not_ roll back the `idSource`. This is in fact why we have
+-- to be in `State` rather than `Reader`: that change has to be persistent to
+-- achieve our goal of renaming wildcards.
 dropDownScope :: RenameState -> RenameState
 dropDownScope = over #tracker Vector.tail
 
