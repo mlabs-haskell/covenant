@@ -15,6 +15,21 @@ module Covenant.Type
     runRenameM,
     pattern ReturnT,
     pattern (:--:>),
+    byteStringT,
+    integerT,
+    stringT,
+    (-*-),
+    tyvar,
+    listT,
+    boolT,
+    dataT,
+    g1T,
+    g2T,
+    mlResultT,
+    comp0,
+    comp1,
+    comp2,
+    unitT,
   )
 where
 
@@ -22,7 +37,15 @@ import Control.Monad (unless)
 import Control.Monad.Except (ExceptT, MonadError (throwError), runExceptT)
 import Control.Monad.State.Strict (State, evalState, gets, modify)
 import Covenant.DeBruijn (DeBruijn, asInt)
-import Covenant.Index (Count, Index, intCount, intIndex)
+import Covenant.Index
+  ( Count,
+    Index,
+    count0,
+    count1,
+    count2,
+    intCount,
+    intIndex,
+  )
 import Data.Coerce (coerce)
 import Data.Functor.Classes (Eq1 (liftEq))
 import Data.Kind (Type)
@@ -144,6 +167,26 @@ pattern x :--:> xs <- (NonEmpty.uncons -> traverse NonEmpty.fromVector -> Just (
 
 infixr 1 :--:>
 
+-- | Helper for defining computation types that do not bind any type variables.
+--
+-- @since 1.0.0
+comp0 :: forall (a :: Type). NonEmptyVector (ValT a) -> CompT a
+comp0 = CompT count0
+
+-- | Helper for defining a computation type that binds one type variable (that
+-- is, something whose type is @forall a . ... -> ...)@.
+--
+-- @since 1.0.0
+comp1 :: NonEmptyVector (ValT AbstractTy) -> CompT AbstractTy
+comp1 = CompT count1
+
+-- | Helper for defining a computation type that binds two type variables (that
+-- is, something whose type is @forall a b . ... -> ...)@.
+--
+-- @since 1.0.0
+comp2 :: NonEmptyVector (ValT AbstractTy) -> CompT AbstractTy
+comp2 = CompT count2
+
 -- | A value type, with abstractions indicated by the type argument. In pretty
 -- much any case imaginable, this would be either 'AbstractTy' (in the ASG) or
 -- 'Renamed' (after renaming).
@@ -182,6 +225,66 @@ instance Eq1 ValT where
     BuiltinNested t1 -> \case
       BuiltinNested t2 -> liftEq f t1 t2
       _ -> False
+
+-- | Helper for defining type variables.
+--
+-- @since 1.0.0
+tyvar :: DeBruijn -> Index "tyvar" -> ValT AbstractTy
+tyvar db = Abstraction . BoundAt db
+
+-- | Helper for defining the value type of builtin bytestrings.
+--
+-- @since 1.0.0
+byteStringT :: forall (a :: Type). ValT a
+byteStringT = BuiltinFlat ByteStringT
+
+-- | Helper for defining the value type of builtin integers.
+--
+-- @since 1.0.0
+integerT :: forall (a :: Type). ValT a
+integerT = BuiltinFlat IntegerT
+
+-- | Helper for defining the value type of builtin strings.
+--
+-- @since 1.0.0
+stringT :: forall (a :: Type). ValT a
+stringT = BuiltinFlat StringT
+
+-- | Helper for defining the value type of builtin booleans.
+--
+-- @since 1.0.0
+boolT :: forall (a :: Type). ValT a
+boolT = BuiltinFlat BoolT
+
+-- | Helper for defining the value type of BLS12-381 G1 curve points.
+--
+-- @since 1.0.0
+g1T :: forall (a :: Type). ValT a
+g1T = BuiltinFlat BLS12_381_G1_ElementT
+
+-- | Helper for defining the value type of BLS12-381 G2 curve points.
+--
+-- @since 1.0.0
+g2T :: forall (a :: Type). ValT a
+g2T = BuiltinFlat BLS12_381_G2_ElementT
+
+-- | Helper for defining the value type of BLS12-381 multiplication results.
+--
+-- @since 1.0.0
+mlResultT :: forall (a :: Type). ValT a
+mlResultT = BuiltinFlat BLS12_381_MlResultT
+
+-- | Helper for defining the value type of Plutus @Data@.
+--
+-- @since 1.0.0
+dataT :: forall (a :: Type). ValT a
+dataT = BuiltinFlat DataT
+
+-- | Helper for defining the value type of the builtin unit type.
+--
+-- @since 1.0.0
+unitT :: forall (a :: Type). ValT a
+unitT = BuiltinFlat UnitT
 
 -- | All builtin types that are \'flat\': that is, do not have other types
 -- \'nested inside them\'.
@@ -225,6 +328,22 @@ data BuiltinNestedT (a :: Type)
       -- | @since 1.0.0
       Show
     )
+
+-- | Helper for constructing builtin pair types. These are assumed to not be
+-- polymorphic: that is, their two argument 'ValT's refer to scopes outside of
+-- the one that 'PairT' normally establishes.
+--
+-- @since 1.0.0
+(-*-) :: forall (a :: Type). ValT a -> ValT a -> ValT a
+t1 -*- t2 = BuiltinNested . PairT count0 t1 $ t2
+
+infixr 1 -*-
+
+-- | Helper for constructing builtin list types.
+--
+-- @since 1.0.0
+listT :: forall (a :: Type). Count "tyvar" -> ValT a -> ValT a
+listT c = BuiltinNested . ListT c
 
 -- Note (Koz, 04/03/2025): We use this for testing to compare for structural
 -- similarity.
