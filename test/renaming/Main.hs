@@ -176,13 +176,13 @@ testHeadListT = do
   let absA = BoundAt Z ix0
   let absAInner = BoundAt (S Z) ix0
   let headListT =
-        CompT count1
-          . NonEmpty.consV (BuiltinNested (ListT count0 (Abstraction absAInner)))
-          $ [Abstraction absA]
+        CompT count1 $
+          BuiltinNested (ListT count0 (Abstraction absAInner))
+            :--:> ReturnT (Abstraction absA)
   let expected =
-        CompT count1
-          . NonEmpty.consV (BuiltinNested (ListT count0 (Abstraction (Unifiable ix0))))
-          $ [Abstraction (Unifiable ix0)]
+        CompT count1 $
+          BuiltinNested (ListT count0 (Abstraction (Unifiable ix0)))
+            :--:> ReturnT (Abstraction (Unifiable ix0))
   let result = runRenameM . renameCompT $ headListT
   assertRight (assertEqual "" expected) result
 
@@ -190,15 +190,13 @@ testHeadListT = do
 testSndPairT :: IO ()
 testSndPairT = do
   let sndPairT =
-        CompT count2
-          . NonEmpty.consV
-            (BuiltinNested (PairT count0 (Abstraction (BoundAt (S Z) ix0)) (Abstraction (BoundAt (S Z) ix1))))
-          $ [Abstraction (BoundAt Z ix1)]
+        CompT count2 $
+          BuiltinNested (PairT count0 (Abstraction (BoundAt (S Z) ix0)) (Abstraction (BoundAt (S Z) ix1)))
+            :--:> ReturnT (Abstraction (BoundAt Z ix1))
   let expected =
-        CompT count2
-          . NonEmpty.consV
-            (BuiltinNested (PairT count0 (Abstraction (Unifiable ix0)) (Abstraction (Unifiable ix1))))
-          $ [Abstraction (Unifiable ix1)]
+        CompT count2 $
+          BuiltinNested (PairT count0 (Abstraction (Unifiable ix0)) (Abstraction (Unifiable ix1)))
+            :--:> ReturnT (Abstraction (Unifiable ix1))
   let result = runRenameM . renameCompT $ sndPairT
   assertRight (assertEqual "" expected) result
 
@@ -210,27 +208,21 @@ testMapT = do
   let mapThunkT =
         ThunkT
           . CompT count0
-          . NonEmpty.consV (Abstraction (BoundAt (S Z) ix0))
-          $ [Abstraction (BoundAt (S Z) ix1)]
+          $ Abstraction (BoundAt (S Z) ix0) :--:> ReturnT (Abstraction (BoundAt (S Z) ix1))
   let mapT =
-        CompT count2
-          . NonEmpty.consV
-            mapThunkT
-          $ [ BuiltinNested (ListT count0 (Abstraction (BoundAt (S Z) ix0))),
-              BuiltinNested (ListT count0 (Abstraction (BoundAt (S Z) ix1)))
-            ]
+        CompT count2 $
+          mapThunkT
+            :--:> BuiltinNested (ListT count0 (Abstraction (BoundAt (S Z) ix0)))
+            :--:> ReturnT (BuiltinNested (ListT count0 (Abstraction (BoundAt (S Z) ix1))))
   let expectedMapThunkT =
         ThunkT
           . CompT count0
-          . NonEmpty.consV (Abstraction (Rigid 0 ix0))
-          $ [Abstraction (Rigid 0 ix1)]
+          $ Abstraction (Rigid 0 ix0) :--:> ReturnT (Abstraction (Rigid 0 ix1))
   let expectedMapT =
-        CompT count2
-          . NonEmpty.consV
-            (ThunkT . CompT count0 . NonEmpty.consV (Abstraction (Unifiable ix0)) $ [Abstraction (Unifiable ix1)])
-          $ [ BuiltinNested (ListT count0 (Abstraction (Unifiable ix0))),
-              BuiltinNested (ListT count0 (Abstraction (Unifiable ix1)))
-            ]
+        CompT count2 $
+          (ThunkT . CompT count0 $ Abstraction (Unifiable ix0) :--:> ReturnT (Abstraction (Unifiable ix1)))
+            :--:> BuiltinNested (ListT count0 (Abstraction (Unifiable ix0)))
+            :--:> ReturnT (BuiltinNested (ListT count0 (Abstraction (Unifiable ix1))))
   let resultThunkT = runRenameM . renameValT $ mapThunkT
   assertRight (assertEqual "" expectedMapThunkT) resultThunkT
   let resultMapT = runRenameM . renameCompT $ mapT
@@ -268,9 +260,7 @@ testDodgyListT = do
 testDodgyIdT :: IO ()
 testDodgyIdT = do
   let idT =
-        CompT count2
-          . NonEmpty.consV (Abstraction (BoundAt Z ix0))
-          $ [Abstraction (BoundAt Z ix0)]
+        CompT count2 $ Abstraction (BoundAt Z ix0) :--:> ReturnT (Abstraction (BoundAt Z ix0))
   let result = runRenameM . renameCompT $ idT
   case result of
     Left OverdeterminateAbstraction -> assertBool "" True
@@ -281,9 +271,9 @@ testDodgyIdT = do
 testDodgyConstT :: IO ()
 testDodgyConstT = do
   let constT =
-        CompT count2 . NonEmpty.consV (Abstraction (BoundAt Z ix0)) $
-          [ ThunkT (CompT count0 . NonEmpty.consV (Abstraction (BoundAt (S Z) ix1)) $ [Abstraction (BoundAt (S Z) ix0)])
-          ]
+        CompT count2 $
+          Abstraction (BoundAt Z ix0)
+            :--:> ReturnT (ThunkT (CompT count0 $ Abstraction (BoundAt (S Z) ix1) :--:> ReturnT (Abstraction (BoundAt (S Z) ix0))))
   let result = runRenameM . renameCompT $ constT
   case result of
     Left OverdeterminateAbstraction -> assertBool "" True
@@ -294,9 +284,8 @@ testDodgyConstT = do
 testIndexingIdT :: IO ()
 testIndexingIdT = do
   let t =
-        CompT count1
-          . NonEmpty.consV (Abstraction (BoundAt Z ix0))
-          $ [Abstraction (BoundAt Z ix1)]
+        CompT count1 $
+          Abstraction (BoundAt Z ix0) :--:> ReturnT (Abstraction (BoundAt Z ix1))
   let result = runRenameM . renameCompT $ t
   case result of
     Left (InvalidAbstractionReference trueLevel ix) -> do

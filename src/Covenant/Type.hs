@@ -15,10 +15,11 @@ module Covenant.Type
     runRenameM,
     pattern ReturnT,
     pattern (:--:>),
+    checkApp,
   )
 where
 
-import Control.Monad (unless)
+import Control.Monad (foldM, guard, unless)
 import Control.Monad.Except (ExceptT, MonadError (throwError), runExceptT)
 import Control.Monad.State.Strict (State, evalState, gets, modify)
 import Covenant.DeBruijn (DeBruijn, asInt)
@@ -26,6 +27,9 @@ import Covenant.Index (Count, Index, intCount, intIndex)
 import Data.Coerce (coerce)
 import Data.Functor.Classes (Eq1 (liftEq))
 import Data.Kind (Type)
+import Data.Map.Merge.Strict qualified as Merge
+import Data.Map.Strict (Map)
+import Data.Map.Strict qualified as Map
 import Data.Tuple.Optics (_1)
 import Data.Vector (Vector)
 import Data.Vector qualified as Vector
@@ -459,6 +463,28 @@ renameValT = \case
         -- Rebuild and return
         pure . PairT abses renamed1 $ renamed2
 
+-- | @since 1.0.0
+checkApp :: CompT Renamed -> [ValT Renamed] -> Maybe (ValT Renamed)
+checkApp (CompT _ xs) =
+  let (curr, rest) = NonEmpty.uncons xs
+   in go curr (Vector.toList rest)
+  where
+    go :: ValT Renamed -> [ValT Renamed] -> [ValT Renamed] -> Maybe (ValT Renamed)
+    go curr = \case
+      [] -> \case
+        [] -> case curr of
+          Abstraction (Unifiable _) -> Nothing -- TODO: Actual error
+          Abstraction (Wildcard _ _) -> Nothing -- TODO: Actual error
+          _ -> pure curr
+        _ -> Nothing -- TODO: Actual error
+      rest -> \case
+        [] -> Nothing -- TODO: Actual error
+        (arg : args) -> do
+          subs <- unify curr arg
+          case Map.foldlWithKey' (\acc index sub -> substitute index sub acc) rest subs of
+            [] -> Nothing -- TODO: Actual error
+            curr' : rest' -> go curr' rest' args
+
 -- Helpers
 
 returnHelper ::
@@ -469,3 +495,80 @@ returnHelper xs = case NonEmpty.uncons xs of
     if Vector.length ys == 0
       then pure y
       else Nothing
+
+unify :: ValT Renamed -> ValT Renamed -> Maybe (Map (Index "tyvar") (ValT Renamed))
+unify = \case
+  Abstraction t1 -> case t1 of
+    Unifiable index1 -> pure . Map.singleton index1
+    Rigid level1 index1 -> \case
+      Abstraction t2 -> case t2 of
+        Rigid level2 index2 -> Map.empty <$ guard (level1 == level2 && index1 == index2)
+        Wildcard _ _ -> pure Map.empty
+        _ -> Nothing -- TODO: Actual error
+      _ -> Nothing -- TODO: Actual error
+    Wildcard scopeId1 index1 -> \case
+      Abstraction (Wildcard scopeId2 index2) -> Map.empty <$ guard (scopeId1 /= scopeId2 || index1 == index2) -- TODO: Actual error
+      _ -> pure Map.empty
+  ThunkT (CompT _ t1) -> \case
+    ThunkT (CompT _ t2) -> do
+      guard (NonEmpty.length t1 == NonEmpty.length t2)
+      foldM
+        ( \acc (tLeft, tRight) ->
+            unify tLeft tRight
+              >>= Merge.mergeA
+                Merge.preserveMissing
+                Merge.preserveMissing
+                (Merge.zipWithMaybeMatched $ \_ l r -> l <$ guard (l == r))
+                acc -- TODO: Actual error
+        )
+        Map.empty
+        . NonEmpty.zip t1
+        $ t2
+    _ -> Nothing -- TODO: Actual error
+  BuiltinFlat t1 -> \case
+    BuiltinFlat t2 -> Map.empty <$ guard (t1 == t2) -- TODO: Actual error
+    _ -> Nothing -- TODO: Actual error
+  BuiltinNested t1 -> case t1 of
+    ListT _ t1' -> \case
+      BuiltinNested t2 -> case t2 of
+        ListT _ t2' -> unify t1' t2'
+        _ -> Nothing -- TODO: Actual error
+      Abstraction t2 -> case t2 of
+        Rigid _ _ -> Nothing -- TODO: Actual error
+        Wildcard _ _ -> pure Map.empty
+        Unifiable _ -> Nothing -- TODO: Actual error
+      _ -> Nothing -- TODO: Actual error
+    PairT _ t11 t12 -> \case
+      BuiltinNested t2 -> case t2 of
+        PairT _ t21 t22 -> do
+          subLeft <- unify t11 t21
+          subRight <- unify t12 t22
+          Merge.mergeA
+            Merge.preserveMissing
+            Merge.preserveMissing
+            (Merge.zipWithMaybeMatched $ \_ l r -> l <$ guard (l == r))
+            subLeft
+            subRight
+        _ -> Nothing -- TODO: Actual error
+      Abstraction t2 -> case t2 of
+        Rigid _ _ -> Nothing -- TODO: Actual error
+        Wildcard _ _ -> pure Map.empty
+        Unifiable _ -> Nothing -- TODO: Actual error
+      _ -> Nothing -- TODO: Actual error
+
+substitute :: Index "tyvar" -> ValT Renamed -> [ValT Renamed] -> [ValT Renamed]
+substitute index toSub = fmap go
+  where
+    go :: ValT Renamed -> ValT Renamed
+    go = \case
+      Abstraction t -> case t of
+        Unifiable ourIndex ->
+          if ourIndex == index
+            then toSub
+            else Abstraction t
+        _ -> Abstraction t
+      ThunkT (CompT abses xs) -> ThunkT . CompT abses . fmap go $ xs
+      BuiltinFlat t -> BuiltinFlat t
+      BuiltinNested t -> BuiltinNested $ case t of
+        ListT abses' t' -> ListT abses' . go $ t'
+        PairT abses' t1 t2 -> PairT abses' (go t1) . go $ t2
