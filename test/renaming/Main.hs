@@ -5,6 +5,7 @@ module Main (main) where
 
 import Covenant.DeBruijn (DeBruijn (S, Z))
 import Covenant.Index (count0, count1, count2, ix0, ix1)
+import Covenant.Test (Concrete (Concrete))
 import Covenant.Type
   ( AbstractTy (BoundAt),
     BuiltinFlatT
@@ -33,22 +34,13 @@ import Covenant.Type
     pattern ReturnT,
     pattern (:--:>),
   )
-import Data.Coerce (coerce)
 import Data.Functor.Classes (liftEq)
 import Data.Kind (Type)
-import Data.Vector qualified as Vector
-import Data.Vector.NonEmpty qualified as NonEmpty
 import Test.QuickCheck
   ( Arbitrary (arbitrary, shrink),
-    Gen,
     Property,
-    elements,
     forAllShrinkShow,
-    liftArbitrary,
-    oneof,
-    sized,
   )
-import Test.QuickCheck.Instances.Vector ()
 import Test.Tasty (adjustOption, defaultMain, testGroup)
 import Test.Tasty.HUnit (assertBool, assertEqual, testCase)
 import Test.Tasty.QuickCheck (QuickCheckTests, testProperty)
@@ -304,68 +296,3 @@ assertRight ::
 assertRight f = \case
   Left _ -> assertBool "renamer errored" False
   Right actual -> f actual
-
--- A newtype wrapper which generates only 'fully concrete' ValTs
-newtype Concrete = Concrete (ValT AbstractTy)
-  deriving (Eq) via (ValT AbstractTy)
-  deriving stock (Show)
-
-instance Arbitrary Concrete where
-  {-# INLINEABLE arbitrary #-}
-  arbitrary = Concrete <$> sized go
-    where
-      go :: Int -> Gen (ValT AbstractTy)
-      go size
-        | size <= 0 =
-            BuiltinFlat
-              <$> elements
-                [ UnitT,
-                  BoolT,
-                  IntegerT,
-                  StringT,
-                  ByteStringT,
-                  BLS12_381_G1_ElementT,
-                  BLS12_381_G2_ElementT,
-                  BLS12_381_MlResultT,
-                  DataT
-                ]
-        | otherwise =
-            oneof
-              [ pure . BuiltinFlat $ UnitT,
-                pure . BuiltinFlat $ BoolT,
-                pure . BuiltinFlat $ IntegerT,
-                pure . BuiltinFlat $ StringT,
-                pure . BuiltinFlat $ ByteStringT,
-                pure . BuiltinFlat $ BLS12_381_G1_ElementT,
-                pure . BuiltinFlat $ BLS12_381_G2_ElementT,
-                pure . BuiltinFlat $ BLS12_381_MlResultT,
-                pure . BuiltinFlat $ DataT,
-                BuiltinNested . ListT count0 <$> go (size `quot` 4),
-                BuiltinNested <$> (PairT count0 <$> go (size `quot` 4) <*> go (size `quot` 4)),
-                ThunkT . CompT count0 <$> (NonEmpty.consV <$> go (size `quot` 4) <*> liftArbitrary (go (size `quot` 4)))
-              ]
-  {-# INLINEABLE shrink #-}
-  shrink (Concrete v) =
-    Concrete <$> case v of
-      -- impossible
-      Abstraction _ -> []
-      ThunkT (CompT _ ts) ->
-        -- Note (Koz, 06/04/2025): This is needed because non-empty Vectors
-        -- don't have Arbitrary instances.
-        ThunkT . CompT count0 <$> do
-          let asList = NonEmpty.toList ts
-          shrunk <- fmap coerce . shrink . fmap Concrete $ asList
-          case shrunk of
-            [] -> []
-            x : xs -> pure (NonEmpty.consV x . Vector.fromList $ xs)
-      -- Can't shrink this
-      BuiltinFlat _ -> []
-      BuiltinNested t ->
-        BuiltinNested <$> case t of
-          ListT _ t' -> do
-            Concrete shrunk <- shrink (Concrete t')
-            pure . ListT count0 $ shrunk
-          PairT _ t1 t2 -> do
-            Concrete shrunkT1 <- shrink (Concrete t1)
-            Concrete shrunkT2 <- shrink (Concrete t2)
-            [PairT count0 shrunkT1 t2, PairT count0 t1 shrunkT2]
