@@ -17,8 +17,8 @@ import Data.Functor.Classes (liftEq)
 import Data.Kind (Type)
 import Data.Vector.NonEmpty qualified as NonEmpty
 import Test.QuickCheck
-  ( Property,
-    arbitrary,
+  ( Arbitrary (arbitrary),
+    Property,
     counterexample,
     forAll,
     property,
@@ -51,58 +51,49 @@ main =
 -- Test cases and properties
 
 prop1Arg :: Property
-prop1Arg = forAll arbitrary $ \oneArg ->
-  let t = typeOneArgFunc oneArg
-   in arity t === 1
+prop1Arg = mkArgProp typeOneArgFunc 1
 
 prop1Rename :: Property
-prop1Rename = forAll arbitrary $ \oneArg ->
-  let t = typeOneArgFunc oneArg
-      result = runRenameM . renameCompT $ t
-   in case result of
-        Left err -> counterexample (show err) False
-        Right renamed -> property $ liftEq eqRenamedVar t renamed
+prop1Rename = mkRenameProp typeOneArgFunc
 
 prop2Args :: Property
-prop2Args = forAll arbitrary $ \twoArg ->
-  let t = typeTwoArgFunc twoArg
-   in arity t === 2
+prop2Args = mkArgProp typeTwoArgFunc 2
 
 prop2Rename :: Property
-prop2Rename = forAll arbitrary $ \twoArg ->
-  let t = typeTwoArgFunc twoArg
-      result = runRenameM . renameCompT $ t
-   in case result of
-        Left err -> counterexample (show err) False
-        Right renamed -> property $ liftEq eqRenamedVar t renamed
+prop2Rename = mkRenameProp typeTwoArgFunc
 
 prop3Args :: Property
-prop3Args = forAll arbitrary $ \threeArg ->
-  let t = typeThreeArgFunc threeArg
-   in arity t === 3
+prop3Args = mkArgProp typeThreeArgFunc 3
 
 prop3Rename :: Property
-prop3Rename = forAll arbitrary $ \threeArg ->
-  let t = typeThreeArgFunc threeArg
-      result = runRenameM . renameCompT $ t
-   in case result of
-        Left err -> counterexample (show err) False
-        Right renamed -> property $ liftEq eqRenamedVar t renamed
+prop3Rename = mkRenameProp typeThreeArgFunc
 
 prop6Args :: Property
-prop6Args = forAll arbitrary $ \sixArg ->
-  let t = typeSixArgFunc sixArg
-   in arity t === 6
+prop6Args = mkArgProp typeSixArgFunc 6
 
 prop6Rename :: Property
-prop6Rename = forAll arbitrary $ \sixArg ->
-  let t = typeSixArgFunc sixArg
+prop6Rename = mkRenameProp typeSixArgFunc
+
+-- Helpers
+
+mkArgProp ::
+  forall (a :: Type).
+  (Show a, Arbitrary a) =>
+  (a -> CompT AbstractTy) -> Int -> Property
+mkArgProp typingFun targetArity = forAll arbitrary $ \f ->
+  let t = typingFun f
+   in arity t === targetArity
+
+mkRenameProp ::
+  forall (a :: Type).
+  (Show a, Arbitrary a) =>
+  (a -> CompT AbstractTy) -> Property
+mkRenameProp typingFun = forAll arbitrary $ \f ->
+  let t = typingFun f
       result = runRenameM . renameCompT $ t
    in case result of
         Left err -> counterexample (show err) False
         Right renamed -> property $ liftEq eqRenamedVar t renamed
-
--- Helpers
 
 arity :: forall (a :: Type). CompT a -> Int
 arity (CompT _ xs) = NonEmpty.length xs - 1
