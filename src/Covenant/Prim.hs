@@ -338,7 +338,7 @@ typeTwoArgFunc = \case
     comp1 $
       tyvar Z ix0
         :--:> listT count0 (tyvar (S Z) ix0)
-        :--:> ReturnT (tyvar Z ix0)
+        :--:> ReturnT (listT count0 (tyvar (S Z) ix0))
   ConstrData -> comp0 $ integerT :--:> listT count0 dataT :--:> ReturnT dataT
   EqualsData -> compareT dataT
   MkPairData -> comp0 $ dataT :--:> dataT :--:> ReturnT (dataT -*- dataT)
