@@ -15,12 +15,14 @@ module Covenant.Type
     runRenameM,
     pattern ReturnT,
     pattern (:--:>),
+    TypeAppError (..),
     checkApp,
+    arity,
   )
 where
 
-import Control.Monad (foldM, guard, unless)
-import Control.Monad.Except (ExceptT, MonadError (throwError), runExceptT)
+import Control.Monad (foldM, unless)
+import Control.Monad.Except (ExceptT, MonadError (throwError), catchError, runExceptT)
 import Control.Monad.State.Strict (State, evalState, gets, modify)
 import Covenant.DeBruijn (DeBruijn, asInt)
 import Covenant.Index (Count, Index, intCount, intIndex)
@@ -30,6 +32,7 @@ import Data.Kind (Type)
 import Data.Map.Merge.Strict qualified as Merge
 import Data.Map.Strict (Map)
 import Data.Map.Strict qualified as Map
+import Data.Ord (comparing)
 import Data.Tuple.Optics (_1)
 import Data.Vector (Vector)
 import Data.Vector qualified as Vector
@@ -147,6 +150,13 @@ pattern x :--:> xs <- (NonEmpty.uncons -> traverse NonEmpty.fromVector -> Just (
     x :--:> xs = NonEmpty.cons x xs
 
 infixr 1 :--:>
+
+-- | Determine the arity of a computation type: that is, how many arguments a
+-- function of this type must be given.
+--
+-- @since 1.0.0
+arity :: forall (a :: Type). CompT a -> Int
+arity (CompT _ xs) = NonEmpty.length xs - 1
 
 -- | A value type, with abstractions indicated by the type argument. In pretty
 -- much any case imaginable, this would be either 'AbstractTy' (in the ASG) or
@@ -464,28 +474,69 @@ renameValT = \case
         pure . PairT abses renamed1 $ renamed2
 
 -- | @since 1.0.0
-checkApp :: CompT Renamed -> [ValT Renamed] -> Maybe (ValT Renamed)
+data TypeAppError
+  = -- | The final type after all arguments are applied is @forall a . a@.
+    LeakingUnifiable (Index "tyvar")
+  | -- | A wildcard (thus, a skolem) escaped its scope.
+    LeakingWildcard Word64 (Index "tyvar")
+  | -- | We were given too many arguments.
+    ExcessArgs (Vector (ValT Renamed))
+  | -- | We weren't given enough arguments.
+    InsufficientArgs
+  | -- | The expected type (first field) and actual type (second field) do not
+    -- unify.
+    DoesNotUnify (ValT Renamed) (ValT Renamed)
+  deriving stock
+    ( -- | @since 1.0.0
+      Eq,
+      -- | @since 1.0.0
+      Show
+    )
+
+-- | @since 1.0.0
+checkApp :: CompT Renamed -> [ValT Renamed] -> Either TypeAppError (ValT Renamed)
 checkApp (CompT _ xs) =
   let (curr, rest) = NonEmpty.uncons xs
    in go curr (Vector.toList rest)
   where
-    go :: ValT Renamed -> [ValT Renamed] -> [ValT Renamed] -> Maybe (ValT Renamed)
+    go ::
+      ValT Renamed ->
+      [ValT Renamed] ->
+      [ValT Renamed] ->
+      Either TypeAppError (ValT Renamed)
     go curr = \case
       [] -> \case
         [] -> case curr of
-          Abstraction (Unifiable _) -> Nothing -- TODO: Actual error
-          Abstraction (Wildcard _ _) -> Nothing -- TODO: Actual error
+          Abstraction (Unifiable index) -> Left . LeakingUnifiable $ index
+          Abstraction (Wildcard scopeId index) -> Left . LeakingWildcard scopeId $ index
           _ -> pure curr
-        _ -> Nothing -- TODO: Actual error
+        args -> Left . ExcessArgs . Vector.fromList $ args
       rest -> \case
-        [] -> Nothing -- TODO: Actual error
+        [] -> Left InsufficientArgs
         (arg : args) -> do
-          subs <- unify curr arg
+          subs <- catchError (unify curr arg) (promoteUnificationError curr arg)
           case Map.foldlWithKey' (\acc index sub -> substitute index sub acc) rest subs of
-            [] -> Nothing -- TODO: Actual error
+            [] -> Left InsufficientArgs
             curr' : rest' -> go curr' rest' args
 
 -- Helpers
+
+-- Because unification is inherently recursive, if we find an error deep within
+-- a type, the message will signify only the _part_ that fails to unify, not the
+-- entire type. While potentially useful, this can be quite confusing,
+-- especially with generated types. Thus, we use `catchError` with this
+-- function, which effectively allows us to rename the types reported in
+-- unification errors to whatever types 'wrap' them.
+promoteUnificationError ::
+  forall (a :: Type).
+  ValT Renamed ->
+  ValT Renamed ->
+  TypeAppError ->
+  Either TypeAppError a
+promoteUnificationError topLevelExpected topLevelActual =
+  Left . \case
+    DoesNotUnify _ _ -> DoesNotUnify topLevelExpected topLevelActual
+    err -> err
 
 returnHelper ::
   forall (a :: Type).
@@ -496,65 +547,134 @@ returnHelper xs = case NonEmpty.uncons xs of
       then pure y
       else Nothing
 
-unify :: ValT Renamed -> ValT Renamed -> Maybe (Map (Index "tyvar") (ValT Renamed))
-unify = \case
-  Abstraction t1 -> case t1 of
-    Unifiable index1 -> pure . Map.singleton index1
-    Rigid level1 index1 -> \case
+unify ::
+  ValT Renamed ->
+  ValT Renamed ->
+  Either TypeAppError (Map (Index "tyvar") (ValT Renamed))
+unify expected actual =
+  catchError
+    ( case expected of
+        Abstraction t1 -> case t1 of
+          -- Unifiables unify with everything, and require a substitutional rewrite.
+          Unifiable index1 -> pure . Map.singleton index1 $ actual
+          Rigid level1 index1 -> expectRigid level1 index1
+          Wildcard scopeId1 index1 -> expectWildcard scopeId1 index1
+        ThunkT t1 -> expectThunk t1
+        BuiltinFlat t1 -> expectFlatBuiltin t1
+        BuiltinNested t1 -> case t1 of
+          ListT _ t1' -> expectListOf t1'
+          PairT _ t11 t12 -> expectPairOf t11 t12
+    )
+    (promoteUnificationError expected actual)
+  where
+    unificationError :: forall (a :: Type). Either TypeAppError a
+    unificationError = Left . DoesNotUnify expected $ actual
+    noSubUnify :: forall (k :: Type) (a :: Type). Either TypeAppError (Map k a)
+    noSubUnify = pure Map.empty
+    expectRigid ::
+      Int -> Index "tyvar" -> Either TypeAppError (Map (Index "tyvar") (ValT Renamed))
+    -- Rigids behave identically to concrete types: they can unify with
+    -- themselves, or any other abstraction, but nothing else. No substitutional
+    -- rewrites are needed.
+    expectRigid level1 index1 = case actual of
       Abstraction t2 -> case t2 of
-        Rigid level2 index2 -> Map.empty <$ guard (level1 == level2 && index1 == index2)
-        Wildcard _ _ -> pure Map.empty
-        _ -> Nothing -- TODO: Actual error
-      _ -> Nothing -- TODO: Actual error
-    Wildcard scopeId1 index1 -> \case
-      Abstraction (Wildcard scopeId2 index2) -> Map.empty <$ guard (scopeId1 /= scopeId2 || index1 == index2) -- TODO: Actual error
-      _ -> pure Map.empty
-  ThunkT (CompT _ t1) -> \case
-    ThunkT (CompT _ t2) -> do
-      guard (NonEmpty.length t1 == NonEmpty.length t2)
-      foldM
-        ( \acc (tLeft, tRight) ->
-            unify tLeft tRight
-              >>= Merge.mergeA
-                Merge.preserveMissing
-                Merge.preserveMissing
-                (Merge.zipWithMaybeMatched $ \_ l r -> l <$ guard (l == r))
-                acc -- TODO: Actual error
-        )
-        Map.empty
-        . NonEmpty.zip t1
-        $ t2
-    _ -> Nothing -- TODO: Actual error
-  BuiltinFlat t1 -> \case
-    BuiltinFlat t2 -> Map.empty <$ guard (t1 == t2) -- TODO: Actual error
-    _ -> Nothing -- TODO: Actual error
-  BuiltinNested t1 -> case t1 of
-    ListT _ t1' -> \case
+        Unifiable _ -> noSubUnify
+        Wildcard _ _ -> noSubUnify
+        Rigid level2 index2 ->
+          if level1 == level2 && index1 == index2
+            then noSubUnify
+            else unificationError
+      _ -> unificationError
+    expectWildcard ::
+      Word64 -> Index "tyvar" -> Either TypeAppError (Map (Index "tyvar") (ValT Renamed))
+    -- Wildcards can unify with unifiables, as well as themselves, but nothing
+    -- else. No substitutional rewrites are needed.
+    expectWildcard scopeId1 index1 = case actual of
+      Abstraction t2 -> case t2 of
+        Unifiable _ -> noSubUnify
+        Wildcard scopeId2 index2 ->
+          if scopeId1 /= scopeId2 || index1 == index2
+            then noSubUnify
+            else unificationError
+        Rigid _ _ -> unificationError
+      _ -> unificationError
+    expectThunk :: CompT Renamed -> Either TypeAppError (Map (Index "tyvar") (ValT Renamed))
+    -- Thunks unify unconditionally with wildcards or unifiables. They unify
+    -- conditionally with other thunks, provided that we can unify each argument
+    -- with its counterpart in the same position, as well as their result types,
+    -- without conflicts.
+    expectThunk (CompT _ t1) = case actual of
+      Abstraction t2 -> case t2 of
+        Wildcard _ _ -> noSubUnify
+        Unifiable _ -> noSubUnify
+        Rigid _ _ -> unificationError
+      ThunkT (CompT _ t2) -> do
+        unless (comparing NonEmpty.length t1 t2 == EQ) unificationError
+        catchError
+          (foldM (\acc (l, r) -> unify l r >>= reconcile acc) Map.empty . NonEmpty.zip t1 $ t2)
+          (promoteUnificationError expected actual)
+      _ -> unificationError
+    expectFlatBuiltin :: BuiltinFlatT -> Either TypeAppError (Map (Index "tyvar") (ValT Renamed))
+    -- 'Flat' builtins are always concrete. They can unify with themselves,
+    -- unifiables or wildcards, but nothing else. No substitutional rewrites are
+    -- needed.
+    expectFlatBuiltin t1 = case actual of
+      Abstraction t2 -> case t2 of
+        Wildcard _ _ -> noSubUnify
+        Unifiable _ -> noSubUnify
+        Rigid _ _ -> unificationError
+      BuiltinFlat t2 ->
+        if t1 == t2
+          then noSubUnify
+          else unificationError
+      _ -> unificationError
+    -- Lists can unify unconditionally with wildcards or unifiables. They can
+    -- unify with other lists as long as their type parameters unify too.
+    -- Substitutions may be required if the type parameter is a unifiable.
+    expectListOf :: ValT Renamed -> Either TypeAppError (Map (Index "tyvar") (ValT Renamed))
+    expectListOf tyParam = case actual of
+      Abstraction t2 -> case t2 of
+        Wildcard _ _ -> noSubUnify
+        Unifiable _ -> noSubUnify
+        Rigid _ _ -> unificationError
       BuiltinNested t2 -> case t2 of
-        ListT _ t2' -> unify t1' t2'
-        _ -> Nothing -- TODO: Actual error
+        ListT _ t2' -> catchError (unify tyParam t2') (promoteUnificationError expected actual)
+        _ -> unificationError
+      _ -> unificationError
+    -- Pairs can unify unconditionally with wildcards or unifiables. They can
+    -- unify with other pairs as long as each type parameter unifies with its
+    -- counterpart without conflicts. Substitutions may be required if one or
+    -- both type parameters are themselves unifiables.
+    expectPairOf ::
+      ValT Renamed -> ValT Renamed -> Either TypeAppError (Map (Index "tyvar") (ValT Renamed))
+    expectPairOf tyParam1 tyParam2 = case actual of
       Abstraction t2 -> case t2 of
-        Rigid _ _ -> Nothing -- TODO: Actual error
-        Wildcard _ _ -> pure Map.empty
-        Unifiable _ -> Nothing -- TODO: Actual error
-      _ -> Nothing -- TODO: Actual error
-    PairT _ t11 t12 -> \case
+        Wildcard _ _ -> noSubUnify
+        Unifiable _ -> noSubUnify
+        Rigid _ _ -> unificationError
       BuiltinNested t2 -> case t2 of
         PairT _ t21 t22 -> do
-          subLeft <- unify t11 t21
-          subRight <- unify t12 t22
-          Merge.mergeA
-            Merge.preserveMissing
-            Merge.preserveMissing
-            (Merge.zipWithMaybeMatched $ \_ l r -> l <$ guard (l == r))
-            subLeft
-            subRight
-        _ -> Nothing -- TODO: Actual error
-      Abstraction t2 -> case t2 of
-        Rigid _ _ -> Nothing -- TODO: Actual error
-        Wildcard _ _ -> pure Map.empty
-        Unifiable _ -> Nothing -- TODO: Actual error
-      _ -> Nothing -- TODO: Actual error
+          firstUnification <- catchError (unify tyParam1 t21) (promoteUnificationError expected actual)
+          catchError (unify tyParam2 t22) (promoteUnificationError expected actual)
+            >>= \res -> reconcile firstUnification res
+        _ -> unificationError
+      _ -> unificationError
+    reconcile ::
+      Map (Index "tyvar") (ValT Renamed) ->
+      Map (Index "tyvar") (ValT Renamed) ->
+      Either TypeAppError (Map (Index "tyvar") (ValT Renamed))
+    -- Note (Koz, 14/04/2025): This utter soup means the following:
+    --
+    -- - If the old map and the new map don't have any overlapping assignments,
+    --   just union them.
+    -- - Otherwise, for any assignment to a unifiable that is present in both
+    --   maps, ensure they assign to the same thing; if they do, it's fine,
+    --   otherwise we have a problem.
+    reconcile =
+      Merge.mergeA
+        Merge.preserveMissing
+        Merge.preserveMissing
+        (Merge.zipWithAMatched $ \_ l r -> l <$ unless (l == r) unificationError)
 
 substitute :: Index "tyvar" -> ValT Renamed -> [ValT Renamed] -> [ValT Renamed]
 substitute index toSub = fmap go
