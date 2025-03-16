@@ -7,8 +7,7 @@ import Covenant.DeBruijn (DeBruijn (S, Z))
 import Covenant.Index (count0, count1, count2, ix0, ix1)
 import Covenant.Test (Concrete (Concrete))
 import Covenant.Type
-  ( AbstractTy (BoundAt),
-    BuiltinFlatT
+  ( BuiltinFlatT
       ( BLS12_381_G1_ElementT,
         BLS12_381_G2_ElementT,
         BLS12_381_MlResultT,
@@ -28,9 +27,15 @@ import Covenant.Type
       ),
     Renamed (Rigid, Unifiable, Wildcard),
     ValT (Abstraction, BuiltinFlat, BuiltinNested, ThunkT),
+    comp0,
+    comp1,
+    comp2,
+    listT,
     renameCompT,
     renameValT,
     runRenameM,
+    tyvar,
+    (-*-),
     pattern ReturnT,
     pattern (:--:>),
   )
@@ -67,7 +72,6 @@ main =
       testCase "forall a . [a] -> !a" testHeadListT,
       testCase "forall a b . (a, b) -> !b" testSndPairT,
       testCase "forall a b . (a -> !b) -> [a] -> ![b]" testMapT,
-      testCase "forall a b . (a, b)" testPairT,
       testGroup
         "Irrelevance"
         [ testCase "forall a b . [a]" testDodgyListT
@@ -111,10 +115,7 @@ propNestedConcrete = forAllShrinkShow arbitrary shrink show $ \(Concrete t) ->
 -- Checks that `forall a . a -> !a` correctly renames.
 testIdT :: IO ()
 testIdT = do
-  let idT =
-        CompT count1 $
-          Abstraction (BoundAt Z ix0)
-            :--:> ReturnT (Abstraction (BoundAt Z ix0))
+  let idT = comp1 $ tyvar Z ix0 :--:> ReturnT (tyvar Z ix0)
   let expected =
         CompT count1 $
           Abstraction (Unifiable ix0)
@@ -125,13 +126,7 @@ testIdT = do
 -- Checks that `forall a b . a -> b -> !a` correctly renames.
 testConstT :: IO ()
 testConstT = do
-  let absA = BoundAt Z ix0
-  let absB = BoundAt Z ix1
-  let constT =
-        CompT count2 $
-          Abstraction absA
-            :--:> Abstraction absB
-            :--:> ReturnT (Abstraction absA)
+  let constT = comp2 $ tyvar Z ix0 :--:> tyvar Z ix1 :--:> ReturnT (tyvar Z ix0)
   let expected =
         CompT count2 $
           Abstraction (Unifiable ix0)
@@ -144,13 +139,7 @@ testConstT = do
 testConstT2 :: IO ()
 testConstT2 = do
   let constT =
-        CompT count1 $
-          Abstraction (BoundAt Z ix0)
-            :--:> ReturnT
-              ( ThunkT . CompT count1 $
-                  Abstraction (BoundAt Z ix0)
-                    :--:> ReturnT (Abstraction (BoundAt (S Z) ix0))
-              )
+        comp1 $ tyvar Z ix0 :--:> ReturnT (ThunkT . comp1 $ tyvar Z ix0 :--:> ReturnT (tyvar (S Z) ix0))
   let expected =
         CompT count1 $
           Abstraction (Unifiable ix0)
@@ -165,12 +154,7 @@ testConstT2 = do
 -- Checks that `forall a . [a] -> !a` correctly renames.
 testHeadListT :: IO ()
 testHeadListT = do
-  let absA = BoundAt Z ix0
-  let absAInner = BoundAt (S Z) ix0
-  let headListT =
-        CompT count1 $
-          BuiltinNested (ListT count0 (Abstraction absAInner))
-            :--:> ReturnT (Abstraction absA)
+  let headListT = comp1 $ listT count0 (tyvar (S Z) ix0) :--:> ReturnT (tyvar Z ix0)
   let expected =
         CompT count1 $
           BuiltinNested (ListT count0 (Abstraction (Unifiable ix0)))
@@ -181,13 +165,10 @@ testHeadListT = do
 -- Checks that `forall a b . (a, b) -> !b` correctly renames.
 testSndPairT :: IO ()
 testSndPairT = do
-  let sndPairT =
-        CompT count2 $
-          BuiltinNested (PairT count0 (Abstraction (BoundAt (S Z) ix0)) (Abstraction (BoundAt (S Z) ix1)))
-            :--:> ReturnT (Abstraction (BoundAt Z ix1))
+  let sndPairT = comp2 $ (tyvar Z ix0 -*- tyvar Z ix1) :--:> ReturnT (tyvar Z ix1)
   let expected =
         CompT count2 $
-          BuiltinNested (PairT count0 (Abstraction (Unifiable ix0)) (Abstraction (Unifiable ix1)))
+          BuiltinNested (PairT (Abstraction (Unifiable ix0)) (Abstraction (Unifiable ix1)))
             :--:> ReturnT (Abstraction (Unifiable ix1))
   let result = runRenameM . renameCompT $ sndPairT
   assertRight (assertEqual "" expected) result
@@ -197,15 +178,12 @@ testSndPairT = do
 -- behave as expected.
 testMapT :: IO ()
 testMapT = do
-  let mapThunkT =
-        ThunkT
-          . CompT count0
-          $ Abstraction (BoundAt (S Z) ix0) :--:> ReturnT (Abstraction (BoundAt (S Z) ix1))
+  let mapThunkT = ThunkT (comp0 $ tyvar (S Z) ix0 :--:> ReturnT (tyvar (S Z) ix1))
   let mapT =
-        CompT count2 $
+        comp2 $
           mapThunkT
-            :--:> BuiltinNested (ListT count0 (Abstraction (BoundAt (S Z) ix0)))
-            :--:> ReturnT (BuiltinNested (ListT count0 (Abstraction (BoundAt (S Z) ix1))))
+            :--:> listT count0 (tyvar (S Z) ix0)
+            :--:> ReturnT (listT count0 (tyvar (S Z) ix1))
   let expectedMapThunkT =
         ThunkT
           . CompT count0
@@ -220,29 +198,11 @@ testMapT = do
   let resultMapT = runRenameM . renameCompT $ mapT
   assertRight (assertEqual "" expectedMapT) resultMapT
 
--- Checks that `forall a b . (a, b)` correctly renames.
-testPairT :: IO ()
-testPairT = do
-  let pairT =
-        BuiltinNested
-          . PairT count2 (Abstraction (BoundAt Z ix0))
-          . Abstraction
-          . BoundAt Z
-          $ ix1
-  let expected =
-        BuiltinNested
-          . PairT count2 (Abstraction (Unifiable ix0))
-          . Abstraction
-          . Unifiable
-          $ ix1
-  let result = runRenameM . renameValT $ pairT
-  assertRight (assertEqual "" expected) result
-
 -- Checks that `forall a b . [a]` triggers the irrelevance checker.
 testDodgyListT :: IO ()
 testDodgyListT = do
-  let listT = BuiltinNested . ListT count2 $ Abstraction (BoundAt Z ix0)
-  let result = runRenameM . renameValT $ listT
+  let listT' = listT count2 (tyvar Z ix0)
+  let result = runRenameM . renameValT $ listT'
   case result of
     Left IrrelevantAbstraction -> assertBool "" True
     Left _ -> assertBool "wrong renaming error" False
@@ -251,8 +211,7 @@ testDodgyListT = do
 -- Checks that `forall a b . a -> !a` triggers the overdeterminance checker.
 testDodgyIdT :: IO ()
 testDodgyIdT = do
-  let idT =
-        CompT count2 $ Abstraction (BoundAt Z ix0) :--:> ReturnT (Abstraction (BoundAt Z ix0))
+  let idT = comp2 $ tyvar Z ix0 :--:> ReturnT (tyvar Z ix0)
   let result = runRenameM . renameCompT $ idT
   case result of
     Left OverdeterminateAbstraction -> assertBool "" True
@@ -263,9 +222,9 @@ testDodgyIdT = do
 testDodgyConstT :: IO ()
 testDodgyConstT = do
   let constT =
-        CompT count2 $
-          Abstraction (BoundAt Z ix0)
-            :--:> ReturnT (ThunkT (CompT count0 $ Abstraction (BoundAt (S Z) ix1) :--:> ReturnT (Abstraction (BoundAt (S Z) ix0))))
+        comp2 $
+          tyvar Z ix0
+            :--:> ReturnT (ThunkT . comp0 $ tyvar (S Z) ix1 :--:> ReturnT (tyvar (S Z) ix0))
   let result = runRenameM . renameCompT $ constT
   case result of
     Left OverdeterminateAbstraction -> assertBool "" True
@@ -275,9 +234,7 @@ testDodgyConstT = do
 -- Checks that `forall a . b -> !a` triggers the variable indexing checker.
 testIndexingIdT :: IO ()
 testIndexingIdT = do
-  let t =
-        CompT count1 $
-          Abstraction (BoundAt Z ix0) :--:> ReturnT (Abstraction (BoundAt Z ix1))
+  let t = comp1 $ tyvar Z ix0 :--:> ReturnT (tyvar Z ix1)
   let result = runRenameM . renameCompT $ t
   case result of
     Left (InvalidAbstractionReference trueLevel ix) -> do

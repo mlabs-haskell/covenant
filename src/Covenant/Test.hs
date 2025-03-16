@@ -81,7 +81,7 @@ instance Arbitrary Concrete where
                 pure . BuiltinFlat $ BLS12_381_MlResultT,
                 pure . BuiltinFlat $ DataT,
                 BuiltinNested . ListT count0 <$> go (size `quot` 4),
-                BuiltinNested <$> (PairT count0 <$> go (size `quot` 4) <*> go (size `quot` 4)),
+                BuiltinNested <$> (PairT <$> go (size `quot` 4) <*> go (size `quot` 4)),
                 ThunkT . CompT count0 <$> (NonEmpty.consV <$> go (size `quot` 4) <*> liftArbitrary (go (size `quot` 4)))
               ]
   {-# INLINEABLE shrink #-}
@@ -100,12 +100,15 @@ instance Arbitrary Concrete where
             x : xs -> pure (NonEmpty.consV x . Vector.fromList $ xs)
       -- Can't shrink this
       BuiltinFlat _ -> []
-      BuiltinNested t ->
-        BuiltinNested <$> case t of
-          ListT _ t' -> do
-            Concrete shrunk <- shrink (Concrete t')
-            pure . ListT count0 $ shrunk
-          PairT _ t1 t2 -> do
-            Concrete shrunkT1 <- shrink (Concrete t1)
-            Concrete shrunkT2 <- shrink (Concrete t2)
-            [PairT count0 shrunkT1 t2, PairT count0 t1 shrunkT2]
+      BuiltinNested t -> case t of
+        ListT _ t' -> do
+          Concrete shrunk <- shrink (Concrete t')
+          pure . BuiltinNested . ListT count0 $ shrunk
+        PairT t1 t2 -> do
+          Concrete shrunkT1 <- shrink (Concrete t1)
+          Concrete shrunkT2 <- shrink (Concrete t2)
+          [ BuiltinNested $ PairT shrunkT1 t2,
+            BuiltinNested $ PairT t1 shrunkT2,
+            shrunkT1,
+            shrunkT2
+            ]

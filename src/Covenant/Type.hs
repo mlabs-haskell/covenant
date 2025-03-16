@@ -319,23 +319,21 @@ data BuiltinFlatT
       Show
     )
 
--- | Builtin types which have \'nested\' types. This is currently lists and
--- pairs only.
+-- | Builtin types which have \'nested\' types. These are lists and pairs only.
 --
 -- = Important note
 --
--- Both \'arms\' of this type have \'type abstraction boundaries\' just before
--- them: their first field indicates how many type variables they bind. Note
--- that 'PairT' has /one/ such boundary for both of its types, rather than one
--- boundary per type.
+-- The 'ListT' \'arm\' of this type has a \'type abstraction boundary\', similar
+-- to that of 'CompT'.
 --
--- While in truth, these types aren't /really/ polymorphic (as they cannot hold
--- thunks, for example), we define them this way for now.
+-- While they may appear as such, these types aren't \'truly polymorphic\' (as
+-- they cannot hold thunks, for example). We define these as such as this is
+-- needed to type primops.
 --
 -- @since 1.0.0
 data BuiltinNestedT (a :: Type)
   = ListT (Count "tyvar") (ValT a)
-  | PairT (Count "tyvar") (ValT a) (ValT a)
+  | PairT (ValT a) (ValT a)
   deriving stock
     ( -- | @since 1.0.0
       Eq,
@@ -349,7 +347,7 @@ data BuiltinNestedT (a :: Type)
 --
 -- @since 1.0.0
 (-*-) :: forall (a :: Type). ValT a -> ValT a -> ValT a
-t1 -*- t2 = BuiltinNested . PairT count0 t1 $ t2
+t1 -*- t2 = BuiltinNested . PairT t1 $ t2
 
 infixr 1 -*-
 
@@ -367,8 +365,8 @@ instance Eq1 BuiltinNestedT where
     ListT abses1 t1 -> \case
       ListT abses2 t2 -> abses1 == abses2 && liftEq f t1 t2
       _ -> False
-    PairT abses1 t11 t12 -> \case
-      PairT abses2 t21 t22 -> abses1 == abses2 && liftEq f t11 t21 && liftEq f t12 t22
+    PairT t11 t12 -> \case
+      PairT t21 t22 -> liftEq f t11 t21 && liftEq f t12 t22
       _ -> False
 
 -- Used during renaming. Contains a source of fresh indices for wildcards, as
@@ -578,19 +576,12 @@ renameValT = \case
         modify dropDownScope
         -- Rebuild and return
         pure . ListT abses $ renamed
-      PairT abses t1 t2 -> RenameM $ do
-        -- Step up a scope
-        modify (stepUpScope abses)
+      PairT t1 t2 -> RenameM $ do
         -- Rename t1, then t2, without any scope shifts
         renamed1 <- coerce . renameValT $ t1
         renamed2 <- coerce . renameValT $ t2
-        -- Check we don't have anything irrelevant
-        ourAbstractions <- gets (view (#tracker % to Vector.head % _1))
-        unless (Vector.and ourAbstractions) (throwError IrrelevantAbstraction)
-        -- Roll back state
-        modify dropDownScope
         -- Rebuild and return
-        pure . PairT abses renamed1 $ renamed2
+        pure . PairT renamed1 $ renamed2
 
 -- | @since 1.0.0
 data TypeAppError
@@ -682,7 +673,7 @@ unify expected actual =
         BuiltinFlat t1 -> expectFlatBuiltin t1
         BuiltinNested t1 -> case t1 of
           ListT _ t1' -> expectListOf t1'
-          PairT _ t11 t12 -> expectPairOf t11 t12
+          PairT t11 t12 -> expectPairOf t11 t12
     )
     (promoteUnificationError expected actual)
   where
@@ -772,7 +763,7 @@ unify expected actual =
         Unifiable _ -> noSubUnify
         Rigid _ _ -> unificationError
       BuiltinNested t2 -> case t2 of
-        PairT _ t21 t22 -> do
+        PairT t21 t22 -> do
           firstUnification <- catchError (unify tyParam1 t21) (promoteUnificationError expected actual)
           catchError (unify tyParam2 t22) (promoteUnificationError expected actual)
             >>= \res -> reconcile firstUnification res
@@ -810,4 +801,4 @@ substitute index toSub = fmap go
       BuiltinFlat t -> BuiltinFlat t
       BuiltinNested t -> BuiltinNested $ case t of
         ListT abses' t' -> ListT abses' . go $ t'
-        PairT abses' t1 t2 -> PairT abses' (go t1) . go $ t2
+        PairT t1 t2 -> PairT (go t1) . go $ t2

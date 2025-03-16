@@ -5,18 +5,14 @@ module Main (main) where
 import Control.Applicative ((<|>))
 import Covenant.DeBruijn (DeBruijn (S, Z))
 import Covenant.Index
-  ( Index,
-    count0,
+  ( count0,
     count1,
-    count2,
     ix0,
     ix1,
   )
 import Covenant.Test (Concrete (Concrete))
 import Covenant.Type
-  ( AbstractTy (BoundAt),
-    BuiltinFlatT (IntegerT),
-    BuiltinNestedT (ListT),
+  ( AbstractTy,
     CompT (CompT),
     Renamed,
     TypeAppError
@@ -25,15 +21,16 @@ import Covenant.Type
         InsufficientArgs,
         LeakingUnifiable
       ),
-    ValT
-      ( Abstraction,
-        BuiltinFlat,
-        BuiltinNested
-      ),
+    ValT,
     checkApp,
+    comp1,
+    comp2,
+    integerT,
+    listT,
     renameCompT,
     renameValT,
     runRenameM,
+    tyvar,
     pattern ReturnT,
     pattern (:--:>),
   )
@@ -80,7 +77,7 @@ main =
     ]
   where
     -- Note (Koz, 26/02/2025): By default, QuickCheck runs only 100 tests per
-    -- property, which is far to few. Using the method below, we can ensure that
+    -- property, which is far too few. Using the method below, we can ensure that
     -- we run a decent number of tests, while also permitting more than this to
     -- be set via the CLI if we want.
     moreTests :: QuickCheckTests -> QuickCheckTests
@@ -207,25 +204,22 @@ propUnifyConcrete = forAllShrink gen shr $ \(tA, mtB) ->
 
 -- Helpers
 
-integerT :: forall (a :: Type). ValT a
-integerT = BuiltinFlat IntegerT
-
 -- `forall a. a -> !a`
 idT :: CompT AbstractTy
-idT = CompT count1 $ tyvar Z ix0 :--:> ReturnT (tyvar Z ix0)
+idT = comp1 $ tyvar Z ix0 :--:> ReturnT (tyvar Z ix0)
 
 -- `forall a b . a -> b -> !a
 const2T :: CompT AbstractTy
-const2T = CompT count2 $ tyvar Z ix0 :--:> tyvar Z ix1 :--:> ReturnT (tyvar Z ix0)
+const2T = comp2 $ tyvar Z ix0 :--:> tyvar Z ix1 :--:> ReturnT (tyvar Z ix0)
 
 -- `forall a . [a] -> !a`
 headListT :: CompT AbstractTy
 headListT =
-  CompT count1 $ list0 (tyvar (S Z) ix0) :--:> ReturnT (tyvar Z ix0)
+  comp1 $ listT count0 (tyvar (S Z) ix0) :--:> ReturnT (tyvar Z ix0)
 
 -- `forall a. [a]`
 emptyListT :: ValT AbstractTy
-emptyListT = list1 (tyvar Z ix0)
+emptyListT = listT count1 (tyvar Z ix0)
 
 failLeft ::
   forall (a :: Type) (b :: Type).
@@ -249,12 +243,3 @@ withRenamedVals ::
 withRenamedVals vals f = case runRenameM . traverse renameValT $ vals of
   Left err -> counterexample (show err) False
   Right vals' -> f vals'
-
-list0 :: ValT AbstractTy -> ValT AbstractTy
-list0 = BuiltinNested . ListT count0
-
-list1 :: ValT AbstractTy -> ValT AbstractTy
-list1 = BuiltinNested . ListT count1
-
-tyvar :: DeBruijn -> Index "tyvar" -> ValT AbstractTy
-tyvar scope index = Abstraction (BoundAt scope index)
