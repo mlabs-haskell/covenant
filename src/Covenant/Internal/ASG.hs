@@ -24,6 +24,7 @@ import Control.Monad.HashCons (HashConsT, MonadHashCons, runHashConsT)
 import Control.Monad.Identity (Identity (runIdentity))
 import Control.Monad.Reader (ReaderT, ask, runReaderT)
 import Covenant.Internal.ASGNode (ASGNode, Id, TyASGNode, childIds)
+import Covenant.Ledger (LedgerFieldName, LedgerRecord)
 import Data.Bimap (Bimap)
 import Data.Bimap qualified as Bimap
 import Data.EnumMap.Strict (EnumMap)
@@ -103,8 +104,18 @@ data TypeError
       (Vector TyASGNode)
       -- | Types of provided arguments
       (Vector TyASGNode)
-  | -- | Tried to construct where the items have different types.
+  | -- | Tried to construct a list where the items have different types.
     TyErrNonHomogenousList
+  | -- | Tried to unwrap a value that is not a newtype
+    TyErrNotANewtype
+  | -- | Tried to access the field of a value that is not a record
+    TyErrNotARecord
+  | -- | Tried to access the field of a value, but the value's type doesn't have the field
+    TyErrInvalidField
+      -- | The value's type
+      LedgerRecord
+      -- | The field
+      LedgerFieldName
   deriving stock
     ( -- | @since 1.0.0
       Eq,

@@ -86,7 +86,7 @@ import Covenant.Internal.ASG
     ASGCompileError (ATypeError),
     ASGNeighbourhood,
     ASGZipper,
-    TypeError (TyErrAppArgMismatch, TyErrAppNotALambda, TyErrNonHomogenousList, TyErrPrimArgMismatch),
+    TypeError (TyErrAppArgMismatch, TyErrAppNotALambda, TyErrInvalidField, TyErrNonHomogenousList, TyErrNotANewtype, TyErrNotARecord, TyErrPrimArgMismatch),
     closeASGZipper,
     compileASG,
     downASGZipper,
@@ -111,7 +111,7 @@ import Covenant.Internal.ASGNode
     Id,
     PrimCall (PrimCallOne, PrimCallSix, PrimCallThree, PrimCallTwo),
     Ref (ABound, AnArg, AnId),
-    TyASGNode (ATyLam),
+    TyASGNode (ATyExpr, ATyLam, ATyLedger),
     TyLam (TyLam),
     typeOfRef,
     pattern App,
@@ -135,7 +135,86 @@ import Covenant.Internal.TyExpr
         TyUnit
       ),
   )
-import Covenant.Ledger (LedgerAccessor, LedgerDestructor)
+import Covenant.Ledger
+  ( LedgerAccessor (LedgerField, LedgerUnwrap),
+    LedgerData (Credential, GovernanceAction, LowerBound, OutputDatum, ScriptInfo, TxCert, UpperBound),
+    LedgerDestructor,
+    LedgerFieldName
+      ( AddressCredential,
+        AddressStakingCredential,
+        CommitteeMembers,
+        CommitteeQuorum,
+        GaidGovActionIx,
+        GaidTxId,
+        IvFrom,
+        IvTo,
+        PpDeposit,
+        PpGovernanceAction,
+        PpReturnAddr,
+        PvMajor,
+        PvMinor,
+        ScriptContextRedeemer,
+        ScriptContextScriptInfo,
+        ScriptContextTxInfo,
+        TxInInfoOutRef,
+        TxInInfoResolved,
+        TxInfoCurrentTreasuryAmount,
+        TxInfoData,
+        TxInfoFee,
+        TxInfoId,
+        TxInfoInputs,
+        TxInfoMint,
+        TxInfoOutputs,
+        TxInfoProposalProcedures,
+        TxInfoRedeemers,
+        TxInfoReferenceInputs,
+        TxInfoSignatories,
+        TxInfoTreasuryDonation,
+        TxInfoTxCerts,
+        TxInfoValidRange,
+        TxInfoVotes,
+        TxInfoWdrl,
+        TxOutAddress,
+        TxOutDatum,
+        TxOutRefId,
+        TxOutRefIdx,
+        TxOutReferenceScript,
+        TxOutValue
+      ),
+    LedgerNewtype
+      ( ChangedParameters,
+        ColdCommitteeCredential,
+        Constitution,
+        CurrencySymbol,
+        DRepCredential,
+        Datum,
+        DatumHash,
+        HotCommitteeCredential,
+        Lovelace,
+        MintValue,
+        POSIXTime,
+        PubKeyHash,
+        Redeemer,
+        ScriptHash,
+        TokenName,
+        TxId,
+        Value
+      ),
+    LedgerRecord
+      ( Address,
+        Committee,
+        GovernanceActionId,
+        Interval,
+        ProposalProcedure,
+        ProtocolVersion,
+        ScriptContext,
+        TxInInfo,
+        TxInfo,
+        TxOut,
+        TxOutRef
+      ),
+    TyLedger (ALedgerData, ALedgerNewtype, ALedgerRecord),
+  )
 import Covenant.Prim (OneArgFunc, SixArgFunc, ThreeArgFunc, TwoArgFunc)
 import Data.Foldable (traverse_)
 import Data.Kind (Type)
@@ -172,7 +251,8 @@ emptyScope = Scope Vector.empty Vector.empty
 lit ::
   forall (m :: Type -> Type).
   (MonadHashCons Id ASGNode m, MonadError ASGCompileError m) =>
-  AConstant -> m Id
+  AConstant ->
+  m Id
 lit c = do
   ty <- liftTypeError (typeLit c)
   refTo (LitInternal ty c)
@@ -183,7 +263,8 @@ lit c = do
 prim ::
   forall (m :: Type -> Type).
   (MonadHashCons Id ASGNode m, MonadError ASGCompileError m) =>
-  PrimCall -> m Id
+  PrimCall ->
+  m Id
 prim p = do
   ty <- typePrim p
   refTo (PrimInternal ty p)
@@ -196,7 +277,9 @@ prim p = do
 app ::
   forall (m :: Type -> Type).
   (MonadHashCons Id ASGNode m, MonadError ASGCompileError m) =>
-  Ref -> Ref -> m Id
+  Ref ->
+  Ref ->
+  m Id
 app f x = do
   tyFun <- typeOfRef f
   tyArg <- typeOfRef f
@@ -325,7 +408,8 @@ pushLetToScope ty (Scope args lets) =
 
 liftTypeError ::
   (MonadError ASGCompileError m) =>
-  Either TypeError a -> m a
+  Either TypeError a ->
+  m a
 liftTypeError = liftEither . mapLeft ATypeError
   where
     mapLeft :: (a -> c) -> Either a b -> Either c b
@@ -364,7 +448,8 @@ typeApp tyFun tyArg = case tyFun of
 typePrim ::
   forall (m :: Type -> Type).
   (MonadHashCons Id ASGNode m, MonadError ASGCompileError m) =>
-  PrimCall -> m TyASGNode
+  PrimCall ->
+  m TyASGNode
 typePrim p = case p of
   (PrimCallOne fun arg1) -> do
     ty <- typeOfRef arg1
@@ -424,11 +509,20 @@ typeSixArgFunc fun tyArg1 tyArg2 tyArg3 tyArg4 tyArg5 tyArg6 =
 -- @since 1.0.0
 ledgerAccess ::
   forall (m :: Type -> Type).
-  (MonadHashCons Id ASGNode m) =>
+  (MonadHashCons Id ASGNode m, MonadError ASGCompileError m) =>
   LedgerAccessor ->
   Ref ->
   m Id
-ledgerAccess acc = refTo . LedgerAccessInternal acc
+ledgerAccess acc x = do
+  tyArg <- typeOfRef x
+  resTy <- liftTypeError $ case acc of
+    LedgerUnwrap -> case tyArg of
+      ATyLedger (ALedgerNewtype tyArgInner) -> Right (typeLedgerUnwrap tyArgInner)
+      _ -> Left TyErrNotANewtype
+    LedgerField field -> case tyArg of
+      ATyLedger (ALedgerRecord tyArgInner) -> typeLedgerFieldAccess tyArgInner field
+      _ -> Left TyErrNotARecord
+  refTo (LedgerAccessInternal resTy acc x)
 
 -- | Construct a ledger sum type destructor. The first 'Ref' must be a
 -- function suitable for destructuring the second 'Ref', though we do not
@@ -443,6 +537,97 @@ ledgerDestruct ::
   Ref ->
   m Id
 ledgerDestruct d rFun = refTo . LedgerDestructInternal d rFun
+
+-- Typing helpers for ledger accessors
+
+typeLedgerUnwrap :: LedgerNewtype -> TyASGNode
+typeLedgerUnwrap = \case
+  ColdCommitteeCredential -> ATyLedger (ALedgerData Credential) -- Credential
+  HotCommitteeCredential -> ATyLedger (ALedgerData Credential) -- Credential
+  DRepCredential -> ATyLedger (ALedgerData Credential) -- Credential
+  ChangedParameters -> ATyExpr TyPlutusData -- BuiltinData
+  PubKeyHash -> ATyExpr TyByteString -- BuiltinByteString
+  Lovelace -> ATyExpr TyInteger -- Integer
+  CurrencySymbol -> ATyExpr TyByteString -- BuiltinByteString
+  TokenName -> ATyExpr TyByteString -- BuiltinByteString
+  Value -> ATyExpr TyPlutusData -- Map CurrencySymbol (Map TokenName Integer) **
+  ScriptHash -> ATyExpr TyByteString -- BuiltinByteString
+  DatumHash -> ATyExpr TyByteString -- BuiltinByteString
+  Datum -> ATyExpr TyPlutusData -- BuiltinData
+  Redeemer -> ATyExpr TyPlutusData -- BuiltinData
+  Constitution -> ATyExpr TyPlutusData -- Maybe ScriptHash **
+  POSIXTime -> ATyExpr TyInteger -- Integer
+  TxId -> ATyExpr TyByteString -- BuiltinByteString
+  MintValue -> ATyExpr TyPlutusData -- Map CurrencySymbol (Map TokenName Integer) **
+
+typeLedgerFieldAccess :: LedgerRecord -> LedgerFieldName -> Either TypeError TyASGNode
+typeLedgerFieldAccess = \case
+  GovernanceActionId -> \case
+    GaidTxId -> Right $ ATyLedger (ALedgerNewtype TxId) -- TxId
+    GaidGovActionIx -> Right $ ATyExpr TyInteger -- Integer
+    field -> Left $ TyErrInvalidField GovernanceActionId field
+  Committee -> \case
+    CommitteeMembers -> Right $ ATyExpr TyPlutusData -- Map ColdCommitteeCredential Integer **
+    CommitteeQuorum -> Right $ ATyExpr TyPlutusData -- Rational
+    field -> Left $ TyErrInvalidField Committee field
+  ProtocolVersion -> \case
+    PvMajor -> Right $ ATyExpr TyInteger -- Integer
+    PvMinor -> Right $ ATyExpr TyInteger -- Integer
+    field -> Left $ TyErrInvalidField ProtocolVersion field
+  ProposalProcedure -> \case
+    PpDeposit -> Right $ ATyLedger (ALedgerNewtype Lovelace) -- Lovelace
+    PpReturnAddr -> Right $ ATyLedger (ALedgerData Credential) -- Credential
+    PpGovernanceAction -> Right $ ATyLedger (ALedgerData GovernanceAction) -- GovernanceAction
+    field -> Left $ TyErrInvalidField ProposalProcedure field
+  TxInInfo -> \case
+    TxInInfoOutRef -> Right $ ATyLedger (ALedgerRecord TxOutRef) --  TxOutRef
+    TxInInfoResolved -> Right $ ATyLedger (ALedgerRecord TxOut) -- TxOut
+    field -> Left $ TyErrInvalidField TxInInfo field
+  TxInfo -> \case
+    TxInfoInputs -> Right $ listOf (ATyLedger (ALedgerRecord TxInInfo)) -- [TxInInfo] **
+    TxInfoReferenceInputs -> Right $ listOf (ATyLedger (ALedgerRecord TxInInfo)) -- [TxInInfo] **
+    TxInfoOutputs -> Right $ listOf (ATyLedger (ALedgerRecord TxOut)) -- [TxOut] **
+    TxInfoFee -> Right $ ATyLedger (ALedgerNewtype Lovelace) -- Lovelace
+    TxInfoMint -> Right $ ATyLedger (ALedgerNewtype MintValue) -- MintValue
+    TxInfoTxCerts -> Right $ listOf (ATyLedger (ALedgerData TxCert)) -- [TxCert] **
+    TxInfoWdrl -> Right $ ATyExpr TyPlutusData -- Map Credential Lovelace **
+    TxInfoValidRange -> Right $ ATyLedger (ALedgerRecord (Interval $ ALedgerNewtype POSIXTime)) -- type POSIXTimeRange = Interval POSIXTime **
+    TxInfoSignatories -> Right $ listOf (ATyLedger (ALedgerNewtype PubKeyHash)) -- [PubKeyHash] **
+    TxInfoRedeemers -> Right $ ATyExpr TyPlutusData -- Map ScriptPurpose Redeemer **
+    TxInfoData -> Right $ ATyExpr TyPlutusData -- Map DatumHash Datum **
+    TxInfoId -> Right $ ATyLedger (ALedgerNewtype TxId) -- TxId
+    TxInfoVotes -> Right $ ATyExpr TyPlutusData -- Map Voter (Map GovernanceActionId Vote) **
+    TxInfoProposalProcedures -> Right $ listOf (ATyLedger (ALedgerRecord ProposalProcedure)) -- [ProposalProcedure] **
+    TxInfoCurrentTreasuryAmount -> Right $ ATyExpr TyPlutusData -- Maybe Lovelace **
+    TxInfoTreasuryDonation -> Right $ ATyExpr TyPlutusData -- Maybe Lovelace **
+    field -> Left $ TyErrInvalidField TxInfo field
+  ScriptContext -> \case
+    ScriptContextTxInfo -> Right $ ATyLedger (ALedgerRecord TxInfo) -- TxInfo
+    ScriptContextRedeemer -> Right $ ATyLedger (ALedgerNewtype Redeemer) -- ScriptInfo
+    ScriptContextScriptInfo -> Right $ ATyLedger (ALedgerData ScriptInfo) -- Credential
+    field -> Left $ TyErrInvalidField ScriptContext field
+  Address -> \case
+    AddressCredential -> Right $ ATyLedger (ALedgerData Credential) -- Credential
+    AddressStakingCredential -> Right $ ATyExpr TyPlutusData -- Maybe StakingCredential **
+    field -> Left $ TyErrInvalidField Address field
+  Interval ty -> \case
+    IvFrom -> Right $ ATyLedger (ALedgerData $ LowerBound ty) -- LowerBound ty **
+    IvTo -> Right $ ATyLedger (ALedgerData $ UpperBound ty) -- UpperBound ty **
+    field -> Left $ TyErrInvalidField (Interval ty) field
+  TxOut -> \case
+    TxOutAddress -> Right $ ATyLedger (ALedgerRecord Address) -- Address
+    TxOutValue -> Right $ ATyLedger (ALedgerNewtype Value) -- Value
+    TxOutDatum -> Right $ ATyLedger (ALedgerData OutputDatum) -- OutputDatum
+    TxOutReferenceScript -> Right $ ATyExpr TyPlutusData -- Maybe ScriptHash **
+    field -> Left $ TyErrInvalidField TxOut field
+  TxOutRef -> \case
+    TxOutRefId -> Right $ ATyLedger (ALedgerNewtype TxId) -- TxId
+    TxOutRefIdx -> Right $ ATyExpr TyInteger -- Integer
+    field -> Left $ TyErrInvalidField TxOutRef field
+  where
+    listOf :: TyASGNode -> TyASGNode
+    -- listOf t = ATyExpr (TyList t) --
+    listOf _ = ATyExpr TyPlutusData --
 
 -- ASGZipper
 

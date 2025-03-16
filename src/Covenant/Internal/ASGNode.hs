@@ -25,7 +25,7 @@ where
 import Control.Monad.HashCons (MonadHashCons, lookupRef)
 import Covenant.Constant (AConstant)
 import Covenant.Internal.TyExpr (TyExpr)
-import Covenant.Ledger (LedgerAccessor, LedgerDestructor)
+import Covenant.Ledger (LedgerAccessor, LedgerDestructor, TyLedger)
 import Covenant.Prim (OneArgFunc, SixArgFunc, ThreeArgFunc, TwoArgFunc)
 import Data.Kind (Type)
 import Data.Maybe (fromJust, mapMaybe)
@@ -128,7 +128,7 @@ data ASGNode
   | LamInternal TyLam Ref
   | LetInternal TyASGNode Ref Ref
   | AppInternal TyASGNode Ref Ref
-  | LedgerAccessInternal LedgerAccessor Ref
+  | LedgerAccessInternal TyASGNode LedgerAccessor Ref
   | LedgerDestructInternal LedgerDestructor Ref Ref
   deriving stock
     ( -- | @since 1.0.0
@@ -174,8 +174,8 @@ pattern App ty rFun rArg <- AppInternal ty rFun rArg
 -- | An accessor for a ledger type.
 --
 -- @since 1.0.0
-pattern LedgerAccess :: LedgerAccessor -> Ref -> ASGNode
-pattern LedgerAccess acc rArg <- LedgerAccessInternal acc rArg
+pattern LedgerAccess :: TyASGNode -> LedgerAccessor -> Ref -> ASGNode
+pattern LedgerAccess ty acc rArg <- LedgerAccessInternal ty acc rArg
 
 -- | A destructor for a ledger sum. The first 'Ref' is for a destructor
 -- function, while the second is the argument to be destructured.
@@ -192,6 +192,7 @@ pattern LedgerDestruct d rDest rArg <- LedgerDestructInternal d rDest rArg
 data TyASGNode
   = ATyExpr TyExpr
   | ATyLam TyLam
+  | ATyLedger TyLedger
   deriving stock
     ( -- | @since 1.0.0
       Eq,
@@ -231,7 +232,7 @@ childIds = \case
   LamInternal _ r1 -> mapMaybe refToId [r1]
   LetInternal _ r1 r2 -> mapMaybe refToId [r1, r2]
   AppInternal _ r1 r2 -> mapMaybe refToId [r1, r2]
-  LedgerAccessInternal _ r1 -> mapMaybe refToId [r1]
+  LedgerAccessInternal _ _ r1 -> mapMaybe refToId [r1]
   LedgerDestructInternal _ r1 r2 -> mapMaybe refToId [r1, r2]
 
 -- Helpers
@@ -259,5 +260,5 @@ typeOfNode = \case
   LamInternal ty _ -> ATyLam ty
   LetInternal ty _ _ -> ty
   AppInternal ty _ _ -> ty
-  LedgerAccessInternal _ _ -> error "TODO"
+  LedgerAccessInternal ty _ _ -> ty
   LedgerDestructInternal {} -> error "TODO"

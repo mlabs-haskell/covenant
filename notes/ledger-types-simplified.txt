@@ -1,0 +1,335 @@
+-- Alias
+
+type POSIXTimeRange = Interval POSIXTime
+type Closure = Bool
+
+-- newtypes
+
+definitions:
+
+newtype ColdCommitteeCredential = ColdCommitteeCredential Credential
+newtype HotCommitteeCredential = HotCommitteeCredential Credential
+newtype DRepCredential = DRepCredential Credential
+newtype ChangedParameters = ChangedParameters {getChangedParameters :: PlutusTx.BuiltinData}
+newtype PubKeyHash = PubKeyHash {getPubKeyHash :: PlutusTx.BuiltinByteString}
+newtype Lovelace = Lovelace { getLovelace :: Integer }
+newtype CurrencySymbol = CurrencySymbol {unCurrencySymbol :: PlutusTx.BuiltinByteString}
+newtype TokenName = TokenName {unTokenName :: PlutusTx.BuiltinByteString}
+newtype Value = Value { getValue :: Map CurrencySymbol (Map TokenName Integer) }
+newtype ScriptHash = ScriptHash {getScriptHash :: Builtins.BuiltinByteString}
+newtype DatumHash = DatumHash Builtins.BuiltinByteString
+newtype Datum = Datum {getDatum :: BuiltinData}
+newtype Redeemer = Redeemer {getRedeemer :: BuiltinData}
+newtype Constitution = Constitution { constitutionScript :: Haskell.Maybe ScriptHash } 
+newtype POSIXTime = POSIXTime {getPOSIXTime :: Integer}
+newtype TxId = TxId {getTxId :: PlutusTx.BuiltinByteString}
+newtype MintValue = UnsafeMintValue (Map CurrencySymbol (Map TokenName Integer))
+
+typenames:
+
+ColdCommitteeCredential
+HotCommitteeCredential
+DRepCredential
+ChangedParameters
+PubKeyHash
+Lovelace
+CurrencySymbol
+TokenName
+Value
+ScriptHash
+DatumHash
+Datum
+Redeemer
+Constitution
+POSIXTime
+TxId
+MintValue
+
+-- records
+
+definitions:
+
+data GovernanceActionId = GovernanceActionId
+  { gaidTxId        :: TxId
+  , gaidGovActionIx :: Haskell.Integer
+  }
+
+data Committee = Committee
+  { committeeMembers :: Map ColdCommitteeCredential Haskell.Integer
+  , committeeQuorum  :: PlutusTx.Rational
+  }
+
+data ProtocolVersion = ProtocolVersion
+  { pvMajor :: Haskell.Integer
+  , pvMinor :: Haskell.Integer
+  }
+
+data ProposalProcedure = ProposalProcedure
+  { ppDeposit          :: Lovelace
+  , ppReturnAddr       :: Credential
+  , ppGovernanceAction :: GovernanceAction
+  }
+
+data TxInInfo = TxInInfo
+  { txInInfoOutRef   :: TxOutRef
+  , txInInfoResolved :: TxOut
+  }
+
+data TxInfo = TxInfo
+  { txInfoInputs                :: [TxInInfo]
+  , txInfoReferenceInputs       :: [TxInInfo]
+  , txInfoOutputs               :: [TxOut]
+  , txInfoFee                   :: Lovelace
+  , txInfoMint                  :: MintValue
+  , txInfoTxCerts               :: [TxCert]
+  , txInfoWdrl                  :: Map Credential Lovelace
+  , txInfoValidRange            :: POSIXTimeRange
+  , txInfoSignatories           :: [PubKeyHash]
+  , txInfoRedeemers             :: Map ScriptPurpose Redeemer
+  , txInfoData                  :: Map DatumHash Datum
+  , txInfoId                    :: TxId
+  , txInfoVotes                 :: Map Voter (Map GovernanceActionId Vote)
+  , txInfoProposalProcedures    :: [ProposalProcedure]
+  , txInfoCurrentTreasuryAmount :: Haskell.Maybe Lovelace
+  , txInfoTreasuryDonation      :: Haskell.Maybe Lovelace
+  }
+
+data ScriptContext = ScriptContext
+  { scriptContextTxInfo     :: TxInfo
+  , scriptContextRedeemer   :: Redeemer
+  , scriptContextScriptInfo :: ScriptInfo
+  }
+
+data Address = Address
+  { addressCredential        :: Credential
+  , addressStakingCredential :: Maybe StakingCredential
+  }
+
+data Interval a = Interval { ivFrom :: LowerBound a, ivTo :: UpperBound a }
+
+data TxOut = TxOut
+  { txOutAddress         :: Address
+  , txOutValue           :: Value
+  , txOutDatum           :: OutputDatum
+  , txOutReferenceScript :: Maybe ScriptHash
+  }
+
+data TxOutRef = TxOutRef
+  { txOutRefId  :: TxId
+  , txOutRefIdx :: Integer
+  }
+
+typenames:
+
+GovernanceActionId
+Committee
+ProtocolVersion
+ProposalProcedure
+TxInInfo
+TxInfo
+ScriptContext
+Address
+Interval
+TxOut
+TxOutRef
+
+fields:
+
+  { gaidTxId        :: TxId
+  , gaidGovActionIx :: Haskell.Integer
+  { committeeMembers :: Map ColdCommitteeCredential Haskell.Integer
+  , committeeQuorum  :: PlutusTx.Rational
+  { pvMajor :: Haskell.Integer
+  , pvMinor :: Haskell.Integer
+  { ppDeposit          :: Lovelace
+  , ppReturnAddr       :: Credential
+  , ppGovernanceAction :: GovernanceAction
+  { txInInfoOutRef   :: TxOutRef
+  , txInInfoResolved :: TxOut
+  { txInfoInputs                :: [TxInInfo]
+  , txInfoReferenceInputs       :: [TxInInfo]
+  , txInfoOutputs               :: [TxOut]
+  , txInfoFee                   :: Lovelace
+  , txInfoMint                  :: MintValue
+  , txInfoTxCerts               :: [TxCert]
+  , txInfoWdrl                  :: Map Credential Lovelace
+  , txInfoValidRange            :: POSIXTimeRange
+  , txInfoSignatories           :: [PubKeyHash]
+  , txInfoRedeemers             :: Map ScriptPurpose Redeemer
+  , txInfoData                  :: Map DatumHash Datum
+  , txInfoId                    :: TxId
+  , txInfoVotes                 :: Map Voter (Map GovernanceActionId Vote)
+  , txInfoProposalProcedures    :: [ProposalProcedure]
+  , txInfoCurrentTreasuryAmount :: Haskell.Maybe Lovelace
+  , txInfoTreasuryDonation      :: Haskell.Maybe Lovelace
+  { scriptContextTxInfo     :: TxInfo
+  , scriptContextRedeemer   :: Redeemer
+  , scriptContextScriptInfo :: ScriptInfo
+  { addressCredential        :: Credential
+  , addressStakingCredential :: Maybe StakingCredential
+	{ ivFrom :: LowerBound a
+	, ivTo :: UpperBound a 
+  { txOutAddress         :: Address
+  , txOutValue           :: Value
+  , txOutDatum           :: OutputDatum
+  , txOutReferenceScript :: Maybe ScriptHash
+  { txOutRefId  :: TxId
+  , txOutRefIdx :: Integer
+
+field labels:
+
+  GaidTxId
+  GaidGovActionIx
+  CommitteeMembers
+  CommitteeQuorum
+  PvMajor
+  PvMinor
+  PpDeposit
+  PpReturnAddr
+  PpGovernanceAction
+  TxInInfoOutRef
+  TxInInfoResolved
+  TxInfoInputs
+  TxInfoReferenceInputs
+  TxInfoOutputs
+  TxInfoFee
+  TxInfoMint
+  TxInfoTxCerts
+  TxInfoWdrl
+  TxInfoValidRange
+  TxInfoSignatories
+  TxInfoRedeemers
+  TxInfoData
+  TxInfoId
+  TxInfoVotes
+  TxInfoProposalProcedures
+  TxInfoCurrentTreasuryAmount
+  TxInfoTreasuryDonation
+  ScriptContextTxInfo
+  ScriptContextRedeemer
+  ScriptContextScriptInfo
+  AddressCredential
+  AddressStakingCredential
+	IvFrom
+	IvTo
+  TxOutAddress
+  TxOutValue
+  TxOutDatum
+  TxOutReferenceScript
+  TxOutRefId
+  TxOutRefIdx
+
+-- sum types
+
+data DRep
+  = DRep DRepCredential
+  | DRepAlwaysAbstain
+  | DRepAlwaysNoConfidence
+
+data Delegatee
+  = DelegStake PubKeyHash
+  | DelegVote DRep
+  | DelegStakeVote PubKeyHash DRep
+
+data TxCert
+  = TxCertRegStaking Credential (Haskell.Maybe Lovelace)
+  | TxCertUnRegStaking Credential (Haskell.Maybe Lovelace)
+  | TxCertDelegStaking Credential Delegatee
+  | TxCertRegDeleg Credential Delegatee Lovelace
+  | TxCertRegDRep DRepCredential Lovelace
+  | TxCertUpdateDRep DRepCredential
+  | TxCertUnRegDRep DRepCredential Lovelace
+  | TxCertPoolRegister
+      PubKeyHash
+      PubKeyHash
+  | TxCertPoolRetire PubKeyHash Haskell.Integer
+  | TxCertAuthHotCommittee ColdCommitteeCredential HotCommitteeCredential
+  | TxCertResignColdCommittee ColdCommitteeCredential
+
+data Voter
+  = CommitteeVoter HotCommitteeCredential
+  | DRepVoter DRepCredential
+  | StakePoolVoter PubKeyHash
+
+data Vote
+  = VoteNo
+  | VoteYes
+  | Abstain
+
+data GovernanceAction
+  = ParameterChange
+      (Haskell.Maybe GovernanceActionId)
+      ChangedParameters
+      (Haskell.Maybe ScriptHash)
+  | HardForkInitiation (Haskell.Maybe GovernanceActionId) ProtocolVersion
+  | TreasuryWithdrawals
+      (Map Credential Lovelace)
+      (Haskell.Maybe ScriptHash)
+  | NoConfidence (Haskell.Maybe GovernanceActionId)
+  | UpdateCommittee
+      (Haskell.Maybe GovernanceActionId)
+      [ColdCommitteeCredential]
+      (Map ColdCommitteeCredential Haskell.Integer)
+      Rational
+  | NewConstitution (Haskell.Maybe GovernanceActionId) Constitution
+  | InfoAction
+
+data ScriptPurpose
+  = Minting CurrencySymbol
+  | Spending TxOutRef
+  | Rewarding Credential
+  | Certifying
+      Haskell.Integer
+      TxCert
+  | Voting Voter
+  | Proposing
+      Haskell.Integer
+      ProposalProcedure
+
+data ScriptInfo
+  = MintingScript CurrencySymbol
+  | SpendingScript TxOutRef (Haskell.Maybe Datum)
+  | RewardingScript Credential
+  | CertifyingScript
+      Haskell.Integer
+      TxCert
+  | VotingScript Voter
+  | ProposingScript
+      Haskell.Integer
+      ProposalProcedure
+
+data Credential
+  = PubKeyCredential PubKeyHash
+  | ScriptCredential ScriptHash
+
+data StakingCredential
+    = StakingHash Credential
+    | StakingPtr
+        Integer
+        Integer
+        Integer
+
+data OutputDatum = NoOutputDatum | OutputDatumHash DatumHash | OutputDatum Datum
+
+
+data UpperBound a = UpperBound (Extended a) Closure
+data LowerBound a = LowerBound (Extended a) Closure
+
+data Extended a = NegInf | Finite a | PosInf
+
+--
+
+DRep
+Delegatee
+TxCert
+Voter
+Vote
+GovernanceAction
+ScriptPurpose
+ScriptInfo
+Credential
+StakingCredential
+OutputDatum
+UpperBound
+LowerBound
+Extended
