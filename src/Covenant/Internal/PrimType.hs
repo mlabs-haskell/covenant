@@ -45,8 +45,6 @@ import Covenant.Prim
         LengthOfByteString,
         ListData,
         MapData,
-        MkNilData,
-        MkNilPairData,
         NullList,
         Ripemd_160,
         SerialiseData,
@@ -147,8 +145,6 @@ typeOfOneArgFunc =
     UnIData -> (TyPlutusData, TyInteger)
     UnBData -> (TyPlutusData, TyByteString)
     SerialiseData -> (TyPlutusData, TyByteString)
-    MkNilData -> (TyUnit, TyList TyPlutusData)
-    MkNilPairData -> (TyUnit, TyList (TyPair TyPlutusData TyPlutusData))
     BLS12_381_G1_neg -> (TyBLS12_381G1Element, TyBLS12_381G1Element)
     BLS12_381_G1_compress -> (TyBLS12_381G1Element, TyByteString)
     BLS12_381_G1_uncompress -> (TyByteString, TyBLS12_381G1Element)

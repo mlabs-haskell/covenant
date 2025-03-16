@@ -139,4 +139,11 @@ test-suite type-applications
   build-depends: vector
   hs-source-dirs: test/type-applications
 
+test-suite primops
+  import: test-lang
+  type: exitcode-stdio-1.0
+  main-is: Main.hs
+  build-depends: nonempty-vector
+  hs-source-dirs: test/primops
+
 -- Benchmarks
