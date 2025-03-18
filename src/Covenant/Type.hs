@@ -687,26 +687,22 @@ unify expected actual =
     -- themselves, or any other abstraction, but nothing else. No substitutional
     -- rewrites are needed.
     expectRigid level1 index1 = case actual of
-      Abstraction t2 -> case t2 of
-        Unifiable _ -> noSubUnify
-        Wildcard _ _ -> noSubUnify
-        Rigid level2 index2 ->
-          if level1 == level2 && index1 == index2
-            then noSubUnify
-            else unificationError
+      Abstraction (Rigid level2 index2) ->
+        if level1 == level2 && index1 == index2
+          then noSubUnify
+          else unificationError
+      Abstraction _ -> noSubUnify
       _ -> unificationError
     expectWildcard ::
       Word64 -> Index "tyvar" -> Either TypeAppError (Map (Index "tyvar") (ValT Renamed))
     -- Wildcards can unify with unifiables, as well as themselves, but nothing
     -- else. No substitutional rewrites are needed.
     expectWildcard scopeId1 index1 = case actual of
-      Abstraction t2 -> case t2 of
-        Unifiable _ -> noSubUnify
-        Wildcard scopeId2 index2 ->
-          if scopeId1 /= scopeId2 || index1 == index2
-            then noSubUnify
-            else unificationError
-        Rigid _ _ -> unificationError
+      Abstraction (Unifiable _) -> noSubUnify
+      Abstraction (Wildcard scopeId2 index2) ->
+        if scopeId1 /= scopeId2 || index1 == index2
+          then noSubUnify
+          else unificationError
       _ -> unificationError
     expectThunk :: CompT Renamed -> Either TypeAppError (Map (Index "tyvar") (ValT Renamed))
     -- Thunks unify unconditionally with wildcards or unifiables. They unify
@@ -714,10 +710,8 @@ unify expected actual =
     -- with its counterpart in the same position, as well as their result types,
     -- without conflicts.
     expectThunk (CompT _ t1) = case actual of
-      Abstraction t2 -> case t2 of
-        Wildcard _ _ -> noSubUnify
-        Unifiable _ -> noSubUnify
-        Rigid _ _ -> unificationError
+      Abstraction (Rigid _ _) -> unificationError
+      Abstraction _ -> noSubUnify
       ThunkT (CompT _ t2) -> do
         unless (comparing NonEmpty.length t1 t2 == EQ) unificationError
         catchError
@@ -729,10 +723,8 @@ unify expected actual =
     -- unifiables or wildcards, but nothing else. No substitutional rewrites are
     -- needed.
     expectFlatBuiltin t1 = case actual of
-      Abstraction t2 -> case t2 of
-        Wildcard _ _ -> noSubUnify
-        Unifiable _ -> noSubUnify
-        Rigid _ _ -> unificationError
+      Abstraction (Rigid _ _) -> unificationError
+      Abstraction _ -> noSubUnify
       BuiltinFlat t2 ->
         if t1 == t2
           then noSubUnify
@@ -743,13 +735,10 @@ unify expected actual =
     -- Substitutions may be required if the type parameter is a unifiable.
     expectListOf :: ValT Renamed -> Either TypeAppError (Map (Index "tyvar") (ValT Renamed))
     expectListOf tyParam = case actual of
-      Abstraction t2 -> case t2 of
-        Wildcard _ _ -> noSubUnify
-        Unifiable _ -> noSubUnify
-        Rigid _ _ -> unificationError
-      BuiltinNested t2 -> case t2 of
-        ListT _ t2' -> catchError (unify tyParam t2') (promoteUnificationError expected actual)
-        _ -> unificationError
+      Abstraction (Rigid _ _) -> unificationError
+      Abstraction _ -> noSubUnify
+      BuiltinNested (ListT _ t2') ->
+        catchError (unify tyParam t2') (promoteUnificationError expected actual)
       _ -> unificationError
     -- Pairs can unify unconditionally with wildcards or unifiables. They can
     -- unify with other pairs as long as each type parameter unifies with its
@@ -758,10 +747,8 @@ unify expected actual =
     expectPairOf ::
       ValT Renamed -> ValT Renamed -> Either TypeAppError (Map (Index "tyvar") (ValT Renamed))
     expectPairOf tyParam1 tyParam2 = case actual of
-      Abstraction t2 -> case t2 of
-        Wildcard _ _ -> noSubUnify
-        Unifiable _ -> noSubUnify
-        Rigid _ _ -> unificationError
+      Abstraction (Rigid _ _) -> unificationError
+      Abstraction _ -> noSubUnify
       BuiltinNested t2 -> case t2 of
         PairT t21 t22 -> do
           firstUnification <- catchError (unify tyParam1 t21) (promoteUnificationError expected actual)

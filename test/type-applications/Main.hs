@@ -3,9 +3,11 @@
 module Main (main) where
 
 import Control.Applicative ((<|>))
-import Covenant.DeBruijn (DeBruijn (S, Z))
+import Control.Monad (guard)
+import Covenant.DeBruijn (DeBruijn (S, Z), asInt)
 import Covenant.Index
-  ( count0,
+  ( Index,
+    count0,
     count1,
     ix0,
     ix1,
@@ -13,16 +15,22 @@ import Covenant.Index
 import Covenant.Test (Concrete (Concrete))
 import Covenant.Type
   ( AbstractTy,
+    BuiltinNestedT (ListT),
     CompT (CompT),
-    Renamed,
+    Renamed (Rigid, Wildcard),
     TypeAppError
       ( DoesNotUnify,
         ExcessArgs,
         InsufficientArgs,
         LeakingUnifiable
       ),
-    ValT,
+    ValT
+      ( Abstraction,
+        BuiltinNested,
+        ThunkT
+      ),
     checkApp,
+    comp0,
     comp1,
     comp2,
     integerT,
@@ -50,6 +58,7 @@ import Test.QuickCheck
     liftShrink,
     oneof,
     shrink,
+    suchThat,
     vectorOf,
     (===),
   )
@@ -72,7 +81,19 @@ main =
         ],
       testGroup
         "Unification"
-        [ testProperty "concrete expected, concrete actual" propUnifyConcrete
+        [ testProperty "concrete expected, concrete actual" propUnifyConcrete,
+          testProperty "unifiable expected, concrete actual" propUnifyUnifiableConcrete,
+          testProperty "rigid expected, concrete actual" propUnifyRigidConcrete,
+          testProperty "wildcard expected, concrete actual" propUnifyWildcardConcrete,
+          testProperty "concrete expected, unifiable actual" propUnifyConcreteUnifiable,
+          testProperty "unifiable expected, unifiable actual" propUnifyUnifiable,
+          testProperty "rigid expected, unifiable actual" propUnifyRigidUnifiable,
+          testProperty "wildcard expected, unifiable actual" propUnifyWildcardUnifiable,
+          testProperty "concrete expected, rigid actual" propUnifyConcreteRigid,
+          testProperty "unifiable expected, rigid actual" propUnifyUnifiableRigid,
+          testProperty "rigid expected, rigid actual" propUnifyRigid,
+          testProperty "wildcard expected, rigid actual" propUnifyWildcardRigid
+          -- TODO: Wildcard arguments; can't come up with cases
         ]
     ]
   where
@@ -201,6 +222,183 @@ propUnifyConcrete = forAllShrink gen shr $ \(tA, mtB) ->
         Just y -> do
           Concrete y' <- shrink (Concrete y)
           pure (x', my) <|> pure (x, Just y')
+
+-- Randomly pick a concrete type A, then try to apply `forall a . [a] -> !a` to
+-- `[A]`. Result should unify to `A`.
+propUnifyUnifiableConcrete :: Property
+propUnifyUnifiableConcrete = forAllShrink arbitrary shrink $ \(Concrete t) ->
+  withRenamedComp headListT $ \renamedHeadListT ->
+    withRenamedVals (Identity t) $ \(Identity arg) ->
+      let asList = BuiltinNested . ListT count0 $ arg
+          expected = Right arg
+          actual = checkApp renamedHeadListT [asList]
+       in expected === actual
+
+-- Randomly pick a rigid type A and concrete type B, then try to apply `A ->
+-- !Integer` to `b`. Result should fail to unify.
+propUnifyRigidConcrete :: Property
+propUnifyRigidConcrete = forAllShrink arbitrary shrink $ \(Concrete t, scope, ix) ->
+  withRenamedComp (comp0 $ tyvar (S scope) ix :--:> ReturnT integerT) $ \f ->
+    withRenamedVals (Identity t) $ \(Identity t') ->
+      -- This is a little confusing, as we would expect that the true level will
+      -- be based on `S scope`, since that's what's in the computation type.
+      -- However, we actually have to reduce it by 1, as we have a 'scope
+      -- stepdown' for `f` even though we bind no variables.
+      let trueLevel = negate . asInt $ scope
+          expected = Left . DoesNotUnify (Abstraction . Rigid trueLevel $ ix) $ t'
+          actual = checkApp f [t']
+       in expected === actual
+
+-- Randomly pick a concrete type A, then try to apply `(forall a . a ->
+-- !Integer) -> !Integer` to `(A -> !Integer)`. Result should fail to unify.
+propUnifyWildcardConcrete :: Property
+propUnifyWildcardConcrete = forAllShrink arbitrary shrink $ \(Concrete t) ->
+  let thunk = ThunkT . comp1 $ tyvar Z ix0 :--:> ReturnT integerT
+   in withRenamedComp (comp0 $ thunk :--:> ReturnT integerT) $ \f ->
+        let argT = ThunkT . comp0 $ t :--:> ReturnT integerT
+         in withRenamedVals (Identity argT) $ \(Identity argT') ->
+              let lhs = ThunkT . CompT count1 $ Abstraction (Wildcard 1 ix0) :--:> ReturnT integerT
+                  expected = Left . DoesNotUnify lhs $ argT'
+                  actual = checkApp f [argT']
+               in expected === actual
+
+-- Randomly pick a concrete type A, then try to apply `[A] -> !A` to `forall a .
+-- [a]`. Result should unify to `A`.
+propUnifyConcreteUnifiable :: Property
+propUnifyConcreteUnifiable = forAllShrink arbitrary shrink $ \(Concrete t) ->
+  withRenamedComp (comp0 $ listT count0 t :--:> ReturnT t) $ \f ->
+    withRenamedVals (Identity emptyListT) $ \(Identity arg) ->
+      withRenamedVals (Identity t) $ \(Identity t') ->
+        let expected = Right t'
+            actual = checkApp f [arg]
+         in expected === actual
+
+-- Randomly pick a concrete type A, then try to apply `forall a. [a] -> !A` to
+-- `forall a. [a]`. Result should unify to `A`.
+propUnifyUnifiable :: Property
+propUnifyUnifiable = forAllShrink arbitrary shrink $ \(Concrete t) ->
+  withRenamedComp (comp1 $ listT count0 (tyvar (S Z) ix0) :--:> ReturnT t) $ \f ->
+    withRenamedVals (Identity emptyListT) $ \(Identity arg) ->
+      withRenamedVals (Identity t) $ \(Identity t') ->
+        let expected = Right t'
+            actual = checkApp f [arg]
+         in expected === actual
+
+-- Randomly generate a rigid type A, and a concrete type B, then try to apply `[A]
+-- -> !B` to `forall a . [a]`. Result should unify to `B`.
+propUnifyRigidUnifiable :: Property
+propUnifyRigidUnifiable = forAllShrink arbitrary shrink $ \(Concrete bT, scope, index) ->
+  withRenamedComp (comp0 $ listT count0 (tyvar (S (S scope)) index) :--:> ReturnT bT) $ \f ->
+    withRenamedVals (Identity emptyListT) $ \(Identity arg) ->
+      withRenamedVals (Identity bT) $ \(Identity bT') ->
+        let expected = Right bT'
+            actual = checkApp f [arg]
+         in expected === actual
+
+-- Randomly generate a concrete type A, then try to apply
+-- `(forall a . a -> !A) -> !A` to `forall a . (a -> !A)`. Result should unify
+-- to `A`.
+propUnifyWildcardUnifiable :: Property
+propUnifyWildcardUnifiable = forAllShrink arbitrary shrink $ \(Concrete t) ->
+  withRenamedComp (comp0 $ ThunkT (comp1 $ tyvar Z ix0 :--:> ReturnT t) :--:> ReturnT t) $ \f ->
+    withRenamedVals (Identity t) $ \(Identity t') ->
+      withRenamedVals (Identity . ThunkT . comp1 $ tyvar Z ix0 :--:> ReturnT t) $ \(Identity arg) ->
+        let expected = Right t'
+            actual = checkApp f [arg]
+         in expected === actual
+
+-- Randomly generate a concrete type A, and a rigid type B, then try to apply `A
+-- -> !Integer` to `B`. Result should fail to unify.
+propUnifyConcreteRigid :: Property
+propUnifyConcreteRigid = forAllShrink arbitrary shrink $ \(Concrete aT, scope, index) ->
+  withRenamedComp (comp0 $ aT :--:> ReturnT integerT) $ \f ->
+    withRenamedVals (Identity $ tyvar scope index) $ \(Identity arg) ->
+      withRenamedVals (Identity aT) $ \(Identity aT') ->
+        let level = negate . asInt $ scope
+            expected = Left . DoesNotUnify aT' . Abstraction . Rigid level $ index
+            actual = checkApp f [arg]
+         in expected === actual
+
+-- Randomly generate a rigid type A, then try to apply `forall a . a -> !a` to
+-- `A`. Result should unify to `A`.
+propUnifyUnifiableRigid :: Property
+propUnifyUnifiableRigid = forAllShrink arbitrary shrink $ \(scope, index) ->
+  withRenamedComp idT $ \f ->
+    withRenamedVals (Identity $ tyvar scope index) $ \(Identity arg) ->
+      let expected = Right arg
+          actual = checkApp f [arg]
+       in expected === actual
+
+-- Randomly generate a scope S and an index I, then another scope S' and another
+-- index I', that may or may not be different to S and/or I respectively. Let
+-- `T` be the rigid type that results from `S` and `I`, and `U` be the rigid
+-- type that results from `S'` and `I'`. Attempt to unify `T -> !Integer` with
+-- `U`. This should unify to `Integer` if, and only if, `T == U`; otherwise, it
+-- should fail to unify.
+propUnifyRigid :: Property
+propUnifyRigid = forAllShrink gen shr $ \testData ->
+  withTestData testData $ \(f, arg, expected) ->
+    let actual = checkApp f [arg]
+     in expected === actual
+  where
+    gen :: Gen (DeBruijn, Index "tyvar", Maybe (Either DeBruijn (Index "tyvar")))
+    gen = do
+      db <- arbitrary
+      index <- arbitrary
+      (db,index,)
+        <$> oneof
+          [ pure Nothing,
+            Just . Left <$> suchThat arbitrary (db /=),
+            Just . Right <$> suchThat arbitrary (index /=)
+          ]
+    shr ::
+      (DeBruijn, Index "tyvar", Maybe (Either DeBruijn (Index "tyvar"))) ->
+      [(DeBruijn, Index "tyvar", Maybe (Either DeBruijn (Index "tyvar")))]
+    shr (db, index, mrest) = do
+      db' <- shrink db
+      index' <- shrink index
+      case mrest of
+        Nothing -> pure (db', index, Nothing) <|> pure (db, index', Nothing)
+        Just (Left db2) -> do
+          db2' <- shrink db2
+          (db', index, Just (Left db2)) <$ guard (db' /= db2)
+            <|> pure (db, index', Just (Left db2))
+            <|> (db, index, Just (Left db2')) <$ guard (db /= db2')
+        Just (Right index2) -> do
+          index2' <- shrink index2
+          pure (db', index, Just (Right index2))
+            <|> (db, index', Just (Right index2)) <$ guard (index' /= index2)
+            <|> (db, index, Just (Right index2')) <$ guard (index /= index2')
+    withTestData ::
+      (DeBruijn, Index "tyvar", Maybe (Either DeBruijn (Index "tyvar"))) ->
+      ((CompT Renamed, ValT Renamed, Either TypeAppError (ValT Renamed)) -> Property) ->
+      Property
+    withTestData (db, index, mrest) f =
+      withRenamedComp (comp0 $ tyvar (S db) index :--:> ReturnT integerT) $ \fun ->
+        case mrest of
+          Nothing -> withRenamedVals (Identity . tyvar db $ index) $ \(Identity arg) ->
+            f (fun, arg, Right integerT)
+          Just rest ->
+            let level = negate . asInt $ db
+                lhs = Abstraction . Rigid level $ index
+             in case rest of
+                  Left db2 -> withRenamedVals (Identity . tyvar db2 $ index) $ \(Identity arg) ->
+                    f (fun, arg, Left . DoesNotUnify lhs $ arg)
+                  Right index2 -> withRenamedVals (Identity . tyvar db $ index2) $ \(Identity arg) ->
+                    f (fun, arg, Left . DoesNotUnify lhs $ arg)
+
+-- Randomly pick a rigid type A, then try to apply `(forall a . a -> !Integer)
+-- -> !Integer` to `(A -> !Integer)`. Result should fail to unify.
+propUnifyWildcardRigid :: Property
+propUnifyWildcardRigid = forAllShrink arbitrary shrink $ \(scope, index) ->
+  let thunk = ThunkT . comp1 $ tyvar Z ix0 :--:> ReturnT integerT
+   in withRenamedComp (comp0 $ thunk :--:> ReturnT integerT) $ \f ->
+        let argT = ThunkT . comp0 $ tyvar (S scope) index :--:> ReturnT integerT
+         in withRenamedVals (Identity argT) $ \(Identity argT') ->
+              let lhs = ThunkT . CompT count1 $ Abstraction (Wildcard 1 ix0) :--:> ReturnT integerT
+                  expected = Left . DoesNotUnify lhs $ argT'
+                  actual = checkApp f [argT']
+               in expected === actual
 
 -- Helpers
 
