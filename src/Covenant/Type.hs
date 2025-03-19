@@ -463,10 +463,10 @@ data RenameError
     IrrelevantAbstraction
   | -- | A computation type specifies an abstraction which is not used
     -- by any argument. For example, the type @forall a b . a -> !(b -> !a)@
-    -- has @b@ overdeterminate.
+    -- has @b@ undetermined.
     --
     -- @since 1.0.0
-    OverdeterminateAbstraction
+    UndeterminedAbstraction
   deriving stock (Eq, Show)
 
 -- | A \'renaming monad\' which allows us to convert type representations from
@@ -524,7 +524,7 @@ renameCompT (CompT abses xs) = RenameM $ do
       (\i -> coerce . renameValT $ xs NonEmpty.! i)
   -- Check that we don't overdetermine anything
   ourAbstractions <- gets (view (#tracker % to Vector.head % _1))
-  unless (Vector.and ourAbstractions) (throwError OverdeterminateAbstraction)
+  unless (Vector.and ourAbstractions) (throwError UndeterminedAbstraction)
   -- Check result type
   renamedResult <- coerce . renameValT . NonEmpty.last $ xs
   -- Roll back state

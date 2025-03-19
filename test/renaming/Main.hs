@@ -23,7 +23,7 @@ import Covenant.Type
     RenameError
       ( InvalidAbstractionReference,
         IrrelevantAbstraction,
-        OverdeterminateAbstraction
+        UndeterminedAbstraction
       ),
     Renamed (Rigid, Unifiable, Wildcard),
     ValT (Abstraction, BuiltinFlat, BuiltinNested, ThunkT),
@@ -198,7 +198,7 @@ testMapT = do
   let resultMapT = runRenameM . renameCompT $ mapT
   assertRight (assertEqual "" expectedMapT) resultMapT
 
--- Checks that `forall a b . [a]` triggers the irrelevance checker.
+-- Checks that `forall a b . [a]` triggers the irrelevant variable checker.
 testDodgyListT :: IO ()
 testDodgyListT = do
   let listT' = listT count2 (tyvar Z ix0)
@@ -208,17 +208,17 @@ testDodgyListT = do
     Left _ -> assertBool "wrong renaming error" False
     _ -> assertBool "renaming succeeded when it should have failed" False
 
--- Checks that `forall a b . a -> !a` triggers the overdeterminance checker.
+-- Checks that `forall a b . a -> !a` triggers the undetermined variable checker.
 testDodgyIdT :: IO ()
 testDodgyIdT = do
   let idT = comp2 $ tyvar Z ix0 :--:> ReturnT (tyvar Z ix0)
   let result = runRenameM . renameCompT $ idT
   case result of
-    Left OverdeterminateAbstraction -> assertBool "" True
+    Left UndeterminedAbstraction -> assertBool "" True
     Left _ -> assertBool "wrong renaming error" False
     _ -> assertBool "renaming succeeded when it should have failed" False
 
--- Checks that `forall a b. a -> !(b -> !a)` triggers the overdeterminance checker.
+-- Checks that `forall a b. a -> !(b -> !a)` triggers the undetermined variable checker.
 testDodgyConstT :: IO ()
 testDodgyConstT = do
   let constT =
@@ -227,7 +227,7 @@ testDodgyConstT = do
             :--:> ReturnT (ThunkT . comp0 $ tyvar (S Z) ix1 :--:> ReturnT (tyvar (S Z) ix0))
   let result = runRenameM . renameCompT $ constT
   case result of
-    Left OverdeterminateAbstraction -> assertBool "" True
+    Left UndeterminedAbstraction -> assertBool "" True
     Left _ -> assertBool "wrong renaming error" False
     _ -> assertBool "renaming succeeded when it should have failed" False
 
