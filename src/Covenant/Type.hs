@@ -614,20 +614,20 @@ checkApp (CompT _ xs) =
       [ValT Renamed] ->
       [ValT Renamed] ->
       Either TypeAppError (ValT Renamed)
-    go curr = \case
-      [] -> \case
-        [] -> case curr of
-          Abstraction (Unifiable index) -> Left . LeakingUnifiable $ index
-          Abstraction (Wildcard scopeId index) -> Left . LeakingWildcard scopeId $ index
-          _ -> pure curr
-        args -> Left . ExcessArgs . Vector.fromList $ args
-      rest -> \case
-        [] -> Left InsufficientArgs
-        (arg : args) -> do
-          subs <- catchError (unify curr arg) (promoteUnificationError curr arg)
-          case Map.foldlWithKey' (\acc index sub -> substitute index sub acc) rest subs of
-            [] -> Left InsufficientArgs
-            curr' : rest' -> go curr' rest' args
+    go currParam restParams args = case restParams of
+      [] -> case args of
+        [] -> case currParam of
+          Abstraction (Unifiable index) -> throwError . LeakingUnifiable $ index
+          Abstraction (Wildcard scopeId index) -> throwError . LeakingWildcard scopeId $ index
+          _ -> pure currParam
+        _ -> throwError . ExcessArgs . Vector.fromList $ args
+      _ -> case args of
+        [] -> throwError InsufficientArgs
+        (currArg : restArgs) -> do
+          subs <- catchError (unify currParam currArg) (promoteUnificationError currParam currArg)
+          case Map.foldlWithKey' (\acc index sub -> substitute index sub acc) restParams subs of
+            [] -> throwError InsufficientArgs
+            (currParam' : restParams') -> go currParam' restParams' restArgs
 
 -- Helpers
 
