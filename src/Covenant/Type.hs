@@ -32,6 +32,7 @@ module Covenant.Type
     comp0,
     comp1,
     comp2,
+    comp3,
     unitT,
   )
 where
@@ -46,6 +47,7 @@ import Covenant.Index
     count0,
     count1,
     count2,
+    count3,
     intCount,
     intIndex,
   )
@@ -200,6 +202,13 @@ comp1 = CompT count1
 -- @since 1.0.0
 comp2 :: NonEmptyVector (ValT AbstractTy) -> CompT AbstractTy
 comp2 = CompT count2
+
+-- | Helper for defining a computation type that binds three type variables
+-- (that is, something whose type is @forall a b c . ... -> ...)@.
+--
+-- @since 1.0.0
+comp3 :: NonEmptyVector (ValT AbstractTy) -> CompT AbstractTy
+comp3 = CompT count3
 
 -- | A value type, with abstractions indicated by the type argument. In pretty
 -- much any case imaginable, this would be either 'AbstractTy' (in the ASG) or
@@ -532,56 +541,64 @@ renameCompT (CompT abses xs) = RenameM $ do
   -- Rebuild and return
   pure . CompT abses . NonEmpty.snocV renamedArgs $ renamedResult
 
+-- | Rename an abstraction.
+--
+-- @since 1.0.0
+renameAbstraction :: AbstractTy -> RenameM Renamed
+renameAbstraction (BoundAt scope index) = RenameM $ do
+  trueLevel <- gets (\x -> view (#tracker % to Vector.length) x - asInt scope)
+  scopeInfo <- gets (\x -> view #tracker x Vector.!? asInt scope)
+  let asIntIx = review intIndex index
+  case scopeInfo of
+    -- This variable is bound in a scope that encloses the renaming scope. Thus,
+    -- the variable is rigid.
+    Nothing -> pure . Rigid trueLevel $ index
+    Just (occursTracker, uniqueScopeId) -> case occursTracker Vector.!? asIntIx of
+      Nothing -> throwError . InvalidAbstractionReference trueLevel $ index
+      Just beenUsed -> do
+        -- Note that this variable has occurred
+        unless beenUsed (modify (noteUsed scope index))
+        pure $
+          if trueLevel == 1
+            -- This is a unifiable variable
+            then Unifiable index
+            -- This is a wildcard variable
+            else Wildcard uniqueScopeId index
+
+-- | Rename a nested type.
+--
+-- @since 1.0.0
+renameNestedT :: BuiltinNestedT AbstractTy -> RenameM (BuiltinNestedT Renamed)
+renameNestedT =
+  RenameM . \case
+    ListT abstractions t -> do
+      -- Step up a scope
+      modify (stepUpScope abstractions)
+      -- Rename the inner type
+      renamed <- coerce . renameValT $ t
+      -- Check that we don't have anything irrelevant
+      ourAbstractions <- gets (view (#tracker % to Vector.head % _1))
+      unless (Vector.and ourAbstractions) (throwError IrrelevantAbstraction)
+      -- Roll back state
+      modify dropDownScope
+      -- Rebuild and return
+      pure . ListT abstractions $ renamed
+    PairT t1 t2 -> do
+      -- Rename both 'sides' without any scope changes
+      renamed1 <- coerce . renameValT $ t1
+      renamed2 <- coerce . renameValT $ t2
+      -- Rebuild and return
+      pure . PairT renamed1 $ renamed2
+
 -- | Rename a value type.
 --
 -- @since 1.0.0
 renameValT :: ValT AbstractTy -> RenameM (ValT Renamed)
 renameValT = \case
-  Abstraction (BoundAt scope index) ->
-    Abstraction
-      <$> RenameM
-        ( do
-            trueLevel <- gets (\x -> view (#tracker % to Vector.length) x - asInt scope)
-            scopeInfo <- gets (\x -> view #tracker x Vector.!? asInt scope)
-            let asIntIx = review intIndex index
-            case scopeInfo of
-              -- This variable is bound at a scope that encloses our starting
-              -- point. Thus, this variable is rigid.
-              Nothing -> pure . Rigid trueLevel $ index
-              Just (varTracker, uniqueScopeId) -> case varTracker Vector.!? asIntIx of
-                Nothing -> throwError . InvalidAbstractionReference trueLevel $ index
-                Just beenUsed -> do
-                  -- Note that we've seen this particular variable
-                  unless beenUsed (modify (noteUsed scope index))
-                  pure $
-                    if trueLevel == 1
-                      -- If the true level is 1, this is a unifiable
-                      then Unifiable index
-                      -- This variable is a wildcard
-                      else Wildcard uniqueScopeId index
-        )
+  Abstraction t -> Abstraction <$> renameAbstraction t
   ThunkT t -> ThunkT <$> renameCompT t
   BuiltinFlat t -> pure . BuiltinFlat $ t
-  BuiltinNested t ->
-    BuiltinNested <$> case t of
-      ListT abses t' -> RenameM $ do
-        -- Step up a scope
-        modify (stepUpScope abses)
-        -- Rename the inner type
-        renamed <- coerce . renameValT $ t'
-        -- Check that we don't have anything irrelevant
-        ourAbstractions <- gets (view (#tracker % to Vector.head % _1))
-        unless (Vector.and ourAbstractions) (throwError IrrelevantAbstraction)
-        -- Roll back state
-        modify dropDownScope
-        -- Rebuild and return
-        pure . ListT abses $ renamed
-      PairT t1 t2 -> RenameM $ do
-        -- Rename t1, then t2, without any scope shifts
-        renamed1 <- coerce . renameValT $ t1
-        renamed2 <- coerce . renameValT $ t2
-        -- Rebuild and return
-        pure . PairT renamed1 $ renamed2
+  BuiltinNested t -> BuiltinNested <$> renameNestedT t
 
 -- | @since 1.0.0
 data TypeAppError

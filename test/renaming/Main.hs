@@ -4,7 +4,15 @@
 module Main (main) where
 
 import Covenant.DeBruijn (DeBruijn (S, Z))
-import Covenant.Index (count0, count1, count2, ix0, ix1)
+import Covenant.Index
+  ( count0,
+    count1,
+    count2,
+    count3,
+    ix0,
+    ix1,
+    ix2,
+  )
 import Covenant.Test (Concrete (Concrete))
 import Covenant.Type
   ( BuiltinFlatT
@@ -30,6 +38,7 @@ import Covenant.Type
     comp0,
     comp1,
     comp2,
+    comp3,
     listT,
     renameCompT,
     renameValT,
@@ -72,6 +81,7 @@ main =
       testCase "forall a . [a] -> !a" testHeadListT,
       testCase "forall a b . (a, b) -> !b" testSndPairT,
       testCase "forall a b . (a -> !b) -> [a] -> ![b]" testMapT,
+      testCase "forall a b c . ({a, b} -> !c) -> !(a -> b -> c)" testUncurryT,
       testGroup
         "Irrelevance"
         [ testCase "forall a b . [a]" testDodgyListT
@@ -197,6 +207,26 @@ testMapT = do
   assertRight (assertEqual "" expectedMapThunkT) resultThunkT
   let resultMapT = runRenameM . renameCompT $ mapT
   assertRight (assertEqual "" expectedMapT) resultMapT
+
+-- Checks that `forall a b c . ({a, b} -> !c) -> !(a -> b -> !c)` renames
+-- correctly.
+testUncurryT :: IO ()
+testUncurryT = do
+  let argT = ThunkT . comp0 $ (tyvar (S Z) ix0 -*- tyvar (S Z) ix1) :--:> ReturnT (tyvar (S Z) ix2)
+  let expectedArgT =
+        ThunkT . CompT count0 $
+          BuiltinNested (PairT (Abstraction (Unifiable ix0)) (Abstraction (Unifiable ix1)))
+            :--:> ReturnT (Abstraction (Unifiable ix2))
+  let resultT = ThunkT . comp0 $ tyvar (S Z) ix0 :--:> tyvar (S Z) ix1 :--:> ReturnT (tyvar (S Z) ix2)
+  let expectedResultT =
+        ThunkT . CompT count0 $
+          Abstraction (Unifiable ix0)
+            :--:> Abstraction (Unifiable ix1)
+            :--:> ReturnT (Abstraction (Unifiable ix2))
+  let t = comp3 $ argT :--:> ReturnT resultT
+  let expectedT = CompT count3 $ expectedArgT :--:> ReturnT expectedResultT
+  let actualRenamedT = runRenameM . renameCompT $ t
+  assertRight (assertEqual "" expectedT) actualRenamedT
 
 -- Checks that `forall a b . [a]` triggers the irrelevant variable checker.
 testDodgyListT :: IO ()
