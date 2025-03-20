@@ -96,6 +96,7 @@ library
     Covenant.Index
     Covenant.Ledger
     Covenant.Prim
+    Covenant.Test
     Covenant.Type
 
   other-modules:
@@ -129,13 +130,14 @@ test-suite renaming
   import: test-lang
   type: exitcode-stdio-1.0
   main-is: Main.hs
-  build-depends:
-    bimap,
-    nonempty-vector,
-    quickcheck-instances ==0.3.32,
-    vector,
-
   hs-source-dirs: test/renaming
+
+test-suite type-applications
+  import: test-lang
+  type: exitcode-stdio-1.0
+  main-is: Main.hs
+  build-depends: vector
+  hs-source-dirs: test/type-applications
 
 test-suite primops
   import: test-lang

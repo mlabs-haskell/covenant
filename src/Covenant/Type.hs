@@ -1,3 +1,4 @@
+{-# LANGUAGE CPP #-}
 {-# LANGUAGE PatternSynonyms #-}
 {-# LANGUAGE ViewPatterns #-}
 
@@ -15,6 +16,9 @@ module Covenant.Type
     runRenameM,
     pattern ReturnT,
     pattern (:--:>),
+    TypeAppError (..),
+    checkApp,
+    arity,
     byteStringT,
     integerT,
     stringT,
@@ -29,12 +33,13 @@ module Covenant.Type
     comp0,
     comp1,
     comp2,
+    comp3,
     unitT,
   )
 where
 
-import Control.Monad (unless)
-import Control.Monad.Except (ExceptT, MonadError (throwError), runExceptT)
+import Control.Monad (foldM, unless)
+import Control.Monad.Except (ExceptT, MonadError (throwError), catchError, runExceptT)
 import Control.Monad.State.Strict (State, evalState, gets, modify)
 import Covenant.DeBruijn (DeBruijn, asInt)
 import Covenant.Index
@@ -43,18 +48,30 @@ import Covenant.Index
     count0,
     count1,
     count2,
+    count3,
     intCount,
     intIndex,
   )
 import Data.Coerce (coerce)
+#if __GLASGOW_HASKELL__==908
+import Data.Foldable (foldl')
+#endif
 import Data.Functor.Classes (Eq1 (liftEq))
 import Data.Kind (Type)
+import Data.Map.Merge.Strict qualified as Merge
+import Data.Map.Strict (Map)
+import Data.Map.Strict qualified as Map
+import Data.Maybe (fromJust, mapMaybe)
+import Data.Ord (comparing)
+import Data.Set (Set)
+import Data.Set qualified as Set
 import Data.Tuple.Optics (_1)
 import Data.Vector (Vector)
 import Data.Vector qualified as Vector
 import Data.Vector.NonEmpty (NonEmptyVector)
 import Data.Vector.NonEmpty qualified as NonEmpty
 import Data.Word (Word64)
+import Optics.AffineFold (preview)
 import Optics.At (ix)
 import Optics.Getter (to, view)
 import Optics.Label (LabelOptic (labelOptic))
@@ -167,6 +184,13 @@ pattern x :--:> xs <- (NonEmpty.uncons -> traverse NonEmpty.fromVector -> Just (
 
 infixr 1 :--:>
 
+-- | Determine the arity of a computation type: that is, how many arguments a
+-- function of this type must be given.
+--
+-- @since 1.0.0
+arity :: forall (a :: Type). CompT a -> Int
+arity (CompT _ xs) = NonEmpty.length xs - 1
+
 -- | Helper for defining computation types that do not bind any type variables.
 --
 -- @since 1.0.0
@@ -186,6 +210,13 @@ comp1 = CompT count1
 -- @since 1.0.0
 comp2 :: NonEmptyVector (ValT AbstractTy) -> CompT AbstractTy
 comp2 = CompT count2
+
+-- | Helper for defining a computation type that binds three type variables
+-- (that is, something whose type is @forall a b c . ... -> ...)@.
+--
+-- @since 1.0.0
+comp3 :: NonEmptyVector (ValT AbstractTy) -> CompT AbstractTy
+comp3 = CompT count3
 
 -- | A value type, with abstractions indicated by the type argument. In pretty
 -- much any case imaginable, this would be either 'AbstractTy' (in the ASG) or
@@ -305,23 +336,21 @@ data BuiltinFlatT
       Show
     )
 
--- | Builtin types which have \'nested\' types. This is currently lists and
--- pairs only.
+-- | Builtin types which have \'nested\' types. These are lists and pairs only.
 --
 -- = Important note
 --
--- Both \'arms\' of this type have \'type abstraction boundaries\' just before
--- them: their first field indicates how many type variables they bind. Note
--- that 'PairT' has /one/ such boundary for both of its types, rather than one
--- boundary per type.
+-- The 'ListT' \'arm\' of this type has a \'type abstraction boundary\', similar
+-- to that of 'CompT'.
 --
--- While in truth, these types aren't /really/ polymorphic (as they cannot hold
--- thunks, for example), we define them this way for now.
+-- While they may appear as such, these types aren't \'truly polymorphic\' (as
+-- they cannot hold thunks, for example). We define these as such as this is
+-- needed to type primops.
 --
 -- @since 1.0.0
 data BuiltinNestedT (a :: Type)
   = ListT (Count "tyvar") (ValT a)
-  | PairT (Count "tyvar") (ValT a) (ValT a)
+  | PairT (ValT a) (ValT a)
   deriving stock
     ( -- | @since 1.0.0
       Eq,
@@ -335,7 +364,7 @@ data BuiltinNestedT (a :: Type)
 --
 -- @since 1.0.0
 (-*-) :: forall (a :: Type). ValT a -> ValT a -> ValT a
-t1 -*- t2 = BuiltinNested . PairT count0 t1 $ t2
+t1 -*- t2 = BuiltinNested . PairT t1 $ t2
 
 infixr 1 -*-
 
@@ -353,8 +382,8 @@ instance Eq1 BuiltinNestedT where
     ListT abses1 t1 -> \case
       ListT abses2 t2 -> abses1 == abses2 && liftEq f t1 t2
       _ -> False
-    PairT abses1 t11 t12 -> \case
-      PairT abses2 t21 t22 -> abses1 == abses2 && liftEq f t11 t21 && liftEq f t12 t22
+    PairT t11 t12 -> \case
+      PairT t21 t22 -> liftEq f t11 t21 && liftEq f t12 t22
       _ -> False
 
 -- Used during renaming. Contains a source of fresh indices for wildcards, as
@@ -451,10 +480,10 @@ data RenameError
     IrrelevantAbstraction
   | -- | A computation type specifies an abstraction which is not used
     -- by any argument. For example, the type @forall a b . a -> !(b -> !a)@
-    -- has @b@ overdeterminate.
+    -- has @b@ undetermined.
     --
     -- @since 1.0.0
-    OverdeterminateAbstraction
+    UndeterminedAbstraction
   deriving stock (Eq, Show)
 
 -- | A \'renaming monad\' which allows us to convert type representations from
@@ -512,7 +541,7 @@ renameCompT (CompT abses xs) = RenameM $ do
       (\i -> coerce . renameValT $ xs NonEmpty.! i)
   -- Check that we don't overdetermine anything
   ourAbstractions <- gets (view (#tracker % to Vector.head % _1))
-  unless (Vector.and ourAbstractions) (throwError OverdeterminateAbstraction)
+  unless (Vector.and ourAbstractions) (throwError UndeterminedAbstraction)
   -- Check result type
   renamedResult <- coerce . renameValT . NonEmpty.last $ xs
   -- Roll back state
@@ -520,65 +549,160 @@ renameCompT (CompT abses xs) = RenameM $ do
   -- Rebuild and return
   pure . CompT abses . NonEmpty.snocV renamedArgs $ renamedResult
 
+-- | Rename an abstraction.
+--
+-- @since 1.0.0
+renameAbstraction :: AbstractTy -> RenameM Renamed
+renameAbstraction (BoundAt scope index) = RenameM $ do
+  trueLevel <- gets (\x -> view (#tracker % to Vector.length) x - asInt scope)
+  scopeInfo <- gets (\x -> view #tracker x Vector.!? asInt scope)
+  let asIntIx = review intIndex index
+  case scopeInfo of
+    -- This variable is bound in a scope that encloses the renaming scope. Thus,
+    -- the variable is rigid.
+    Nothing -> pure . Rigid trueLevel $ index
+    Just (occursTracker, uniqueScopeId) -> case occursTracker Vector.!? asIntIx of
+      Nothing -> throwError . InvalidAbstractionReference trueLevel $ index
+      Just beenUsed -> do
+        -- Note that this variable has occurred
+        unless beenUsed (modify (noteUsed scope index))
+        pure $
+          if trueLevel == 1
+            -- This is a unifiable variable
+            then Unifiable index
+            -- This is a wildcard variable
+            else Wildcard uniqueScopeId index
+
+-- | Rename a nested type.
+--
+-- @since 1.0.0
+renameNestedT :: BuiltinNestedT AbstractTy -> RenameM (BuiltinNestedT Renamed)
+renameNestedT =
+  RenameM . \case
+    ListT abstractions t -> do
+      -- Step up a scope
+      modify (stepUpScope abstractions)
+      -- Rename the inner type
+      renamed <- coerce . renameValT $ t
+      -- Check that we don't have anything irrelevant
+      ourAbstractions <- gets (view (#tracker % to Vector.head % _1))
+      unless (Vector.and ourAbstractions) (throwError IrrelevantAbstraction)
+      -- Roll back state
+      modify dropDownScope
+      -- Rebuild and return
+      pure . ListT abstractions $ renamed
+    PairT t1 t2 -> do
+      -- Rename both 'sides' without any scope changes
+      renamed1 <- coerce . renameValT $ t1
+      renamed2 <- coerce . renameValT $ t2
+      -- Rebuild and return
+      pure . PairT renamed1 $ renamed2
+
 -- | Rename a value type.
 --
 -- @since 1.0.0
 renameValT :: ValT AbstractTy -> RenameM (ValT Renamed)
 renameValT = \case
-  Abstraction (BoundAt scope index) ->
-    Abstraction
-      <$> RenameM
-        ( do
-            trueLevel <- gets (\x -> view (#tracker % to Vector.length) x - asInt scope)
-            scopeInfo <- gets (\x -> view #tracker x Vector.!? asInt scope)
-            let asIntIx = review intIndex index
-            case scopeInfo of
-              -- This variable is bound at a scope that encloses our starting
-              -- point. Thus, this variable is rigid.
-              Nothing -> pure . Rigid trueLevel $ index
-              Just (varTracker, uniqueScopeId) -> case varTracker Vector.!? asIntIx of
-                Nothing -> throwError . InvalidAbstractionReference trueLevel $ index
-                Just beenUsed -> do
-                  -- Note that we've seen this particular variable
-                  unless beenUsed (modify (noteUsed scope index))
-                  pure $
-                    if trueLevel == 1
-                      -- If the true level is 1, this is a unifiable
-                      then Unifiable index
-                      -- This variable is a wildcard
-                      else Wildcard uniqueScopeId index
-        )
+  Abstraction t -> Abstraction <$> renameAbstraction t
   ThunkT t -> ThunkT <$> renameCompT t
   BuiltinFlat t -> pure . BuiltinFlat $ t
-  BuiltinNested t ->
-    BuiltinNested <$> case t of
-      ListT abses t' -> RenameM $ do
-        -- Step up a scope
-        modify (stepUpScope abses)
-        -- Rename the inner type
-        renamed <- coerce . renameValT $ t'
-        -- Check that we don't have anything irrelevant
-        ourAbstractions <- gets (view (#tracker % to Vector.head % _1))
-        unless (Vector.and ourAbstractions) (throwError IrrelevantAbstraction)
-        -- Roll back state
-        modify dropDownScope
-        -- Rebuild and return
-        pure . ListT abses $ renamed
-      PairT abses t1 t2 -> RenameM $ do
-        -- Step up a scope
-        modify (stepUpScope abses)
-        -- Rename t1, then t2, without any scope shifts
-        renamed1 <- coerce . renameValT $ t1
-        renamed2 <- coerce . renameValT $ t2
-        -- Check we don't have anything irrelevant
-        ourAbstractions <- gets (view (#tracker % to Vector.head % _1))
-        unless (Vector.and ourAbstractions) (throwError IrrelevantAbstraction)
-        -- Roll back state
-        modify dropDownScope
-        -- Rebuild and return
-        pure . PairT abses renamed1 $ renamed2
+  BuiltinNested t -> BuiltinNested <$> renameNestedT t
+
+-- | @since 1.0.0
+data TypeAppError
+  = -- | The final type after all arguments are applied is @forall a . a@.
+    LeakingUnifiable (Index "tyvar")
+  | -- | A wildcard (thus, a skolem) escaped its scope.
+    LeakingWildcard Word64 (Index "tyvar")
+  | -- | We were given too many arguments.
+    ExcessArgs (Vector (ValT Renamed))
+  | -- | We weren't given enough arguments.
+    InsufficientArgs
+  | -- | The expected type (first field) and actual type (second field) do not
+    -- unify.
+    DoesNotUnify (ValT Renamed) (ValT Renamed)
+  deriving stock
+    ( -- | @since 1.0.0
+      Eq,
+      -- | @since 1.0.0
+      Show
+    )
+
+-- | @since 1.0.0
+checkApp :: CompT Renamed -> [ValT Renamed] -> Either TypeAppError (ValT Renamed)
+checkApp (CompT _ xs) =
+  let (curr, rest) = NonEmpty.uncons xs
+   in go curr (Vector.toList rest)
+  where
+    go ::
+      ValT Renamed ->
+      [ValT Renamed] ->
+      [ValT Renamed] ->
+      Either TypeAppError (ValT Renamed)
+    go currParam restParams args = case restParams of
+      [] -> case args of
+        [] -> case currParam of
+          Abstraction (Unifiable index) -> throwError . LeakingUnifiable $ index
+          Abstraction (Wildcard scopeId index) -> throwError . LeakingWildcard scopeId $ index
+          ThunkT (CompT _ xs') -> do
+            let remainingUnifiables = NonEmpty.foldl' (\acc t -> acc <> collectUnifiables t) Set.empty xs'
+            let requiredIntroductions = Set.size remainingUnifiables
+            -- We know that the size of a set cannot be negative, but GHC
+            -- doesn't.
+            let asCount = fromJust . preview intCount $ requiredIntroductions
+            let indexesToUse = mapMaybe (preview intIndex) [0, 1 .. requiredIntroductions - 1]
+            let renames = zipWith (\i replacement -> (i, Abstraction . Unifiable $ replacement)) (Set.toList remainingUnifiables) indexesToUse
+            let fixed = fmap (\t -> foldl' (\acc (i, r) -> substitute i r acc) t renames) xs'
+            pure . ThunkT . CompT asCount $ fixed
+          BuiltinNested (ListT _ t) -> do
+            let remainingUnifiables = collectUnifiables t
+            let requiredIntroductions = Set.size remainingUnifiables
+            -- We know that the size of a set cannot be negative, but GHC
+            -- doesn't.
+            let asCount = fromJust . preview intCount $ requiredIntroductions
+            let indexesToUse = mapMaybe (preview intIndex) [0, 1 .. requiredIntroductions - 1]
+            let renames = zipWith (\i replacement -> (i, Abstraction . Unifiable $ replacement)) (Set.toList remainingUnifiables) indexesToUse
+            let fixed = foldl' (\acc (i, r) -> substitute i r acc) t renames
+            pure . BuiltinNested . ListT asCount $ fixed
+          _ -> pure currParam
+        _ -> throwError . ExcessArgs . Vector.fromList $ args
+      _ -> case args of
+        [] -> throwError InsufficientArgs
+        (currArg : restArgs) -> do
+          subs <- catchError (unify currParam currArg) (promoteUnificationError currParam currArg)
+          case Map.foldlWithKey' (\acc index sub -> fmap (substitute index sub) acc) restParams subs of
+            [] -> throwError InsufficientArgs
+            (currParam' : restParams') -> go currParam' restParams' restArgs
 
 -- Helpers
+
+collectUnifiables :: ValT Renamed -> Set (Index "tyvar")
+collectUnifiables = \case
+  Abstraction t -> case t of
+    Unifiable index -> Set.singleton index
+    _ -> Set.empty
+  BuiltinFlat _ -> Set.empty
+  BuiltinNested t -> case t of
+    ListT _ t' -> collectUnifiables t'
+    PairT t1 t2 -> collectUnifiables t1 <> collectUnifiables t2
+  ThunkT (CompT _ xs) -> NonEmpty.foldl' (\acc t -> acc <> collectUnifiables t) Set.empty xs
+
+-- Because unification is inherently recursive, if we find an error deep within
+-- a type, the message will signify only the _part_ that fails to unify, not the
+-- entire type. While potentially useful, this can be quite confusing,
+-- especially with generated types. Thus, we use `catchError` with this
+-- function, which effectively allows us to rename the types reported in
+-- unification errors to whatever types 'wrap' them.
+promoteUnificationError ::
+  forall (a :: Type).
+  ValT Renamed ->
+  ValT Renamed ->
+  TypeAppError ->
+  Either TypeAppError a
+promoteUnificationError topLevelExpected topLevelActual =
+  Left . \case
+    DoesNotUnify _ _ -> DoesNotUnify topLevelExpected topLevelActual
+    err -> err
 
 returnHelper ::
   forall (a :: Type).
@@ -588,3 +712,134 @@ returnHelper xs = case NonEmpty.uncons xs of
     if Vector.length ys == 0
       then pure y
       else Nothing
+
+unify ::
+  ValT Renamed ->
+  ValT Renamed ->
+  Either TypeAppError (Map (Index "tyvar") (ValT Renamed))
+unify expected actual =
+  catchError
+    ( case expected of
+        Abstraction t1 -> case t1 of
+          -- Unifiables unify with everything, and require a substitutional rewrite.
+          Unifiable index1 -> pure . Map.singleton index1 $ actual
+          Rigid level1 index1 -> expectRigid level1 index1
+          Wildcard scopeId1 index1 -> expectWildcard scopeId1 index1
+        ThunkT t1 -> expectThunk t1
+        BuiltinFlat t1 -> expectFlatBuiltin t1
+        BuiltinNested t1 -> case t1 of
+          ListT _ t1' -> expectListOf t1'
+          PairT t11 t12 -> expectPairOf t11 t12
+    )
+    (promoteUnificationError expected actual)
+  where
+    unificationError :: forall (a :: Type). Either TypeAppError a
+    unificationError = Left . DoesNotUnify expected $ actual
+    noSubUnify :: forall (k :: Type) (a :: Type). Either TypeAppError (Map k a)
+    noSubUnify = pure Map.empty
+    expectRigid ::
+      Int -> Index "tyvar" -> Either TypeAppError (Map (Index "tyvar") (ValT Renamed))
+    -- Rigids behave identically to concrete types: they can unify with
+    -- themselves, or any other abstraction, but nothing else. No substitutional
+    -- rewrites are needed.
+    expectRigid level1 index1 = case actual of
+      Abstraction (Rigid level2 index2) ->
+        if level1 == level2 && index1 == index2
+          then noSubUnify
+          else unificationError
+      Abstraction _ -> noSubUnify
+      _ -> unificationError
+    expectWildcard ::
+      Word64 -> Index "tyvar" -> Either TypeAppError (Map (Index "tyvar") (ValT Renamed))
+    -- Wildcards can unify with unifiables, as well as themselves, but nothing
+    -- else. No substitutional rewrites are needed.
+    expectWildcard scopeId1 index1 = case actual of
+      Abstraction (Unifiable _) -> noSubUnify
+      Abstraction (Wildcard scopeId2 index2) ->
+        if scopeId1 /= scopeId2 || index1 == index2
+          then noSubUnify
+          else unificationError
+      _ -> unificationError
+    expectThunk :: CompT Renamed -> Either TypeAppError (Map (Index "tyvar") (ValT Renamed))
+    -- Thunks unify unconditionally with wildcards or unifiables. They unify
+    -- conditionally with other thunks, provided that we can unify each argument
+    -- with its counterpart in the same position, as well as their result types,
+    -- without conflicts.
+    expectThunk (CompT _ t1) = case actual of
+      Abstraction (Rigid _ _) -> unificationError
+      Abstraction _ -> noSubUnify
+      ThunkT (CompT _ t2) -> do
+        unless (comparing NonEmpty.length t1 t2 == EQ) unificationError
+        catchError
+          (foldM (\acc (l, r) -> unify l r >>= reconcile acc) Map.empty . NonEmpty.zip t1 $ t2)
+          (promoteUnificationError expected actual)
+      _ -> unificationError
+    expectFlatBuiltin :: BuiltinFlatT -> Either TypeAppError (Map (Index "tyvar") (ValT Renamed))
+    -- 'Flat' builtins are always concrete. They can unify with themselves,
+    -- unifiables or wildcards, but nothing else. No substitutional rewrites are
+    -- needed.
+    expectFlatBuiltin t1 = case actual of
+      Abstraction (Rigid _ _) -> unificationError
+      Abstraction _ -> noSubUnify
+      BuiltinFlat t2 ->
+        if t1 == t2
+          then noSubUnify
+          else unificationError
+      _ -> unificationError
+    -- Lists can unify unconditionally with wildcards or unifiables. They can
+    -- unify with other lists as long as their type parameters unify too.
+    -- Substitutions may be required if the type parameter is a unifiable.
+    expectListOf :: ValT Renamed -> Either TypeAppError (Map (Index "tyvar") (ValT Renamed))
+    expectListOf tyParam = case actual of
+      Abstraction (Rigid _ _) -> unificationError
+      Abstraction _ -> noSubUnify
+      BuiltinNested (ListT _ t2') ->
+        catchError (unify tyParam t2') (promoteUnificationError expected actual)
+      _ -> unificationError
+    -- Pairs can unify unconditionally with wildcards or unifiables. They can
+    -- unify with other pairs as long as each type parameter unifies with its
+    -- counterpart without conflicts. Substitutions may be required if one or
+    -- both type parameters are themselves unifiables.
+    expectPairOf ::
+      ValT Renamed -> ValT Renamed -> Either TypeAppError (Map (Index "tyvar") (ValT Renamed))
+    expectPairOf tyParam1 tyParam2 = case actual of
+      Abstraction (Rigid _ _) -> unificationError
+      Abstraction _ -> noSubUnify
+      BuiltinNested t2 -> case t2 of
+        PairT t21 t22 -> do
+          firstUnification <- catchError (unify tyParam1 t21) (promoteUnificationError expected actual)
+          catchError (unify tyParam2 t22) (promoteUnificationError expected actual)
+            >>= \res -> reconcile firstUnification res
+        _ -> unificationError
+      _ -> unificationError
+    reconcile ::
+      Map (Index "tyvar") (ValT Renamed) ->
+      Map (Index "tyvar") (ValT Renamed) ->
+      Either TypeAppError (Map (Index "tyvar") (ValT Renamed))
+    -- Note (Koz, 14/04/2025): This utter soup means the following:
+    --
+    -- - If the old map and the new map don't have any overlapping assignments,
+    --   just union them.
+    -- - Otherwise, for any assignment to a unifiable that is present in both
+    --   maps, ensure they assign to the same thing; if they do, it's fine,
+    --   otherwise we have a problem.
+    reconcile =
+      Merge.mergeA
+        Merge.preserveMissing
+        Merge.preserveMissing
+        (Merge.zipWithAMatched $ \_ l r -> l <$ unless (l == r) unificationError)
+
+substitute :: Index "tyvar" -> ValT Renamed -> ValT Renamed -> ValT Renamed
+substitute index toSub = \case
+  Abstraction t -> case t of
+    Unifiable ourIndex ->
+      if ourIndex == index
+        then toSub
+        else Abstraction t
+    _ -> Abstraction t
+  ThunkT (CompT abstractions xs) ->
+    ThunkT . CompT abstractions . fmap (substitute index toSub) $ xs
+  BuiltinFlat t -> BuiltinFlat t
+  BuiltinNested t -> BuiltinNested $ case t of
+    ListT abstractions t' -> ListT abstractions . substitute index toSub $ t'
+    PairT t1 t2 -> PairT (substitute index toSub t1) (substitute index toSub t2)

@@ -15,6 +15,7 @@ import Data.Coerce (coerce)
 import Data.List.NonEmpty (NonEmpty)
 import Data.Semigroup (Semigroup (sconcat, stimes), Sum (Sum))
 import Data.Word (Word32)
+import Test.QuickCheck (Arbitrary)
 
 -- | A DeBruijn index.
 --
@@ -24,7 +25,9 @@ newtype DeBruijn = DeBruijn Word32
     ( -- | @since 1.0.0
       Eq,
       -- | @since 1.0.0
-      Ord
+      Ord,
+      -- | @since 1.0.0
+      Arbitrary
     )
     via Word32
   deriving stock

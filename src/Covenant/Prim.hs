@@ -164,11 +164,11 @@ typeOneArgFunc = \case
   DecodeUtf8 -> comp0 $ byteStringT :--:> ReturnT stringT
   FstPair ->
     comp2 $
-      (tyvar (S Z) ix0 -*- tyvar (S Z) ix1)
+      (tyvar Z ix0 -*- tyvar Z ix1)
         :--:> ReturnT (tyvar Z ix0)
   SndPair ->
     comp2 $
-      (tyvar (S Z) ix0 -*- tyvar (S Z) ix1)
+      (tyvar Z ix0 -*- tyvar Z ix1)
         :--:> ReturnT (tyvar Z ix1)
   HeadList ->
     comp1 $ list0 (tyvar (S Z) ix0) :--:> ReturnT (tyvar Z ix0)
