@@ -11,6 +11,7 @@ import Covenant.Index
     count1,
     ix0,
     ix1,
+    ix2,
   )
 import Covenant.Test (Concrete (Concrete))
 import Covenant.Type
@@ -33,12 +34,14 @@ import Covenant.Type
     comp0,
     comp1,
     comp2,
+    comp3,
     integerT,
     listT,
     renameCompT,
     renameValT,
     runRenameM,
     tyvar,
+    (-*-),
     pattern ReturnT,
     pattern (:--:>),
   )
@@ -77,7 +80,8 @@ main =
         "Substitution"
         [ testProperty "id applied to concrete" propIdConcrete,
           testProperty "two-arg const to same concretes" propConst2Same,
-          testProperty "two-arg const to different concretes" propConst2Different
+          testProperty "two-arg const to different concretes" propConst2Different,
+          testProperty "uncurry to concretes" propUncurry
         ],
       testGroup
         "Unification"
@@ -185,6 +189,20 @@ propConst2Different = forAllShrink arbitrary shrink $ \(Concrete t1, Concrete t2
           let expected = Right t1'
               actual = checkApp renamedConst2T [t1', t2']
            in expected === actual
+
+-- Randomly pick concrete types `B` and `C`. Then try to apply `forall a b
+-- c . ({a, b} -> !c) -> !(a -> b -> !c)` to `forall a . ({a, B} -> !C)`. Result should
+-- unify to `forall a . (a -> B -> !C)`.
+propUncurry :: Property
+propUncurry = forAllShrink arbitrary shrink $ \(Concrete bT, Concrete cT) ->
+  withRenamedComp uncurryT $ \uncurryTRenamed ->
+    let argT = ThunkT . comp1 $ (tyvar Z ix0 -*- bT) :--:> ReturnT cT
+        expectedT = ThunkT . comp1 $ tyvar Z ix0 :--:> bT :--:> ReturnT cT
+     in withRenamedVals (Identity argT) $ \(Identity renamedArgT) ->
+          withRenamedVals (Identity expectedT) $ \(Identity renamedExpectedT) ->
+            let expected = Right renamedExpectedT
+                actual = checkApp uncurryTRenamed [renamedArgT]
+             in expected === actual
 
 -- Randomly pick a concrete type `A`, then pick a type `b` which is either `A`
 -- or a type different from `A` (50% of the time each way). Then try to apply `A
@@ -401,6 +419,20 @@ propUnifyWildcardRigid = forAllShrink arbitrary shrink $ \(scope, index) ->
                in expected === actual
 
 -- Helpers
+
+-- `forall a b c . ({a, b} -> !c) -> !(a -> b -> !c)`
+uncurryT :: CompT AbstractTy
+uncurryT =
+  let argT =
+        ThunkT . comp0 $
+          (tyvar (S Z) ix0 -*- tyvar (S Z) ix1)
+            :--:> ReturnT (tyvar (S Z) ix2)
+      resultT =
+        ThunkT . comp0 $
+          tyvar (S Z) ix0
+            :--:> tyvar (S Z) ix1
+            :--:> ReturnT (tyvar (S Z) ix2)
+   in comp3 $ argT :--:> ReturnT resultT
 
 -- `forall a. a -> !a`
 idT :: CompT AbstractTy

@@ -1,3 +1,4 @@
+{-# LANGUAGE CPP #-}
 {-# LANGUAGE PatternSynonyms #-}
 {-# LANGUAGE ViewPatterns #-}
 
@@ -52,18 +53,25 @@ import Covenant.Index
     intIndex,
   )
 import Data.Coerce (coerce)
+#if __GLASGOW_HASKELL__==908
+import Data.Foldable (foldl')
+#endif
 import Data.Functor.Classes (Eq1 (liftEq))
 import Data.Kind (Type)
 import Data.Map.Merge.Strict qualified as Merge
 import Data.Map.Strict (Map)
 import Data.Map.Strict qualified as Map
+import Data.Maybe (fromJust, mapMaybe)
 import Data.Ord (comparing)
+import Data.Set (Set)
+import Data.Set qualified as Set
 import Data.Tuple.Optics (_1)
 import Data.Vector (Vector)
 import Data.Vector qualified as Vector
 import Data.Vector.NonEmpty (NonEmptyVector)
 import Data.Vector.NonEmpty qualified as NonEmpty
 import Data.Word (Word64)
+import Optics.AffineFold (preview)
 import Optics.At (ix)
 import Optics.Getter (to, view)
 import Optics.Label (LabelOptic (labelOptic))
@@ -636,17 +644,48 @@ checkApp (CompT _ xs) =
         [] -> case currParam of
           Abstraction (Unifiable index) -> throwError . LeakingUnifiable $ index
           Abstraction (Wildcard scopeId index) -> throwError . LeakingWildcard scopeId $ index
+          ThunkT (CompT _ xs') -> do
+            let remainingUnifiables = NonEmpty.foldl' (\acc t -> acc <> collectUnifiables t) Set.empty xs'
+            let requiredIntroductions = Set.size remainingUnifiables
+            -- We know that the size of a set cannot be negative, but GHC
+            -- doesn't.
+            let asCount = fromJust . preview intCount $ requiredIntroductions
+            let indexesToUse = mapMaybe (preview intIndex) [0, 1 .. requiredIntroductions - 1]
+            let renames = zipWith (\i replacement -> (i, Abstraction . Unifiable $ replacement)) (Set.toList remainingUnifiables) indexesToUse
+            let fixed = fmap (\t -> foldl' (\acc (i, r) -> substitute i r acc) t renames) xs'
+            pure . ThunkT . CompT asCount $ fixed
+          BuiltinNested (ListT _ t) -> do
+            let remainingUnifiables = collectUnifiables t
+            let requiredIntroductions = Set.size remainingUnifiables
+            -- We know that the size of a set cannot be negative, but GHC
+            -- doesn't.
+            let asCount = fromJust . preview intCount $ requiredIntroductions
+            let indexesToUse = mapMaybe (preview intIndex) [0, 1 .. requiredIntroductions - 1]
+            let renames = zipWith (\i replacement -> (i, Abstraction . Unifiable $ replacement)) (Set.toList remainingUnifiables) indexesToUse
+            let fixed = foldl' (\acc (i, r) -> substitute i r acc) t renames
+            pure . BuiltinNested . ListT asCount $ fixed
           _ -> pure currParam
         _ -> throwError . ExcessArgs . Vector.fromList $ args
       _ -> case args of
         [] -> throwError InsufficientArgs
         (currArg : restArgs) -> do
           subs <- catchError (unify currParam currArg) (promoteUnificationError currParam currArg)
-          case Map.foldlWithKey' (\acc index sub -> substitute index sub acc) restParams subs of
+          case Map.foldlWithKey' (\acc index sub -> fmap (substitute index sub) acc) restParams subs of
             [] -> throwError InsufficientArgs
             (currParam' : restParams') -> go currParam' restParams' restArgs
 
 -- Helpers
+
+collectUnifiables :: ValT Renamed -> Set (Index "tyvar")
+collectUnifiables = \case
+  Abstraction t -> case t of
+    Unifiable index -> Set.singleton index
+    _ -> Set.empty
+  BuiltinFlat _ -> Set.empty
+  BuiltinNested t -> case t of
+    ListT _ t' -> collectUnifiables t'
+    PairT t1 t2 -> collectUnifiables t1 <> collectUnifiables t2
+  ThunkT (CompT _ xs) -> NonEmpty.foldl' (\acc t -> acc <> collectUnifiables t) Set.empty xs
 
 -- Because unification is inherently recursive, if we find an error deep within
 -- a type, the message will signify only the _part_ that fails to unify, not the
@@ -790,19 +829,17 @@ unify expected actual =
         Merge.preserveMissing
         (Merge.zipWithAMatched $ \_ l r -> l <$ unless (l == r) unificationError)
 
-substitute :: Index "tyvar" -> ValT Renamed -> [ValT Renamed] -> [ValT Renamed]
-substitute index toSub = fmap go
-  where
-    go :: ValT Renamed -> ValT Renamed
-    go = \case
-      Abstraction t -> case t of
-        Unifiable ourIndex ->
-          if ourIndex == index
-            then toSub
-            else Abstraction t
-        _ -> Abstraction t
-      ThunkT (CompT abses xs) -> ThunkT . CompT abses . fmap go $ xs
-      BuiltinFlat t -> BuiltinFlat t
-      BuiltinNested t -> BuiltinNested $ case t of
-        ListT abses' t' -> ListT abses' . go $ t'
-        PairT t1 t2 -> PairT (go t1) . go $ t2
+substitute :: Index "tyvar" -> ValT Renamed -> ValT Renamed -> ValT Renamed
+substitute index toSub = \case
+  Abstraction t -> case t of
+    Unifiable ourIndex ->
+      if ourIndex == index
+        then toSub
+        else Abstraction t
+    _ -> Abstraction t
+  ThunkT (CompT abstractions xs) ->
+    ThunkT . CompT abstractions . fmap (substitute index toSub) $ xs
+  BuiltinFlat t -> BuiltinFlat t
+  BuiltinNested t -> BuiltinNested $ case t of
+    ListT abstractions t' -> ListT abstractions . substitute index toSub $ t'
+    PairT t1 t2 -> PairT (substitute index toSub t1) (substitute index toSub t2)
