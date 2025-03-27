@@ -26,7 +26,7 @@ import Control.Monad.HashCons (MonadHashCons, lookupRef)
 import Covenant.Constant (AConstant)
 import Covenant.Internal.TyExpr (TyExpr)
 import Covenant.Ledger (LedgerAccessor, LedgerDestructor)
-import Covenant.Prim (OneArgFunc, SixArgFunc, ThreeArgFunc, TwoArgFunc)
+import Covenant.Prim (OneArgFunc, ThreeArgFunc, TwoArgFunc)
 import Data.Kind (Type)
 import Data.Maybe (fromJust, mapMaybe)
 import Data.Word (Word64)
@@ -103,7 +103,7 @@ data PrimCall
   = PrimCallOne OneArgFunc Ref
   | PrimCallTwo TwoArgFunc Ref Ref
   | PrimCallThree ThreeArgFunc Ref Ref Ref
-  | PrimCallSix SixArgFunc Ref Ref Ref Ref Ref Ref
+  --   | PrimCallSix SixArgFunc Ref Ref Ref Ref Ref Ref
   deriving stock
     ( -- | @since 1.0.0
       Eq,
@@ -227,7 +227,7 @@ childIds = \case
     PrimCallOne _ r1 -> mapMaybe refToId [r1]
     PrimCallTwo _ r1 r2 -> mapMaybe refToId [r1, r2]
     PrimCallThree _ r1 r2 r3 -> mapMaybe refToId [r1, r2, r3]
-    PrimCallSix _ r1 r2 r3 r4 r5 r6 -> mapMaybe refToId [r1, r2, r3, r4, r5, r6]
+  -- PrimCallSix _ r1 r2 r3 r4 r5 r6 -> mapMaybe refToId [r1, r2, r3, r4, r5, r6]
   LamInternal _ r1 -> mapMaybe refToId [r1]
   LetInternal _ r1 r2 -> mapMaybe refToId [r1, r2]
   AppInternal _ r1 r2 -> mapMaybe refToId [r1, r2]

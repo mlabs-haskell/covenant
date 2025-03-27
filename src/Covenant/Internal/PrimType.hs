@@ -2,11 +2,11 @@ module Covenant.Internal.PrimType
   ( typeOfOneArgFunc,
     typeOfTwoArgFunc,
     typeOfThreeArgFunc,
-    typeOfSixArgFunc,
+    -- typeOfSixArgFunc,
   )
 where
 
-import Covenant.Internal.ASGNode (TyASGNode (ATyExpr, ATyLam), TyLam (TyLam))
+import Covenant.Internal.ASGNode (TyASGNode (ATyExpr))
 import Covenant.Internal.TyExpr
   ( TyExpr
       ( TyBLS12_381G1Element,
@@ -15,8 +15,6 @@ import Covenant.Internal.TyExpr
         TyBoolean,
         TyByteString,
         TyInteger,
-        TyList,
-        TyPair,
         TyPlutusData,
         TyString,
         TyUnit
@@ -24,7 +22,7 @@ import Covenant.Internal.TyExpr
   )
 import Covenant.Prim
   ( OneArgFunc
-      ( BData,
+      ( -- BData,
         BLS12_381_G1_compress,
         BLS12_381_G1_neg,
         BLS12_381_G1_uncompress,
@@ -38,31 +36,31 @@ import Covenant.Prim
         DecodeUtf8,
         EncodeUtf8,
         FindFirstSetBit,
-        FstPair,
-        HeadList,
-        IData,
+        -- FstPair,
+        -- HeadList,
+        -- IData,
         Keccak_256,
         LengthOfByteString,
-        ListData,
-        MapData,
-        NullList,
+        -- ListData,
+        -- MapData,
+        -- NullList,
         Ripemd_160,
-        SerialiseData,
+        -- SerialiseData,
         Sha2_256,
-        Sha3_256,
-        SndPair,
-        TailList,
-        UnBData,
-        UnConstrData,
-        UnIData,
-        UnListData,
-        UnMapData
+        Sha3_256
+        -- SndPair,
+        -- TailList,
+        -- UnBData,
+        -- UnConstrData,
+        -- UnIData,
+        -- UnListData,
+        -- UnMapData
       ),
-    SixArgFunc (CaseData, ChooseData),
+    -- SixArgFunc (CaseData, ChooseData),
     ThreeArgFunc
       ( AndByteString,
-        CaseList,
-        ChooseList,
+        -- CaseList,
+        -- ChooseList,
         ExpModInteger,
         IfThenElse,
         IntegerToByteString,
@@ -70,7 +68,7 @@ import Covenant.Prim
         VerifyEcdsaSecp256k1Signature,
         VerifyEd25519Signature,
         VerifySchnorrSecp256k1Signature,
-        WriteBits,
+        -- WriteBits,
         XorByteString
       ),
     TwoArgFunc
@@ -91,10 +89,10 @@ import Covenant.Prim
         ByteStringToInteger,
         ChooseUnit,
         ConsByteString,
-        ConstrData,
+        -- ConstrData,
         DivideInteger,
         EqualsByteString,
-        EqualsData,
+        -- EqualsData,
         EqualsInteger,
         EqualsString,
         IndexByteString,
@@ -102,8 +100,8 @@ import Covenant.Prim
         LessThanEqualsByteString,
         LessThanEqualsInteger,
         LessThanInteger,
-        MkCons,
-        MkPairData,
+        -- MkCons,
+        -- MkPairData,
         ModInteger,
         MultiplyInteger,
         QuotientInteger,
@@ -130,21 +128,21 @@ typeOfOneArgFunc =
     Blake2b_256 -> (TyByteString, TyByteString)
     EncodeUtf8 -> (TyString, TyByteString)
     DecodeUtf8 -> (TyByteString, TyString)
-    FstPair -> (TyPair TyPlutusData TyPlutusData, TyPlutusData)
-    SndPair -> (TyPair TyPlutusData TyPlutusData, TyPlutusData)
-    HeadList -> (TyList TyPlutusData, TyPlutusData)
-    TailList -> (TyList TyPlutusData, TyList TyPlutusData)
-    NullList -> (TyList TyPlutusData, TyBoolean)
-    MapData -> (TyList (TyPair TyPlutusData TyPlutusData), TyPlutusData)
-    ListData -> (TyList TyPlutusData, TyPlutusData)
-    IData -> (TyInteger, TyPlutusData)
-    BData -> (TyByteString, TyPlutusData)
-    UnConstrData -> (TyPlutusData, TyPair TyInteger (TyList TyPlutusData))
-    UnMapData -> (TyPlutusData, TyList (TyPair TyPlutusData TyPlutusData))
-    UnListData -> (TyPlutusData, TyList TyPlutusData)
-    UnIData -> (TyPlutusData, TyInteger)
-    UnBData -> (TyPlutusData, TyByteString)
-    SerialiseData -> (TyPlutusData, TyByteString)
+    -- FstPair -> (TyPair TyPlutusData TyPlutusData, TyPlutusData)
+    -- SndPair -> (TyPair TyPlutusData TyPlutusData, TyPlutusData)
+    -- HeadList -> (TyList TyPlutusData, TyPlutusData)
+    -- TailList -> (TyList TyPlutusData, TyList TyPlutusData)
+    -- NullList -> (TyList TyPlutusData, TyBoolean)
+    -- MapData -> (TyList (TyPair TyPlutusData TyPlutusData), TyPlutusData)
+    -- ListData -> (TyList TyPlutusData, TyPlutusData)
+    -- IData -> (TyInteger, TyPlutusData)
+    -- BData -> (TyByteString, TyPlutusData)
+    -- UnConstrData -> (TyPlutusData, TyPair TyInteger (TyList TyPlutusData))
+    -- UnMapData -> (TyPlutusData, TyList (TyPair TyPlutusData TyPlutusData))
+    -- UnListData -> (TyPlutusData, TyList TyPlutusData)
+    -- UnIData -> (TyPlutusData, TyInteger)
+    -- UnBData -> (TyPlutusData, TyByteString)
+    -- SerialiseData -> (TyPlutusData, TyByteString)
     BLS12_381_G1_neg -> (TyBLS12_381G1Element, TyBLS12_381G1Element)
     BLS12_381_G1_compress -> (TyBLS12_381G1Element, TyByteString)
     BLS12_381_G1_uncompress -> (TyByteString, TyBLS12_381G1Element)
@@ -188,10 +186,10 @@ typeOfTwoArgFunc =
     EqualsString -> (TyString, TyString, TyBoolean)
     ChooseUnit -> (TyUnit, TyPlutusData, TyPlutusData)
     Trace -> (TyString, TyPlutusData, TyPlutusData)
-    MkCons -> (TyPlutusData, TyList TyPlutusData, TyList TyPlutusData)
-    ConstrData -> (TyInteger, TyList TyPlutusData, TyPlutusData)
-    EqualsData -> (TyPlutusData, TyPlutusData, TyBoolean)
-    MkPairData -> (TyPlutusData, TyPlutusData, TyPair TyPlutusData TyPlutusData)
+    -- MkCons -> (TyPlutusData, TyList TyPlutusData, TyList TyPlutusData)
+    -- ConstrData -> (TyInteger, TyList TyPlutusData, TyPlutusData)
+    -- EqualsData -> (TyPlutusData, TyPlutusData, TyBoolean)
+    -- MkPairData -> (TyPlutusData, TyPlutusData, TyPair TyPlutusData TyPlutusData)
     BLS12_381_G1_add -> (TyBLS12_381G1Element, TyBLS12_381G1Element, TyBLS12_381G1Element)
     BLS12_381_G1_scalarMul -> (TyInteger, TyBLS12_381G1Element, TyBLS12_381G1Element)
     BLS12_381_G1_equal -> (TyBLS12_381G1Element, TyBLS12_381G1Element, TyBoolean)
@@ -223,18 +221,19 @@ typeOfThreeArgFunc =
     VerifyEcdsaSecp256k1Signature -> (TyByteString, TyByteString, TyByteString, TyBoolean)
     VerifySchnorrSecp256k1Signature -> (TyByteString, TyByteString, TyByteString, TyBoolean)
     IfThenElse -> (TyBoolean, TyPlutusData, TyPlutusData, TyPlutusData)
-    ChooseList -> (TyList TyPlutusData, TyPlutusData, TyPlutusData, TyPlutusData)
-    CaseList -> (TyList TyPlutusData, TyPlutusData, TyPair TyPlutusData (TyList TyPlutusData), TyPlutusData)
+    -- ChooseList -> (TyList TyPlutusData, TyPlutusData, TyPlutusData, TyPlutusData)
+    -- CaseList -> (TyList TyPlutusData, TyPlutusData, TyPair TyPlutusData (TyList TyPlutusData), TyPlutusData)
     IntegerToByteString -> (TyBoolean, TyInteger, TyInteger, TyByteString)
     AndByteString -> (TyBoolean, TyByteString, TyByteString, TyByteString)
     OrByteString -> (TyBoolean, TyByteString, TyByteString, TyByteString)
     XorByteString -> (TyBoolean, TyByteString, TyByteString, TyByteString)
-    WriteBits -> (TyByteString, TyList TyInteger, TyBoolean, TyByteString)
+    -- WriteBits -> (TyByteString, TyList TyInteger, TyBoolean, TyByteString)
     ExpModInteger -> (TyInteger, TyInteger, TyInteger, TyInteger)
   where
     liftTy :: (TyExpr, TyExpr, TyExpr, TyExpr) -> (TyASGNode, TyASGNode, TyASGNode, TyASGNode)
     liftTy (t1, t2, t3, t4) = (ATyExpr t1, ATyExpr t2, ATyExpr t3, ATyExpr t4)
 
+{-
 -- | Maps six-argument functions to their input and output types.
 -- Returns a tuple of (arg1 type, arg2 type, arg3 type, .. arg6 type, return type).
 --
@@ -269,3 +268,4 @@ typeOfSixArgFunc = \case
       -- a
       ATyExpr TyUnit
     )
+  -}

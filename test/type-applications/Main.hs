@@ -11,37 +11,30 @@ import Covenant.Index
     count1,
     ix0,
     ix1,
-    ix2,
   )
 import Covenant.Test (Concrete (Concrete))
 import Covenant.Type
   ( AbstractTy,
-    BuiltinNestedT (ListT),
     CompT (CompT),
     Renamed (Rigid, Wildcard),
     TypeAppError
       ( DoesNotUnify,
         ExcessArgs,
-        InsufficientArgs,
-        LeakingUnifiable
+        InsufficientArgs
       ),
     ValT
       ( Abstraction,
-        BuiltinNested,
         ThunkT
       ),
     checkApp,
     comp0,
     comp1,
     comp2,
-    comp3,
     integerT,
-    listT,
     renameCompT,
     renameValT,
     runRenameM,
     tyvar,
-    (-*-),
     pattern ReturnT,
     pattern (:--:>),
   )
@@ -72,32 +65,24 @@ import Test.Tasty.QuickCheck (QuickCheckTests, testProperty)
 main :: IO ()
 main =
   defaultMain . adjustOption moreTests . testGroup "Type application" $
-    [ testCase "HeadList on polymorphic empty list" unitLeakingUnifiable,
-      -- TODO: Check leaking wildcard; can't think of a case now
-      testProperty "Too many arguments to HeadList" propTooManyArgs,
+    [ testProperty "Too many arguments to HeadList" propTooManyArgs,
       testCase "HeadList on no arguments" unitInsufficientArgs,
       testGroup
         "Substitution"
         [ testProperty "id applied to concrete" propIdConcrete,
           testProperty "two-arg const to same concretes" propConst2Same,
-          testProperty "two-arg const to different concretes" propConst2Different,
-          testProperty "uncurry to concretes" propUncurry
+          testProperty "two-arg const to different concretes" propConst2Different
         ],
       testGroup
         "Unification"
         [ testProperty "concrete expected, concrete actual" propUnifyConcrete,
-          testProperty "unifiable expected, concrete actual" propUnifyUnifiableConcrete,
           testProperty "rigid expected, concrete actual" propUnifyRigidConcrete,
           testProperty "wildcard expected, concrete actual" propUnifyWildcardConcrete,
-          testProperty "concrete expected, unifiable actual" propUnifyConcreteUnifiable,
-          testProperty "unifiable expected, unifiable actual" propUnifyUnifiable,
-          testProperty "rigid expected, unifiable actual" propUnifyRigidUnifiable,
           testProperty "wildcard expected, unifiable actual" propUnifyWildcardUnifiable,
           testProperty "concrete expected, rigid actual" propUnifyConcreteRigid,
           testProperty "unifiable expected, rigid actual" propUnifyUnifiableRigid,
           testProperty "rigid expected, rigid actual" propUnifyRigid,
           testProperty "wildcard expected, rigid actual" propUnifyWildcardRigid
-          -- TODO: Wildcard arguments; can't come up with cases
         ]
     ]
   where
@@ -110,51 +95,44 @@ main =
 
 -- Units and properties
 
--- Try to apply `forall a . [a] -> !a` to `forall a . [a]`. Result should be a
--- leaking unifiable.
-unitLeakingUnifiable :: IO ()
-unitLeakingUnifiable = do
-  renamedHeadListT <- failLeft . runRenameM . renameCompT $ headListT
-  renamedEmptyListT <- failLeft . runRenameM . renameValT $ emptyListT
-  let expected = Left (LeakingUnifiable ix0)
-  let actual = checkApp renamedHeadListT [renamedEmptyListT]
-  assertEqual "" expected actual
-
--- Try to apply more than one argument to `forall a . [a] -> !a`, making sure
--- that the first argument is 'suitable'. Result should indicate excess
--- arguments.
+-- Try to apply more than one argument to `forall a . a -> !a`.
+-- Result should indicate excess arguments.
 propTooManyArgs :: Property
 propTooManyArgs = forAllShrink gen shr $ \excessArgs ->
-  withRenamedComp headListT $ \renamedHeadListT ->
-    withRenamedVals (Identity emptyListT) $ \(Identity renamedEmptyListT) ->
-      withRenamedVals excessArgs $ \renamedExcessArgs ->
-        let expected = Left . ExcessArgs . Vector.fromList $ renamedExcessArgs
-            actual = checkApp renamedHeadListT (renamedEmptyListT : renamedExcessArgs)
-         in expected === actual
+  withRenamedComp idT $ \renamedIdT ->
+    withRenamedVals excessArgs $ \renamedExcessArgs ->
+      case renamedExcessArgs of
+        [] -> discard -- should be impossible
+        _ : extraArgs ->
+          let expected = Left . ExcessArgs . Vector.fromList $ extraArgs
+              actual = checkApp renamedIdT renamedExcessArgs
+           in expected === actual
   where
     -- Note (Koz, 14/04/2025): The default size of 100 makes it rather painful
     -- to generate excess arguments, as the generator used for concrete types
-    -- is recursive. Furthermore, we need to ensure the list is nonempty, which
-    -- forces too many restarts. Thus, we roll our own.
+    -- is recursive. Furthermore, we need to ensure the list has at least two
+    -- elements, which forces too many restarts. Thus, we roll our own.
     gen :: Gen [ValT AbstractTy]
     gen = do
       size <- getSize
       lenIncrease <- elements [0, 1 .. size `quot` 4]
       Concrete firstTy <- arbitrary
-      (firstTy :) <$> vectorOf lenIncrease (coerce @Concrete <$> arbitrary)
+      Concrete secondTy <- arbitrary
+      ([firstTy, secondTy] <>) <$> vectorOf lenIncrease (coerce @Concrete <$> arbitrary)
     shr :: [ValT AbstractTy] -> [[ValT AbstractTy]]
     shr = \case
       [] -> []
       [_] -> []
+      [_, _] -> []
       xs -> liftShrink (coerce . shrink . Concrete) xs
 
--- Try to apply `forall a . [a] -> !a` to zero arguments. Result should indicate
+-- Try to apply `forall a . a -> !a` to zero arguments. Result should indicate
 -- insufficient arguments.
 unitInsufficientArgs :: IO ()
 unitInsufficientArgs = do
-  renamedHeadListT <- failLeft . runRenameM . renameCompT $ headListT
+  renamedIdT <- failLeft . runRenameM . renameCompT $ idT
   let expected = Left InsufficientArgs
-  let actual = checkApp renamedHeadListT []
+  let actual = checkApp renamedIdT []
   assertEqual "" expected actual
 
 -- Try to apply `forall a . a -> !a` to a random concrete type. Result should be
@@ -189,20 +167,6 @@ propConst2Different = forAllShrink arbitrary shrink $ \(Concrete t1, Concrete t2
           let expected = Right t1'
               actual = checkApp renamedConst2T [t1', t2']
            in expected === actual
-
--- Randomly pick concrete types `B` and `C`. Then try to apply `forall a b
--- c . ({a, b} -> !c) -> !(a -> b -> !c)` to `forall a . ({a, B} -> !C)`. Result should
--- unify to `forall a . (a -> B -> !C)`.
-propUncurry :: Property
-propUncurry = forAllShrink arbitrary shrink $ \(Concrete bT, Concrete cT) ->
-  withRenamedComp uncurryT $ \uncurryTRenamed ->
-    let argT = ThunkT . comp1 $ (tyvar Z ix0 -*- bT) :--:> ReturnT cT
-        expectedT = ThunkT . comp1 $ tyvar Z ix0 :--:> bT :--:> ReturnT cT
-     in withRenamedVals (Identity argT) $ \(Identity renamedArgT) ->
-          withRenamedVals (Identity expectedT) $ \(Identity renamedExpectedT) ->
-            let expected = Right renamedExpectedT
-                actual = checkApp uncurryTRenamed [renamedArgT]
-             in expected === actual
 
 -- Randomly pick a concrete type `A`, then pick a type `b` which is either `A`
 -- or a type different from `A` (50% of the time each way). Then try to apply `A
@@ -241,17 +205,6 @@ propUnifyConcrete = forAllShrink gen shr $ \(tA, mtB) ->
           Concrete y' <- shrink (Concrete y)
           pure (x', my) <|> pure (x, Just y')
 
--- Randomly pick a concrete type A, then try to apply `forall a . [a] -> !a` to
--- `[A]`. Result should unify to `A`.
-propUnifyUnifiableConcrete :: Property
-propUnifyUnifiableConcrete = forAllShrink arbitrary shrink $ \(Concrete t) ->
-  withRenamedComp headListT $ \renamedHeadListT ->
-    withRenamedVals (Identity t) $ \(Identity arg) ->
-      let asList = BuiltinNested . ListT count0 $ arg
-          expected = Right arg
-          actual = checkApp renamedHeadListT [asList]
-       in expected === actual
-
 -- Randomly pick a rigid type A and concrete type B, then try to apply `A ->
 -- !Integer` to `b`. Result should fail to unify.
 propUnifyRigidConcrete :: Property
@@ -279,39 +232,6 @@ propUnifyWildcardConcrete = forAllShrink arbitrary shrink $ \(Concrete t) ->
                   expected = Left . DoesNotUnify lhs $ argT'
                   actual = checkApp f [argT']
                in expected === actual
-
--- Randomly pick a concrete type A, then try to apply `[A] -> !A` to `forall a .
--- [a]`. Result should unify to `A`.
-propUnifyConcreteUnifiable :: Property
-propUnifyConcreteUnifiable = forAllShrink arbitrary shrink $ \(Concrete t) ->
-  withRenamedComp (comp0 $ listT count0 t :--:> ReturnT t) $ \f ->
-    withRenamedVals (Identity emptyListT) $ \(Identity arg) ->
-      withRenamedVals (Identity t) $ \(Identity t') ->
-        let expected = Right t'
-            actual = checkApp f [arg]
-         in expected === actual
-
--- Randomly pick a concrete type A, then try to apply `forall a. [a] -> !A` to
--- `forall a. [a]`. Result should unify to `A`.
-propUnifyUnifiable :: Property
-propUnifyUnifiable = forAllShrink arbitrary shrink $ \(Concrete t) ->
-  withRenamedComp (comp1 $ listT count0 (tyvar (S Z) ix0) :--:> ReturnT t) $ \f ->
-    withRenamedVals (Identity emptyListT) $ \(Identity arg) ->
-      withRenamedVals (Identity t) $ \(Identity t') ->
-        let expected = Right t'
-            actual = checkApp f [arg]
-         in expected === actual
-
--- Randomly generate a rigid type A, and a concrete type B, then try to apply `[A]
--- -> !B` to `forall a . [a]`. Result should unify to `B`.
-propUnifyRigidUnifiable :: Property
-propUnifyRigidUnifiable = forAllShrink arbitrary shrink $ \(Concrete bT, scope, index) ->
-  withRenamedComp (comp0 $ listT count0 (tyvar (S (S scope)) index) :--:> ReturnT bT) $ \f ->
-    withRenamedVals (Identity emptyListT) $ \(Identity arg) ->
-      withRenamedVals (Identity bT) $ \(Identity bT') ->
-        let expected = Right bT'
-            actual = checkApp f [arg]
-         in expected === actual
 
 -- Randomly generate a concrete type A, then try to apply
 -- `(forall a . a -> !A) -> !A` to `forall a . (a -> !A)`. Result should unify
@@ -420,20 +340,6 @@ propUnifyWildcardRigid = forAllShrink arbitrary shrink $ \(scope, index) ->
 
 -- Helpers
 
--- `forall a b c . ({a, b} -> !c) -> !(a -> b -> !c)`
-uncurryT :: CompT AbstractTy
-uncurryT =
-  let argT =
-        ThunkT . comp0 $
-          (tyvar (S Z) ix0 -*- tyvar (S Z) ix1)
-            :--:> ReturnT (tyvar (S Z) ix2)
-      resultT =
-        ThunkT . comp0 $
-          tyvar (S Z) ix0
-            :--:> tyvar (S Z) ix1
-            :--:> ReturnT (tyvar (S Z) ix2)
-   in comp3 $ argT :--:> ReturnT resultT
-
 -- `forall a. a -> !a`
 idT :: CompT AbstractTy
 idT = comp1 $ tyvar Z ix0 :--:> ReturnT (tyvar Z ix0)
@@ -441,15 +347,6 @@ idT = comp1 $ tyvar Z ix0 :--:> ReturnT (tyvar Z ix0)
 -- `forall a b . a -> b -> !a
 const2T :: CompT AbstractTy
 const2T = comp2 $ tyvar Z ix0 :--:> tyvar Z ix1 :--:> ReturnT (tyvar Z ix0)
-
--- `forall a . [a] -> !a`
-headListT :: CompT AbstractTy
-headListT =
-  comp1 $ listT count0 (tyvar (S Z) ix0) :--:> ReturnT (tyvar Z ix0)
-
--- `forall a. [a]`
-emptyListT :: ValT AbstractTy
-emptyListT = listT count1 (tyvar Z ix0)
 
 failLeft ::
   forall (a :: Type) (b :: Type).

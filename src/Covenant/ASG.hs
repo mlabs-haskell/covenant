@@ -109,7 +109,7 @@ import Covenant.Internal.ASGNode
     Arg (Arg),
     Bound (Bound),
     Id,
-    PrimCall (PrimCallOne, PrimCallSix, PrimCallThree, PrimCallTwo),
+    PrimCall (PrimCallOne, PrimCallThree, PrimCallTwo),
     Ref (ABound, AnArg, AnId),
     TyASGNode (ATyLam),
     TyLam (TyLam),
@@ -122,7 +122,7 @@ import Covenant.Internal.ASGNode
     pattern Lit,
     pattern Prim,
   )
-import Covenant.Internal.PrimType (typeOfOneArgFunc, typeOfSixArgFunc, typeOfThreeArgFunc, typeOfTwoArgFunc)
+import Covenant.Internal.PrimType (typeOfOneArgFunc, typeOfThreeArgFunc, typeOfTwoArgFunc)
 import Covenant.Internal.TyExpr
   ( TyExpr
       ( TyBoolean,
@@ -136,7 +136,7 @@ import Covenant.Internal.TyExpr
       ),
   )
 import Covenant.Ledger (LedgerAccessor, LedgerDestructor)
-import Covenant.Prim (OneArgFunc, SixArgFunc, ThreeArgFunc, TwoArgFunc)
+import Covenant.Prim (OneArgFunc, ThreeArgFunc, TwoArgFunc)
 import Data.Foldable (traverse_)
 import Data.Kind (Type)
 import Data.Monoid (Endo (Endo))
@@ -378,14 +378,17 @@ typePrim p = case p of
     ty2 <- typeOfRef arg2
     ty3 <- typeOfRef arg3
     liftTypeError $ typeThreeArgFunc fun ty1 ty2 ty3
-  (PrimCallSix fun arg1 arg2 arg3 arg4 arg5 arg6) -> do
-    ty1 <- typeOfRef arg1
-    ty2 <- typeOfRef arg2
-    ty3 <- typeOfRef arg3
-    ty4 <- typeOfRef arg4
-    ty5 <- typeOfRef arg5
-    ty6 <- typeOfRef arg6
-    liftTypeError $ typeSixArgFunc fun ty1 ty2 ty3 ty4 ty5 ty6
+
+{-
+(PrimCallSix fun arg1 arg2 arg3 arg4 arg5 arg6) -> do
+  ty1 <- typeOfRef arg1
+  ty2 <- typeOfRef arg2
+  ty3 <- typeOfRef arg3
+  ty4 <- typeOfRef arg4
+  ty5 <- typeOfRef arg5
+  ty6 <- typeOfRef arg6
+  liftTypeError $ typeSixArgFunc fun ty1 ty2 ty3 ty4 ty5 ty6
+-}
 
 typeOneArgFunc :: OneArgFunc -> TyASGNode -> Either TypeError TyASGNode
 typeOneArgFunc fun tyArg1 =
@@ -408,6 +411,7 @@ typeThreeArgFunc fun tyArg1 tyArg2 tyArg3 =
         then Right tyRes
         else Left $ TyErrPrimArgMismatch (Vector.fromList [tyParam1, tyParam2, tyParam3]) (Vector.fromList [tyArg1, tyArg2, tyArg3])
 
+{-
 typeSixArgFunc :: SixArgFunc -> TyASGNode -> TyASGNode -> TyASGNode -> TyASGNode -> TyASGNode -> TyASGNode -> Either TypeError TyASGNode
 typeSixArgFunc fun tyArg1 tyArg2 tyArg3 tyArg4 tyArg5 tyArg6 =
   let (tyParam1, tyParam2, tyParam3, tyParam4, tyParam5, tyParam6, tyRes) = typeOfSixArgFunc fun
@@ -418,6 +422,7 @@ typeSixArgFunc fun tyArg1 tyArg2 tyArg3 tyArg4 tyArg5 tyArg6 =
             TyErrPrimArgMismatch
               (Vector.fromList [tyParam1, tyParam2, tyParam3, tyParam4, tyParam5, tyParam6])
               (Vector.fromList [tyArg1, tyArg2, tyArg3, tyArg4, tyArg5, tyArg6])
+-}
 
 -- | Construct a ledger type accessor.
 --

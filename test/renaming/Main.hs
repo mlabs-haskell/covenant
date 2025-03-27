@@ -5,13 +5,10 @@ module Main (main) where
 
 import Covenant.DeBruijn (DeBruijn (S, Z))
 import Covenant.Index
-  ( count0,
-    count1,
+  ( count1,
     count2,
-    count3,
     ix0,
     ix1,
-    ix2,
   )
 import Covenant.Test (Concrete (Concrete))
 import Covenant.Type
@@ -21,30 +18,24 @@ import Covenant.Type
         BLS12_381_MlResultT,
         BoolT,
         ByteStringT,
-        DataT,
         IntegerT,
         StringT,
         UnitT
       ),
-    BuiltinNestedT (ListT, PairT),
     CompT (CompT),
     RenameError
       ( InvalidAbstractionReference,
-        IrrelevantAbstraction,
         UndeterminedAbstraction
       ),
-    Renamed (Rigid, Unifiable, Wildcard),
-    ValT (Abstraction, BuiltinFlat, BuiltinNested, ThunkT),
+    Renamed (Unifiable, Wildcard),
+    ValT (Abstraction, BuiltinFlat, ThunkT),
     comp0,
     comp1,
     comp2,
-    comp3,
-    listT,
     renameCompT,
     renameValT,
     runRenameM,
     tyvar,
-    (-*-),
     pattern ReturnT,
     pattern (:--:>),
   )
@@ -71,21 +62,12 @@ main =
           testCase "ByteStringT" $ testFlat ByteStringT,
           testCase "G1ElementT" $ testFlat BLS12_381_G1_ElementT,
           testCase "G2ElementT" $ testFlat BLS12_381_G2_ElementT,
-          testCase "MlResultT" $ testFlat BLS12_381_MlResultT,
-          testCase "DataT" $ testFlat DataT
+          testCase "MlResultT" $ testFlat BLS12_381_MlResultT
         ],
       testProperty "Nested concrete types" propNestedConcrete,
       testCase "forall a . a -> !a" testIdT,
       testCase "forall a b . a -> b -> !a" testConstT,
       testCase "forall a . a -> !(forall b . b -> !a)" testConstT2,
-      testCase "forall a . [a] -> !a" testHeadListT,
-      testCase "forall a b . (a, b) -> !b" testSndPairT,
-      testCase "forall a b . (a -> !b) -> [a] -> ![b]" testMapT,
-      testCase "forall a b c . ({a, b} -> !c) -> !(a -> b -> c)" testUncurryT,
-      testGroup
-        "Irrelevance"
-        [ testCase "forall a b . [a]" testDodgyListT
-        ],
       testGroup
         "Overdeterminance"
         [ testCase "forall a b . a -> !(b -> !a)" testDodgyConstT,
@@ -160,83 +142,6 @@ testConstT2 = do
               )
   let result = runRenameM . renameCompT $ constT
   assertRight (assertEqual "" expected) result
-
--- Checks that `forall a . [a] -> !a` correctly renames.
-testHeadListT :: IO ()
-testHeadListT = do
-  let headListT = comp1 $ listT count0 (tyvar (S Z) ix0) :--:> ReturnT (tyvar Z ix0)
-  let expected =
-        CompT count1 $
-          BuiltinNested (ListT count0 (Abstraction (Unifiable ix0)))
-            :--:> ReturnT (Abstraction (Unifiable ix0))
-  let result = runRenameM . renameCompT $ headListT
-  assertRight (assertEqual "" expected) result
-
--- Checks that `forall a b . (a, b) -> !b` correctly renames.
-testSndPairT :: IO ()
-testSndPairT = do
-  let sndPairT = comp2 $ (tyvar Z ix0 -*- tyvar Z ix1) :--:> ReturnT (tyvar Z ix1)
-  let expected =
-        CompT count2 $
-          BuiltinNested (PairT (Abstraction (Unifiable ix0)) (Abstraction (Unifiable ix1)))
-            :--:> ReturnT (Abstraction (Unifiable ix1))
-  let result = runRenameM . renameCompT $ sndPairT
-  assertRight (assertEqual "" expected) result
-
--- Checks that `forall a b . (a -> !b) -> [a] -> !b` correctly renames.
--- Also renames the thunk argument type _only_, to check that rigid arguments
--- behave as expected.
-testMapT :: IO ()
-testMapT = do
-  let mapThunkT = ThunkT (comp0 $ tyvar (S Z) ix0 :--:> ReturnT (tyvar (S Z) ix1))
-  let mapT =
-        comp2 $
-          mapThunkT
-            :--:> listT count0 (tyvar (S Z) ix0)
-            :--:> ReturnT (listT count0 (tyvar (S Z) ix1))
-  let expectedMapThunkT =
-        ThunkT
-          . CompT count0
-          $ Abstraction (Rigid 0 ix0) :--:> ReturnT (Abstraction (Rigid 0 ix1))
-  let expectedMapT =
-        CompT count2 $
-          (ThunkT . CompT count0 $ Abstraction (Unifiable ix0) :--:> ReturnT (Abstraction (Unifiable ix1)))
-            :--:> BuiltinNested (ListT count0 (Abstraction (Unifiable ix0)))
-            :--:> ReturnT (BuiltinNested (ListT count0 (Abstraction (Unifiable ix1))))
-  let resultThunkT = runRenameM . renameValT $ mapThunkT
-  assertRight (assertEqual "" expectedMapThunkT) resultThunkT
-  let resultMapT = runRenameM . renameCompT $ mapT
-  assertRight (assertEqual "" expectedMapT) resultMapT
-
--- Checks that `forall a b c . ({a, b} -> !c) -> !(a -> b -> !c)` renames
--- correctly.
-testUncurryT :: IO ()
-testUncurryT = do
-  let argT = ThunkT . comp0 $ (tyvar (S Z) ix0 -*- tyvar (S Z) ix1) :--:> ReturnT (tyvar (S Z) ix2)
-  let expectedArgT =
-        ThunkT . CompT count0 $
-          BuiltinNested (PairT (Abstraction (Unifiable ix0)) (Abstraction (Unifiable ix1)))
-            :--:> ReturnT (Abstraction (Unifiable ix2))
-  let resultT = ThunkT . comp0 $ tyvar (S Z) ix0 :--:> tyvar (S Z) ix1 :--:> ReturnT (tyvar (S Z) ix2)
-  let expectedResultT =
-        ThunkT . CompT count0 $
-          Abstraction (Unifiable ix0)
-            :--:> Abstraction (Unifiable ix1)
-            :--:> ReturnT (Abstraction (Unifiable ix2))
-  let t = comp3 $ argT :--:> ReturnT resultT
-  let expectedT = CompT count3 $ expectedArgT :--:> ReturnT expectedResultT
-  let actualRenamedT = runRenameM . renameCompT $ t
-  assertRight (assertEqual "" expectedT) actualRenamedT
-
--- Checks that `forall a b . [a]` triggers the irrelevant variable checker.
-testDodgyListT :: IO ()
-testDodgyListT = do
-  let listT' = listT count2 (tyvar Z ix0)
-  let result = runRenameM . renameValT $ listT'
-  case result of
-    Left IrrelevantAbstraction -> assertBool "" True
-    Left _ -> assertBool "wrong renaming error" False
-    _ -> assertBool "renaming succeeded when it should have failed" False
 
 -- Checks that `forall a b . a -> !a` triggers the undetermined variable checker.
 testDodgyIdT :: IO ()
