@@ -26,6 +26,7 @@ import Data.Semigroup (Semigroup (sconcat, stimes), Sum (Sum))
 import Data.Word (Word32)
 import GHC.TypeLits (Symbol)
 import Optics.Prism (Prism', prism)
+import Test.QuickCheck (Arbitrary)
 
 -- | A positional index, starting from zero. The label allows distinguishing
 -- different flavours of indices.
@@ -36,7 +37,9 @@ newtype Index (ofWhat :: Symbol) = Index Word32
     ( -- | @since 1.0.0
       Eq,
       -- | @since 1.0.0
-      Ord
+      Ord,
+      -- | @since 1.0.0
+      Arbitrary
     )
     via Word32
   deriving stock
