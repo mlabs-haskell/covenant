@@ -12,14 +12,12 @@ import Covenant.Type
         BLS12_381_MlResultT,
         BoolT,
         ByteStringT,
-        DataT,
         IntegerT,
         StringT,
         UnitT
       ),
-    BuiltinNestedT (ListT, PairT),
     CompT (CompT),
-    ValT (Abstraction, BuiltinFlat, BuiltinNested, ThunkT),
+    ValT (Abstraction, BuiltinFlat, ThunkT),
   )
 import Data.Coerce (coerce)
 import Data.Vector qualified as Vector
@@ -66,8 +64,7 @@ instance Arbitrary Concrete where
                   ByteStringT,
                   BLS12_381_G1_ElementT,
                   BLS12_381_G2_ElementT,
-                  BLS12_381_MlResultT,
-                  DataT
+                  BLS12_381_MlResultT
                 ]
         | otherwise =
             oneof
@@ -79,9 +76,6 @@ instance Arbitrary Concrete where
                 pure . BuiltinFlat $ BLS12_381_G1_ElementT,
                 pure . BuiltinFlat $ BLS12_381_G2_ElementT,
                 pure . BuiltinFlat $ BLS12_381_MlResultT,
-                pure . BuiltinFlat $ DataT,
-                BuiltinNested . ListT count0 <$> go (size `quot` 4),
-                BuiltinNested <$> (PairT <$> go (size `quot` 4) <*> go (size `quot` 4)),
                 ThunkT . CompT count0 <$> (NonEmpty.consV <$> go (size `quot` 4) <*> liftArbitrary (go (size `quot` 4)))
               ]
   {-# INLINEABLE shrink #-}
@@ -100,15 +94,3 @@ instance Arbitrary Concrete where
             x : xs -> pure (NonEmpty.consV x . Vector.fromList $ xs)
       -- Can't shrink this
       BuiltinFlat _ -> []
-      BuiltinNested t -> case t of
-        ListT _ t' -> do
-          Concrete shrunk <- shrink (Concrete t')
-          pure . BuiltinNested . ListT count0 $ shrunk
-        PairT t1 t2 -> do
-          Concrete shrunkT1 <- shrink (Concrete t1)
-          Concrete shrunkT2 <- shrink (Concrete t2)
-          [ BuiltinNested $ PairT shrunkT1 t2,
-            BuiltinNested $ PairT t1 shrunkT2,
-            shrunkT1,
-            shrunkT2
-            ]

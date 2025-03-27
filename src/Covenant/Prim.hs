@@ -17,32 +17,28 @@ module Covenant.Prim
     typeTwoArgFunc,
     ThreeArgFunc (..),
     typeThreeArgFunc,
-    SixArgFunc (..),
-    typeSixArgFunc,
+    -- SixArgFunc (..),
+    -- typeSixArgFunc,
   )
 where
 
-import Covenant.DeBruijn (DeBruijn (S, Z))
-import Covenant.Index (count0, ix0, ix1)
+import Covenant.DeBruijn (DeBruijn (Z))
+import Covenant.Index (count0, ix0)
 import Covenant.Type
   ( AbstractTy,
     CompT (CompT),
-    ValT (ThunkT),
+    ValT,
     boolT,
     byteStringT,
     comp0,
     comp1,
-    comp2,
-    dataT,
     g1T,
     g2T,
     integerT,
-    listT,
     mlResultT,
     stringT,
     tyvar,
     unitT,
-    (-*-),
     pattern ReturnT,
     pattern (:--:>),
   )
@@ -73,22 +69,22 @@ data OneArgFunc
   | Blake2b_256
   | EncodeUtf8
   | DecodeUtf8
-  | FstPair
-  | SndPair
-  | HeadList
-  | TailList
-  | NullList
-  | MapData
-  | ListData
-  | IData
-  | BData
-  | UnConstrData
-  | UnMapData
-  | UnListData
-  | UnIData
-  | UnBData
-  | SerialiseData
-  | BLS12_381_G1_neg
+  | --  | FstPair
+    --  |  SndPair
+    --  | HeadList
+    --  | TailList
+    --  | NullList
+    --  | MapData
+    --  | ListData
+    --  | IData
+    --  | BData
+    --  | UnConstrData
+    --  | UnMapData
+    --  | UnListData
+    --  | UnIData
+    --  | UnBData
+    --  | SerialiseData
+    BLS12_381_G1_neg
   | BLS12_381_G1_compress
   | BLS12_381_G1_uncompress
   | BLS12_381_G2_neg
@@ -122,21 +118,21 @@ instance Arbitrary OneArgFunc where
         Blake2b_256,
         EncodeUtf8,
         DecodeUtf8,
-        FstPair,
-        SndPair,
-        HeadList,
-        TailList,
-        NullList,
-        MapData,
-        ListData,
-        IData,
-        BData,
-        UnConstrData,
-        UnMapData,
-        UnListData,
-        UnIData,
-        UnBData,
-        SerialiseData,
+        -- FstPair,
+        -- SndPair,
+        -- HeadList,
+        -- TailList,
+        -- NullList,
+        -- MapData,
+        -- ListData,
+        -- IData,
+        -- BData,
+        -- UnConstrData,
+        -- UnMapData,
+        -- UnListData,
+        -- UnIData,
+        -- UnBData,
+        -- SerialiseData,
         BLS12_381_G1_neg,
         BLS12_381_G1_compress,
         BLS12_381_G1_uncompress,
@@ -162,33 +158,6 @@ typeOneArgFunc = \case
   Blake2b_256 -> hashingT
   EncodeUtf8 -> comp0 $ stringT :--:> ReturnT byteStringT
   DecodeUtf8 -> comp0 $ byteStringT :--:> ReturnT stringT
-  FstPair ->
-    comp2 $
-      (tyvar Z ix0 -*- tyvar Z ix1)
-        :--:> ReturnT (tyvar Z ix0)
-  SndPair ->
-    comp2 $
-      (tyvar Z ix0 -*- tyvar Z ix1)
-        :--:> ReturnT (tyvar Z ix1)
-  HeadList ->
-    comp1 $ list0 (tyvar (S Z) ix0) :--:> ReturnT (tyvar Z ix0)
-  TailList ->
-    comp1 $
-      list0 (tyvar (S Z) ix0)
-        :--:> ReturnT (listT count0 (tyvar (S Z) ix0))
-  NullList ->
-    comp1 $ list0 (tyvar (S Z) ix0) :--:> ReturnT boolT
-  MapData ->
-    comp0 $ list0 (dataT -*- dataT) :--:> ReturnT dataT
-  ListData -> comp0 $ list0 dataT :--:> ReturnT dataT
-  IData -> comp0 $ integerT :--:> ReturnT dataT
-  BData -> comp0 $ byteStringT :--:> ReturnT dataT
-  UnConstrData -> comp0 $ dataT :--:> ReturnT (integerT -*- list0 dataT)
-  UnMapData -> comp0 $ dataT :--:> ReturnT (list0 (dataT -*- dataT))
-  UnListData -> comp0 $ dataT :--:> ReturnT (list0 dataT)
-  UnIData -> comp0 $ dataT :--:> ReturnT integerT
-  UnBData -> comp0 $ dataT :--:> ReturnT byteStringT
-  SerialiseData -> comp0 $ dataT :--:> ReturnT byteStringT
   BLS12_381_G1_neg -> comp0 $ g1T :--:> ReturnT g1T
   BLS12_381_G1_compress -> comp0 $ g1T :--:> ReturnT byteStringT
   BLS12_381_G1_uncompress -> comp0 $ byteStringT :--:> ReturnT g1T
@@ -202,8 +171,6 @@ typeOneArgFunc = \case
   FindFirstSetBit -> comp0 $ byteStringT :--:> ReturnT integerT
   Ripemd_160 -> hashingT
   where
-    list0 :: ValT AbstractTy -> ValT AbstractTy
-    list0 = listT count0
     hashingT :: CompT AbstractTy
     hashingT = CompT count0 $ byteStringT :--:> ReturnT byteStringT
 
@@ -231,11 +198,11 @@ data TwoArgFunc
   | EqualsString
   | ChooseUnit
   | Trace
-  | MkCons
-  | ConstrData
-  | EqualsData
-  | MkPairData
-  | BLS12_381_G1_add
+  | -- | MkCons
+    -- | ConstrData
+    -- | EqualsData
+    -- | MkPairData
+    BLS12_381_G1_add
   | BLS12_381_G1_scalarMul
   | BLS12_381_G1_equal
   | BLS12_381_G1_hashToGroup
@@ -287,10 +254,10 @@ instance Arbitrary TwoArgFunc where
         EqualsString,
         ChooseUnit,
         Trace,
-        MkCons,
-        ConstrData,
-        EqualsData,
-        MkPairData,
+        -- MkCons,
+        -- ConstrData,
+        -- EqualsData,
+        -- MkPairData,
         BLS12_381_G1_add,
         BLS12_381_G1_scalarMul,
         BLS12_381_G1_equal,
@@ -334,14 +301,6 @@ typeTwoArgFunc = \case
   EqualsString -> compareT stringT
   ChooseUnit -> comp1 $ unitT :--:> tyvar Z ix0 :--:> ReturnT (tyvar Z ix0)
   Trace -> comp1 $ stringT :--:> tyvar Z ix0 :--:> ReturnT (tyvar Z ix0)
-  MkCons ->
-    comp1 $
-      tyvar Z ix0
-        :--:> listT count0 (tyvar (S Z) ix0)
-        :--:> ReturnT (listT count0 (tyvar (S Z) ix0))
-  ConstrData -> comp0 $ integerT :--:> listT count0 dataT :--:> ReturnT dataT
-  EqualsData -> compareT dataT
-  MkPairData -> comp0 $ dataT :--:> dataT :--:> ReturnT (dataT -*- dataT)
   BLS12_381_G1_add -> combineT g1T
   BLS12_381_G1_scalarMul -> comp0 $ integerT :--:> g1T :--:> ReturnT g1T
   BLS12_381_G1_equal -> compareT g1T
@@ -372,14 +331,14 @@ data ThreeArgFunc
   | VerifyEcdsaSecp256k1Signature
   | VerifySchnorrSecp256k1Signature
   | IfThenElse
-  | ChooseList
-  | CaseList
-  | IntegerToByteString
+  | -- | ChooseList
+    -- | CaseList
+    IntegerToByteString
   | AndByteString
   | OrByteString
   | XorByteString
-  | WriteBits
-  | ExpModInteger
+  | -- | WriteBits
+    ExpModInteger
   deriving stock
     ( -- | @since 1.0.0
       Eq,
@@ -400,13 +359,13 @@ instance Arbitrary ThreeArgFunc where
         VerifyEcdsaSecp256k1Signature,
         VerifySchnorrSecp256k1Signature,
         IfThenElse,
-        ChooseList,
-        CaseList,
+        -- ChooseList,
+        -- CaseList,
         IntegerToByteString,
         AndByteString,
         OrByteString,
         XorByteString,
-        WriteBits,
+        -- WriteBits,
         ExpModInteger
       ]
 
@@ -424,35 +383,12 @@ typeThreeArgFunc = \case
         :--:> tyvar Z ix0
         :--:> tyvar Z ix0
         :--:> ReturnT (tyvar Z ix0)
-  ChooseList ->
-    comp2 $
-      listT count0 (tyvar (S Z) ix0)
-        :--:> tyvar Z ix1
-        :--:> tyvar Z ix1
-        :--:> ReturnT (tyvar Z ix1)
-  CaseList ->
-    comp2 $
-      tyvar Z ix1
-        :--:> ThunkT
-          ( comp0 $
-              tyvar (S Z) ix0
-                :--:> listT count0 (tyvar (S (S Z)) ix0)
-                :--:> ReturnT (tyvar (S Z) ix1)
-          )
-        :--:> listT count0 (tyvar (S Z) ix0)
-        :--:> ReturnT (tyvar Z ix1)
   IntegerToByteString ->
     comp0 $
       boolT :--:> integerT :--:> integerT :--:> ReturnT byteStringT
   AndByteString -> bitwiseT
   OrByteString -> bitwiseT
   XorByteString -> bitwiseT
-  WriteBits ->
-    comp0 $
-      byteStringT
-        :--:> listT count0 integerT
-        :--:> boolT
-        :--:> ReturnT byteStringT
   ExpModInteger ->
     comp0 $
       integerT
@@ -475,6 +411,7 @@ typeThreeArgFunc = \case
           :--:> byteStringT
           :--:> ReturnT byteStringT
 
+{-
 -- | All six-argument primitives provided by Plutus.
 --
 -- @since 1.0.0
@@ -496,27 +433,4 @@ data SixArgFunc
 instance Arbitrary SixArgFunc where
   {-# INLINEABLE arbitrary #-}
   arbitrary = elements [ChooseData, CaseData]
-
--- | Produce the type of a six-argument primop.
---
--- @since 1.0.0
-typeSixArgFunc :: SixArgFunc -> CompT AbstractTy
-typeSixArgFunc = \case
-  ChooseData ->
-    comp1 $
-      dataT
-        :--:> tyvar Z ix0
-        :--:> tyvar Z ix0
-        :--:> tyvar Z ix0
-        :--:> tyvar Z ix0
-        :--:> tyvar Z ix0
-        :--:> ReturnT (tyvar Z ix0)
-  CaseData ->
-    comp1 $
-      ThunkT (comp0 $ integerT :--:> listT count0 dataT :--:> ReturnT (tyvar (S Z) ix0))
-        :--:> ThunkT (comp0 $ listT count0 (dataT -*- dataT) :--:> ReturnT (tyvar (S Z) ix0))
-        :--:> ThunkT (comp0 $ listT count0 dataT :--:> ReturnT (tyvar (S Z) ix0))
-        :--:> ThunkT (comp0 $ integerT :--:> ReturnT (tyvar (S Z) ix0))
-        :--:> ThunkT (comp0 $ byteStringT :--:> ReturnT (tyvar (S Z) ix0))
-        :--:> dataT
-        :--:> ReturnT (tyvar Z ix0)
+-}
