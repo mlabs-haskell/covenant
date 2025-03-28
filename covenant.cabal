@@ -20,7 +20,7 @@ extra-source-files:
 -- Common sections
 common lang
   ghc-options:
-    -Wall
+    -- -Wall
     -Wcompat
     -Wredundant-bang-patterns
     -Wredundant-strictness-flags
@@ -28,8 +28,8 @@ common lang
     -Woperator-whitespace
     -Wambiguous-fields
     -Wmisplaced-pragmas
-    -Wmissing-export-lists
-    -Wmissing-import-lists
+    --  -Wmissing-export-lists
+    -- -Wmissing-import-lists
 
   default-extensions:
     BangPatterns
@@ -95,6 +95,7 @@ library
     Covenant.DeBruijn
     Covenant.Index
     Covenant.Ledger
+    Covenant.Pretty
     Covenant.Prim
     Covenant.Test
     Covenant.Type
@@ -117,6 +118,8 @@ library
     optics-core ==0.4.1.1,
     optics-extra ==0.4.2.1,
     optics-th ==0.4.1,
+    -- TODO: Version bounds
+    prettyprinter,
     quickcheck-instances ==0.3.32,
     quickcheck-transformer ==0.3.1.2,
     text >=2.1.1 && <2.2,
