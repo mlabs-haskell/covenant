@@ -172,7 +172,8 @@ emptyScope = Scope Vector.empty Vector.empty
 lit ::
   forall (m :: Type -> Type).
   (MonadHashCons Id ASGNode m, MonadError ASGCompileError m) =>
-  AConstant -> m Id
+  AConstant ->
+  m Id
 lit c = do
   ty <- liftTypeError (typeLit c)
   refTo (LitInternal ty c)
@@ -183,7 +184,8 @@ lit c = do
 prim ::
   forall (m :: Type -> Type).
   (MonadHashCons Id ASGNode m, MonadError ASGCompileError m) =>
-  PrimCall -> m Id
+  PrimCall ->
+  m Id
 prim p = do
   ty <- typePrim p
   refTo (PrimInternal ty p)
@@ -196,7 +198,9 @@ prim p = do
 app ::
   forall (m :: Type -> Type).
   (MonadHashCons Id ASGNode m, MonadError ASGCompileError m) =>
-  Ref -> Ref -> m Id
+  Ref ->
+  Ref ->
+  m Id
 app f x = do
   tyFun <- typeOfRef f
   tyArg <- typeOfRef f
@@ -325,7 +329,8 @@ pushLetToScope ty (Scope args lets) =
 
 liftTypeError ::
   (MonadError ASGCompileError m) =>
-  Either TypeError a -> m a
+  Either TypeError a ->
+  m a
 liftTypeError = liftEither . mapLeft ATypeError
   where
     mapLeft :: (a -> c) -> Either a b -> Either c b
@@ -364,7 +369,8 @@ typeApp tyFun tyArg = case tyFun of
 typePrim ::
   forall (m :: Type -> Type).
   (MonadHashCons Id ASGNode m, MonadError ASGCompileError m) =>
-  PrimCall -> m TyASGNode
+  PrimCall ->
+  m TyASGNode
 typePrim p = case p of
   (PrimCallOne fun arg1) -> do
     ty <- typeOfRef arg1

@@ -80,7 +80,9 @@ prop6Rename = mkRenameProp typeSixArgFunc
 mkArgProp ::
   forall (a :: Type).
   (Show a, Arbitrary a) =>
-  (a -> CompT AbstractTy) -> Int -> Property
+  (a -> CompT AbstractTy) ->
+  Int ->
+  Property
 mkArgProp typingFun targetArity = forAll arbitrary $ \f ->
   let t = typingFun f
    in arity t === targetArity
@@ -88,7 +90,8 @@ mkArgProp typingFun targetArity = forAll arbitrary $ \f ->
 mkRenameProp ::
   forall (a :: Type).
   (Show a, Arbitrary a) =>
-  (a -> CompT AbstractTy) -> Property
+  (a -> CompT AbstractTy) ->
+  Property
 mkRenameProp typingFun = forAll arbitrary $ \f ->
   let t = typingFun f
       result = runRenameM . renameCompT $ t
