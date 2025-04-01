@@ -747,19 +747,28 @@ infiniteVars =
 boundIdents :: forall (ann :: Type). Lens' (PrettyContext ann) (Map ScopeBoundary [Doc ann])
 boundIdents = lens goGet goSet
   where
+    goGet :: PrettyContext ann -> Map ScopeBoundary [Doc ann]
     goGet (PrettyContext bi _ _) = bi
+
+    goSet :: PrettyContext ann -> Map ScopeBoundary [Doc ann] -> PrettyContext ann
     goSet (PrettyContext _ scop vars) bi' = PrettyContext bi' scop vars
 
 currentScope :: forall (ann :: Type). Lens' (PrettyContext ann) ScopeBoundary
 currentScope = lens goGet goSet
   where
+    goGet :: PrettyContext ann -> ScopeBoundary
     goGet (PrettyContext _ scop _) = scop
+
+    goSet :: PrettyContext ann -> ScopeBoundary -> PrettyContext ann
     goSet (PrettyContext bi _ vars) scop = PrettyContext bi scop vars
 
 varStream :: forall (ann :: Type). Lens' (PrettyContext ann) [Doc ann]
 varStream = lens goGet goSet
   where
+    goGet :: PrettyContext ann -> [Doc ann]
     goGet (PrettyContext _ _ vars) = vars
+
+    goSet :: PrettyContext ann -> [Doc ann] -> PrettyContext ann
     goSet (PrettyContext bi scop _) = PrettyContext bi scop
 
 -- Generate N fresh var names and use the supplied monadic function to do something with them.
@@ -776,8 +785,6 @@ newtype PrettyM (ann :: Type) (a :: Type) = PrettyM (Reader (PrettyContext ann) 
 runPrettyM :: forall (ann :: Type) (a :: Type). PrettyM ann a -> a
 runPrettyM (PrettyM ma) = runReader ma (PrettyContext mempty 0 infiniteVars)
 
--- REVIEW @Koz: You said we always consider a boundary crossed even if the count is zero,
---              but when I do that it blows up lists? I think I have to be misunderstanding something
 bindVars :: forall (ann :: Type) (a :: Type). Count "tyvar" -> ([Doc ann] -> PrettyM ann a) -> PrettyM ann a
 bindVars count' act
   | count == 0 = crossBoundary (act [])
