@@ -65,8 +65,8 @@ import Test.Tasty.QuickCheck (QuickCheckTests, testProperty)
 main :: IO ()
 main =
   defaultMain . adjustOption moreTests . testGroup "Type application" $
-    [ testProperty "Too many arguments to HeadList" propTooManyArgs,
-      testCase "HeadList on no arguments" unitInsufficientArgs,
+    [ testProperty "Too many arguments to id" propTooManyArgs,
+      testCase "id on no arguments" unitInsufficientArgs,
       testGroup
         "Substitution"
         [ testProperty "id applied to concrete" propIdConcrete,

@@ -29,7 +29,7 @@ import Covenant.Prim
         BLS12_381_G2_compress,
         BLS12_381_G2_neg,
         BLS12_381_G2_uncompress,
-        Blake2b_244,
+        Blake2b_224,
         Blake2b_256,
         ComplementByteString,
         CountSetBits,
@@ -150,7 +150,7 @@ typeOfOneArgFunc =
     BLS12_381_G2_compress -> (TyBLS12_381G2Element, TyByteString)
     BLS12_381_G2_uncompress -> (TyByteString, TyBLS12_381G2Element)
     Keccak_256 -> (TyByteString, TyByteString)
-    Blake2b_244 -> (TyByteString, TyByteString) -- TODO: Fix typo in Prim.hs to Blake2b_224
+    Blake2b_224 -> (TyByteString, TyByteString)
     ComplementByteString -> (TyByteString, TyByteString)
     CountSetBits -> (TyByteString, TyInteger)
     FindFirstSetBit -> (TyByteString, TyInteger)

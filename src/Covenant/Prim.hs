@@ -91,7 +91,7 @@ data OneArgFunc
   | BLS12_381_G2_compress
   | BLS12_381_G2_uncompress
   | Keccak_256
-  | Blake2b_244
+  | Blake2b_224
   | ComplementByteString
   | CountSetBits
   | FindFirstSetBit
@@ -140,7 +140,7 @@ instance Arbitrary OneArgFunc where
         BLS12_381_G2_compress,
         BLS12_381_G2_uncompress,
         Keccak_256,
-        Blake2b_244,
+        Blake2b_224,
         ComplementByteString,
         CountSetBits,
         FindFirstSetBit,
@@ -165,7 +165,7 @@ typeOneArgFunc = \case
   BLS12_381_G2_compress -> comp0 $ g2T :--:> ReturnT byteStringT
   BLS12_381_G2_uncompress -> comp0 $ byteStringT :--:> ReturnT g2T
   Keccak_256 -> hashingT
-  Blake2b_244 -> hashingT
+  Blake2b_224 -> hashingT
   ComplementByteString -> comp0 $ byteStringT :--:> ReturnT byteStringT
   CountSetBits -> comp0 $ byteStringT :--:> ReturnT integerT
   FindFirstSetBit -> comp0 $ byteStringT :--:> ReturnT integerT
