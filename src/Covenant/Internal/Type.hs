@@ -183,9 +183,10 @@ newtype ScopeBoundary = ScopeBoundary Int
 
 data PrettyContext (ann :: Type)
   = PrettyContext
-      (Map ScopeBoundary (Vector (Doc ann)))
-      ScopeBoundary
-      [Doc ann]
+  { _boundIdents :: Map ScopeBoundary (Vector (Doc ann)),
+    _currentScope :: ScopeBoundary,
+    _varStream :: [Doc ann]
+  }
 
 instance
   (k ~ A_Lens, a ~ Map ScopeBoundary (Vector (Doc ann)), b ~ Map ScopeBoundary (Vector (Doc ann))) =>
