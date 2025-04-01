@@ -36,6 +36,7 @@ where
 
 import Control.Monad (foldM, unless)
 import Control.Monad.Except (ExceptT, MonadError (throwError), catchError, runExceptT)
+import Control.Monad.Reader (MonadReader, Reader, asks, local, runReader)
 import Control.Monad.State.Strict (State, evalState, gets, modify)
 import Covenant.DeBruijn (DeBruijn, asInt)
 import Covenant.Index
@@ -54,6 +55,7 @@ import Data.Foldable (foldl')
 #endif
 import Data.Functor.Classes (Eq1 (liftEq))
 import Data.Kind (Type)
+import Data.List.NonEmpty (NonEmpty ((:|)))
 import Data.Map.Merge.Strict qualified as Merge
 import Data.Map.Strict (Map)
 import Data.Map.Strict qualified as Map
@@ -71,10 +73,18 @@ import Optics.AffineFold (preview)
 import Optics.At (ix)
 import Optics.Getter (to, view)
 import Optics.Label (LabelOptic (labelOptic))
-import Optics.Lens (A_Lens, lens)
+import Optics.Lens (A_Lens, Lens', lens)
 import Optics.Optic ((%))
 import Optics.Review (review)
 import Optics.Setter (over, set)
+import Prettyprinter
+  ( Doc,
+    Pretty (pretty),
+    hsep,
+    parens,
+    viaShow,
+    (<+>),
+  )
 
 -- | A type abstraction, using a combination of a DeBruijn index (to indicate
 -- which scope it refers to) and a positional index (to indicate which bound
@@ -149,6 +159,9 @@ instance Eq1 CompT where
   {-# INLINEABLE liftEq #-}
   liftEq f (CompT abses1 xs) (CompT abses2 ys) =
     abses1 == abses2 && liftEq (liftEq f) xs ys
+
+instance Pretty (CompT Renamed) where
+  pretty = runPrettyM . prettyCompTWithContext
 
 -- | Helper for defining the \'bodies\' of computation types, without having to
 -- use 'NonEmptyVector' functions.
@@ -458,7 +471,8 @@ newtype RenameM (a :: Type)
 -- @since 1.0.0
 runRenameM ::
   forall (a :: Type).
-  RenameM a -> Either RenameError a
+  RenameM a ->
+  Either RenameError a
 runRenameM (RenameM comp) = evalState (runExceptT comp) . RenameState 0 $ Vector.empty
 
 -- | Rename a computation type.
@@ -601,7 +615,8 @@ promoteUnificationError topLevelExpected topLevelActual =
 
 returnHelper ::
   forall (a :: Type).
-  NonEmptyVector (ValT a) -> Maybe (ValT a)
+  NonEmptyVector (ValT a) ->
+  Maybe (ValT a)
 returnHelper xs = case NonEmpty.uncons xs of
   (y, ys) ->
     if Vector.length ys == 0
@@ -706,3 +721,142 @@ substitute index toSub = \case
   ThunkT (CompT abstractions xs) ->
     ThunkT . CompT abstractions . fmap (substitute index toSub) $ xs
   BuiltinFlat t -> BuiltinFlat t
+
+-- Pretty printing stuff, somewhat awkward to put it here but doing so avoids orphan instances
+
+-- Keeping the field names for clarify even if we don't use them
+newtype ScopeBoundary = ScopeBoundary {_getBoundary :: Int}
+  deriving newtype (Show, Eq, Ord, Num, Enum)
+
+data PrettyContext (ann :: Type)
+  = PrettyContext
+  { _pcBoundIdents :: Map ScopeBoundary [Doc ann],
+    _pcCurrentScope :: ScopeBoundary,
+    _pcVarStream :: [Doc ann]
+  }
+
+-- Lazily generated infinite list of variables. Will start with a, b, c... and cycle around to a1, b2, c3 etc.
+-- We could do something more sophisticated but this should work.
+infiniteVars :: forall (ann :: Type). [Doc ann]
+infiniteVars =
+  let aToZ = ['a' .. 'z']
+      intStrings = ("" <$ aToZ) <> map (show @Integer) [0 ..]
+   in zipWith (\x xs -> pretty (x : xs)) aToZ intStrings
+
+-- optics, for convenience. Manually defined b/c TH splices tend to blow up HLS
+boundIdents :: forall (ann :: Type). Lens' (PrettyContext ann) (Map ScopeBoundary [Doc ann])
+boundIdents = lens goGet goSet
+  where
+    goGet :: PrettyContext ann -> Map ScopeBoundary [Doc ann]
+    goGet (PrettyContext bi _ _) = bi
+
+    goSet :: PrettyContext ann -> Map ScopeBoundary [Doc ann] -> PrettyContext ann
+    goSet (PrettyContext _ scop vars) bi' = PrettyContext bi' scop vars
+
+currentScope :: forall (ann :: Type). Lens' (PrettyContext ann) ScopeBoundary
+currentScope = lens goGet goSet
+  where
+    goGet :: PrettyContext ann -> ScopeBoundary
+    goGet (PrettyContext _ scop _) = scop
+
+    goSet :: PrettyContext ann -> ScopeBoundary -> PrettyContext ann
+    goSet (PrettyContext bi _ vars) scop = PrettyContext bi scop vars
+
+varStream :: forall (ann :: Type). Lens' (PrettyContext ann) [Doc ann]
+varStream = lens goGet goSet
+  where
+    goGet :: PrettyContext ann -> [Doc ann]
+    goGet (PrettyContext _ _ vars) = vars
+
+    goSet :: PrettyContext ann -> [Doc ann] -> PrettyContext ann
+    goSet (PrettyContext bi scop _) = PrettyContext bi scop
+
+-- Generate N fresh var names and use the supplied monadic function to do something with them.
+withFreshVarNames :: forall (ann :: Type) (a :: Type). Int -> ([Doc ann] -> PrettyM ann a) -> PrettyM ann a
+withFreshVarNames n act = do
+  stream <- asks (view varStream)
+  let (used, rest) = splitAt n stream
+  local (set varStream rest) $ act used
+
+-- Maybe make a newtype with error reporting since this can fail, but do later since *should't* fail
+newtype PrettyM (ann :: Type) (a :: Type) = PrettyM (Reader (PrettyContext ann) a)
+  deriving newtype (Functor, Applicative, Monad, MonadReader (PrettyContext ann))
+
+runPrettyM :: forall (ann :: Type) (a :: Type). PrettyM ann a -> a
+runPrettyM (PrettyM ma) = runReader ma (PrettyContext mempty 0 infiniteVars)
+
+bindVars :: forall (ann :: Type) (a :: Type). Count "tyvar" -> ([Doc ann] -> PrettyM ann a) -> PrettyM ann a
+bindVars count' act
+  | count == 0 = crossBoundary (act [])
+  | otherwise = crossBoundary $ do
+      here <- asks (view currentScope)
+      withFreshVarNames count $ \newBoundVars ->
+        local (over boundIdents (Map.insert here newBoundVars)) (act newBoundVars)
+  where
+    -- Increment the current scope
+    crossBoundary :: PrettyM ann a -> PrettyM ann a
+    crossBoundary = local (over currentScope (+ 1))
+
+    count :: Int
+    count = review intCount count'
+
+-- Bad name, but anyway, looks up the Doc for a pretty
+lookupRigid :: forall (ann :: Type). Int -> Index "tyvar" -> PrettyM ann (Doc ann)
+lookupRigid (ScopeBoundary -> scopeOffset) argIndex = do
+  let argIndex' = review intIndex argIndex
+  here <- asks (view currentScope)
+  asks (preview (boundIdents % ix (here + scopeOffset) % ix argIndex')) >>= \case
+    Nothing ->
+      -- TODO: actual error reporting
+      error $
+        "Internal error: The encountered a variable at arg index "
+          <> show argIndex'
+          <> " with true level "
+          <> show scopeOffset
+          <> " but could not locate the corresponding pretty form at scope level "
+          <> show here
+    Just res' -> pure res'
+
+prettyRenamedWithContext :: forall (ann :: Type). Renamed -> PrettyM ann (Doc ann)
+prettyRenamedWithContext = \case
+  Rigid offset index -> lookupRigid offset index
+  Unifiable i -> lookupRigid 0 i -- ok maybe 'lookupRigid' isn't the best name
+  Wildcard w64 i -> pure $ "_" <> viaShow w64 <> "#" <> pretty (review intIndex i)
+
+prettyCompTWithContext :: forall (ann :: Type). CompT Renamed -> PrettyM ann (Doc ann)
+prettyCompTWithContext (CompT count funArgs)
+  | review intCount count == 0 = prettyFunTy (NonEmpty.toNonEmpty funArgs)
+  | otherwise = bindVars count $ \newVars -> do
+      funTy <- prettyFunTy (NonEmpty.toNonEmpty funArgs) -- easier to pattern match
+      pure $ mkForall newVars funTy
+
+mkForall :: forall (ann :: Type). [Doc ann] -> Doc ann -> Doc ann
+mkForall tvars funTyBody = case tvars of
+  [] -> funTyBody
+  vars -> "forall" <+> hsep vars <> "." <+> funTyBody
+
+prettyFunTy :: forall (ann :: Type). NonEmpty (ValT Renamed) -> PrettyM ann (Doc ann)
+prettyFunTy (arg :| rest) = case rest of
+  [] -> ("!" <>) <$> prettyArg arg
+  (a : as) -> (\x y -> x <+> "->" <+> y) <$> prettyArg arg <*> prettyFunTy (a :| as)
+  where
+    prettyArg :: ValT Renamed -> PrettyM ann (Doc ann)
+    prettyArg vt
+      | isSimpleValT vt = prettyValTWithContext vt
+      | otherwise = parens <$> prettyValTWithContext vt
+
+-- I.e. can we omit parens and get something unambiguous? This might be overly aggressive w/ parens but that's OK
+isSimpleValT :: forall (a :: Type). ValT a -> Bool
+isSimpleValT = \case
+  Abstraction _ -> True
+  BuiltinFlat _ -> True
+  ThunkT thunk -> isSimpleCompT thunk
+  where
+    isSimpleCompT :: CompT a -> Bool
+    isSimpleCompT (CompT count args) = review intCount count == 0 && NonEmpty.length args == 1
+
+prettyValTWithContext :: forall (ann :: Type). ValT Renamed -> PrettyM ann (Doc ann)
+prettyValTWithContext = \case
+  Abstraction abstr -> prettyRenamedWithContext abstr
+  ThunkT compT -> prettyCompTWithContext compT
+  BuiltinFlat biFlat -> pure $ viaShow biFlat

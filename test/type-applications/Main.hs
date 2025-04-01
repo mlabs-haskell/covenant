@@ -350,7 +350,9 @@ const2T = comp2 $ tyvar Z ix0 :--:> tyvar Z ix1 :--:> ReturnT (tyvar Z ix0)
 
 failLeft ::
   forall (a :: Type) (b :: Type).
-  (Show a) => Either a b -> IO b
+  (Show a) =>
+  Either a b ->
+  IO b
 failLeft = either (assertFailure . show) pure
 
 withRenamedComp ::
