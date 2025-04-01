@@ -8,7 +8,6 @@ module Covenant.Type
     CompT (..),
     ValT (..),
     BuiltinFlatT (..),
-    BuiltinNestedT (..),
     RenameError (..),
     renameValT,
     renameCompT,
@@ -22,11 +21,8 @@ module Covenant.Type
     byteStringT,
     integerT,
     stringT,
-    (-*-),
     tyvar,
-    listT,
     boolT,
-    dataT,
     g1T,
     g2T,
     mlResultT,
@@ -230,8 +226,6 @@ data ValT (a :: Type)
     ThunkT (CompT a)
   | -- | A builtin type without any nesting.
     BuiltinFlat BuiltinFlatT
-  | -- | A builtin type which is \'nested\'; something like lists, pairs etc.
-    BuiltinNested (BuiltinNestedT a)
   deriving stock
     ( -- | @since 1.0.0
       Eq,
@@ -252,9 +246,6 @@ instance Eq1 ValT where
       _ -> False
     BuiltinFlat t1 -> \case
       BuiltinFlat t2 -> t1 == t2
-      _ -> False
-    BuiltinNested t1 -> \case
-      BuiltinNested t2 -> liftEq f t1 t2
       _ -> False
 
 -- | Helper for defining type variables.
@@ -305,12 +296,6 @@ g2T = BuiltinFlat BLS12_381_G2_ElementT
 mlResultT :: forall (a :: Type). ValT a
 mlResultT = BuiltinFlat BLS12_381_MlResultT
 
--- | Helper for defining the value type of Plutus @Data@.
---
--- @since 1.0.0
-dataT :: forall (a :: Type). ValT a
-dataT = BuiltinFlat DataT
-
 -- | Helper for defining the value type of the builtin unit type.
 --
 -- @since 1.0.0
@@ -328,63 +313,12 @@ data BuiltinFlatT
   | BLS12_381_G1_ElementT
   | BLS12_381_G2_ElementT
   | BLS12_381_MlResultT
-  | DataT
   deriving stock
     ( -- | @since 1.0.0
       Eq,
       -- | @since 1.0.0
       Show
     )
-
--- | Builtin types which have \'nested\' types. These are lists and pairs only.
---
--- = Important note
---
--- The 'ListT' \'arm\' of this type has a \'type abstraction boundary\', similar
--- to that of 'CompT'.
---
--- While they may appear as such, these types aren't \'truly polymorphic\' (as
--- they cannot hold thunks, for example). We define these as such as this is
--- needed to type primops.
---
--- @since 1.0.0
-data BuiltinNestedT (a :: Type)
-  = ListT (Count "tyvar") (ValT a)
-  | PairT (ValT a) (ValT a)
-  deriving stock
-    ( -- | @since 1.0.0
-      Eq,
-      -- | @since 1.0.0
-      Show
-    )
-
--- | Helper for constructing builtin pair types. These are assumed to not be
--- polymorphic: that is, their two argument 'ValT's refer to scopes outside of
--- the one that 'PairT' normally establishes.
---
--- @since 1.0.0
-(-*-) :: forall (a :: Type). ValT a -> ValT a -> ValT a
-t1 -*- t2 = BuiltinNested . PairT t1 $ t2
-
-infixr 1 -*-
-
--- | Helper for constructing builtin list types.
---
--- @since 1.0.0
-listT :: forall (a :: Type). Count "tyvar" -> ValT a -> ValT a
-listT c = BuiltinNested . ListT c
-
--- Note (Koz, 04/03/2025): We use this for testing to compare for structural
--- similarity.
-instance Eq1 BuiltinNestedT where
-  {-# INLINEABLE liftEq #-}
-  liftEq f = \case
-    ListT abses1 t1 -> \case
-      ListT abses2 t2 -> abses1 == abses2 && liftEq f t1 t2
-      _ -> False
-    PairT t11 t12 -> \case
-      PairT t21 t22 -> liftEq f t11 t21 && liftEq f t12 t22
-      _ -> False
 
 -- Used during renaming. Contains a source of fresh indices for wildcards, as
 -- well as tracking:
@@ -573,31 +507,6 @@ renameAbstraction (BoundAt scope index) = RenameM $ do
             -- This is a wildcard variable
             else Wildcard uniqueScopeId index
 
--- | Rename a nested type.
---
--- @since 1.0.0
-renameNestedT :: BuiltinNestedT AbstractTy -> RenameM (BuiltinNestedT Renamed)
-renameNestedT =
-  RenameM . \case
-    ListT abstractions t -> do
-      -- Step up a scope
-      modify (stepUpScope abstractions)
-      -- Rename the inner type
-      renamed <- coerce . renameValT $ t
-      -- Check that we don't have anything irrelevant
-      ourAbstractions <- gets (view (#tracker % to Vector.head % _1))
-      unless (Vector.and ourAbstractions) (throwError IrrelevantAbstraction)
-      -- Roll back state
-      modify dropDownScope
-      -- Rebuild and return
-      pure . ListT abstractions $ renamed
-    PairT t1 t2 -> do
-      -- Rename both 'sides' without any scope changes
-      renamed1 <- coerce . renameValT $ t1
-      renamed2 <- coerce . renameValT $ t2
-      -- Rebuild and return
-      pure . PairT renamed1 $ renamed2
-
 -- | Rename a value type.
 --
 -- @since 1.0.0
@@ -606,7 +515,6 @@ renameValT = \case
   Abstraction t -> Abstraction <$> renameAbstraction t
   ThunkT t -> ThunkT <$> renameCompT t
   BuiltinFlat t -> pure . BuiltinFlat $ t
-  BuiltinNested t -> BuiltinNested <$> renameNestedT t
 
 -- | @since 1.0.0
 data TypeAppError
@@ -654,16 +562,6 @@ checkApp (CompT _ xs) =
             let renames = zipWith (\i replacement -> (i, Abstraction . Unifiable $ replacement)) (Set.toList remainingUnifiables) indexesToUse
             let fixed = fmap (\t -> foldl' (\acc (i, r) -> substitute i r acc) t renames) xs'
             pure . ThunkT . CompT asCount $ fixed
-          BuiltinNested (ListT _ t) -> do
-            let remainingUnifiables = collectUnifiables t
-            let requiredIntroductions = Set.size remainingUnifiables
-            -- We know that the size of a set cannot be negative, but GHC
-            -- doesn't.
-            let asCount = fromJust . preview intCount $ requiredIntroductions
-            let indexesToUse = mapMaybe (preview intIndex) [0, 1 .. requiredIntroductions - 1]
-            let renames = zipWith (\i replacement -> (i, Abstraction . Unifiable $ replacement)) (Set.toList remainingUnifiables) indexesToUse
-            let fixed = foldl' (\acc (i, r) -> substitute i r acc) t renames
-            pure . BuiltinNested . ListT asCount $ fixed
           _ -> pure currParam
         _ -> throwError . ExcessArgs . Vector.fromList $ args
       _ -> case args of
@@ -682,9 +580,6 @@ collectUnifiables = \case
     Unifiable index -> Set.singleton index
     _ -> Set.empty
   BuiltinFlat _ -> Set.empty
-  BuiltinNested t -> case t of
-    ListT _ t' -> collectUnifiables t'
-    PairT t1 t2 -> collectUnifiables t1 <> collectUnifiables t2
   ThunkT (CompT _ xs) -> NonEmpty.foldl' (\acc t -> acc <> collectUnifiables t) Set.empty xs
 
 -- Because unification is inherently recursive, if we find an error deep within
@@ -727,9 +622,6 @@ unify expected actual =
           Wildcard scopeId1 index1 -> expectWildcard scopeId1 index1
         ThunkT t1 -> expectThunk t1
         BuiltinFlat t1 -> expectFlatBuiltin t1
-        BuiltinNested t1 -> case t1 of
-          ListT _ t1' -> expectListOf t1'
-          PairT t11 t12 -> expectPairOf t11 t12
     )
     (promoteUnificationError expected actual)
   where
@@ -786,32 +678,6 @@ unify expected actual =
           then noSubUnify
           else unificationError
       _ -> unificationError
-    -- Lists can unify unconditionally with wildcards or unifiables. They can
-    -- unify with other lists as long as their type parameters unify too.
-    -- Substitutions may be required if the type parameter is a unifiable.
-    expectListOf :: ValT Renamed -> Either TypeAppError (Map (Index "tyvar") (ValT Renamed))
-    expectListOf tyParam = case actual of
-      Abstraction (Rigid _ _) -> unificationError
-      Abstraction _ -> noSubUnify
-      BuiltinNested (ListT _ t2') ->
-        catchError (unify tyParam t2') (promoteUnificationError expected actual)
-      _ -> unificationError
-    -- Pairs can unify unconditionally with wildcards or unifiables. They can
-    -- unify with other pairs as long as each type parameter unifies with its
-    -- counterpart without conflicts. Substitutions may be required if one or
-    -- both type parameters are themselves unifiables.
-    expectPairOf ::
-      ValT Renamed -> ValT Renamed -> Either TypeAppError (Map (Index "tyvar") (ValT Renamed))
-    expectPairOf tyParam1 tyParam2 = case actual of
-      Abstraction (Rigid _ _) -> unificationError
-      Abstraction _ -> noSubUnify
-      BuiltinNested t2 -> case t2 of
-        PairT t21 t22 -> do
-          firstUnification <- catchError (unify tyParam1 t21) (promoteUnificationError expected actual)
-          catchError (unify tyParam2 t22) (promoteUnificationError expected actual)
-            >>= \res -> reconcile firstUnification res
-        _ -> unificationError
-      _ -> unificationError
     reconcile ::
       Map (Index "tyvar") (ValT Renamed) ->
       Map (Index "tyvar") (ValT Renamed) ->
@@ -840,6 +706,3 @@ substitute index toSub = \case
   ThunkT (CompT abstractions xs) ->
     ThunkT . CompT abstractions . fmap (substitute index toSub) $ xs
   BuiltinFlat t -> BuiltinFlat t
-  BuiltinNested t -> BuiltinNested $ case t of
-    ListT abstractions t' -> ListT abstractions . substitute index toSub $ t'
-    PairT t1 t2 -> PairT (substitute index toSub t1) (substitute index toSub t2)
