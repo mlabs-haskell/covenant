@@ -103,6 +103,7 @@ library
     Covenant.Internal.ASG
     Covenant.Internal.ASGNode
     Covenant.Internal.PrimType
+    Covenant.Internal.Rename
     Covenant.Internal.TyExpr
     Covenant.Internal.Type
 
