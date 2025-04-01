@@ -20,7 +20,7 @@ extra-source-files:
 -- Common sections
 common lang
   ghc-options:
-    -- -Wall
+    -Wall
     -Wcompat
     -Wredundant-bang-patterns
     -Wredundant-strictness-flags
@@ -28,8 +28,8 @@ common lang
     -Woperator-whitespace
     -Wambiguous-fields
     -Wmisplaced-pragmas
-    --  -Wmissing-export-lists
-    -- -Wmissing-import-lists
+    -Wmissing-export-lists
+    -Wmissing-import-lists
 
   default-extensions:
     BangPatterns
@@ -95,7 +95,6 @@ library
     Covenant.DeBruijn
     Covenant.Index
     Covenant.Ledger
-    Covenant.Pretty
     Covenant.Prim
     Covenant.Test
     Covenant.Type
