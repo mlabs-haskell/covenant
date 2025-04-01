@@ -104,6 +104,7 @@ library
     Covenant.Internal.ASGNode
     Covenant.Internal.PrimType
     Covenant.Internal.TyExpr
+    Covenant.Internal.Type
 
   build-depends:
     QuickCheck ==2.15.0.1,
