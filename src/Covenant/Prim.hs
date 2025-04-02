@@ -1,5 +1,3 @@
-{-# LANGUAGE PatternSynonyms #-}
-
 -- |
 -- Module: Covenant.Prim
 -- Copyright: (C) MLabs 2025
@@ -23,15 +21,14 @@ module Covenant.Prim
 where
 
 import Covenant.DeBruijn (DeBruijn (Z))
-import Covenant.Index (count0, ix0)
+import Covenant.Index (ix0)
 import Covenant.Type
   ( AbstractTy,
-    CompT (CompT),
+    CompT (Comp0, Comp1),
+    CompTInternal (ReturnT, (:--:>)),
     ValT,
     boolT,
     byteStringT,
-    comp0,
-    comp1,
     g1T,
     g2T,
     integerT,
@@ -39,8 +36,6 @@ import Covenant.Type
     stringT,
     tyvar,
     unitT,
-    pattern ReturnT,
-    pattern (:--:>),
   )
 import Test.QuickCheck (Arbitrary (arbitrary), elements)
 
@@ -152,27 +147,27 @@ instance Arbitrary OneArgFunc where
 -- @since 1.0.0
 typeOneArgFunc :: OneArgFunc -> CompT AbstractTy
 typeOneArgFunc = \case
-  LengthOfByteString -> comp0 $ byteStringT :--:> ReturnT integerT
+  LengthOfByteString -> Comp0 $ byteStringT :--:> ReturnT integerT
   Sha2_256 -> hashingT
   Sha3_256 -> hashingT
   Blake2b_256 -> hashingT
-  EncodeUtf8 -> comp0 $ stringT :--:> ReturnT byteStringT
-  DecodeUtf8 -> comp0 $ byteStringT :--:> ReturnT stringT
-  BLS12_381_G1_neg -> comp0 $ g1T :--:> ReturnT g1T
-  BLS12_381_G1_compress -> comp0 $ g1T :--:> ReturnT byteStringT
-  BLS12_381_G1_uncompress -> comp0 $ byteStringT :--:> ReturnT g1T
-  BLS12_381_G2_neg -> comp0 $ g2T :--:> ReturnT g2T
-  BLS12_381_G2_compress -> comp0 $ g2T :--:> ReturnT byteStringT
-  BLS12_381_G2_uncompress -> comp0 $ byteStringT :--:> ReturnT g2T
+  EncodeUtf8 -> Comp0 $ stringT :--:> ReturnT byteStringT
+  DecodeUtf8 -> Comp0 $ byteStringT :--:> ReturnT stringT
+  BLS12_381_G1_neg -> Comp0 $ g1T :--:> ReturnT g1T
+  BLS12_381_G1_compress -> Comp0 $ g1T :--:> ReturnT byteStringT
+  BLS12_381_G1_uncompress -> Comp0 $ byteStringT :--:> ReturnT g1T
+  BLS12_381_G2_neg -> Comp0 $ g2T :--:> ReturnT g2T
+  BLS12_381_G2_compress -> Comp0 $ g2T :--:> ReturnT byteStringT
+  BLS12_381_G2_uncompress -> Comp0 $ byteStringT :--:> ReturnT g2T
   Keccak_256 -> hashingT
   Blake2b_224 -> hashingT
-  ComplementByteString -> comp0 $ byteStringT :--:> ReturnT byteStringT
-  CountSetBits -> comp0 $ byteStringT :--:> ReturnT integerT
-  FindFirstSetBit -> comp0 $ byteStringT :--:> ReturnT integerT
+  ComplementByteString -> Comp0 $ byteStringT :--:> ReturnT byteStringT
+  CountSetBits -> Comp0 $ byteStringT :--:> ReturnT integerT
+  FindFirstSetBit -> Comp0 $ byteStringT :--:> ReturnT integerT
   Ripemd_160 -> hashingT
   where
     hashingT :: CompT AbstractTy
-    hashingT = CompT count0 $ byteStringT :--:> ReturnT byteStringT
+    hashingT = Comp0 $ byteStringT :--:> ReturnT byteStringT
 
 -- | All two-argument primitives provided by Plutus.
 --
@@ -292,36 +287,36 @@ typeTwoArgFunc = \case
   LessThanInteger -> compareT integerT
   LessThanEqualsInteger -> compareT integerT
   AppendByteString -> combineT byteStringT
-  ConsByteString -> comp0 $ integerT :--:> byteStringT :--:> ReturnT byteStringT
-  IndexByteString -> comp0 $ byteStringT :--:> integerT :--:> ReturnT integerT
+  ConsByteString -> Comp0 $ integerT :--:> byteStringT :--:> ReturnT byteStringT
+  IndexByteString -> Comp0 $ byteStringT :--:> integerT :--:> ReturnT integerT
   EqualsByteString -> compareT byteStringT
   LessThanByteString -> compareT byteStringT
   LessThanEqualsByteString -> compareT byteStringT
   AppendString -> combineT stringT
   EqualsString -> compareT stringT
-  ChooseUnit -> comp1 $ unitT :--:> tyvar Z ix0 :--:> ReturnT (tyvar Z ix0)
-  Trace -> comp1 $ stringT :--:> tyvar Z ix0 :--:> ReturnT (tyvar Z ix0)
+  ChooseUnit -> Comp1 $ unitT :--:> tyvar Z ix0 :--:> ReturnT (tyvar Z ix0)
+  Trace -> Comp1 $ stringT :--:> tyvar Z ix0 :--:> ReturnT (tyvar Z ix0)
   BLS12_381_G1_add -> combineT g1T
-  BLS12_381_G1_scalarMul -> comp0 $ integerT :--:> g1T :--:> ReturnT g1T
+  BLS12_381_G1_scalarMul -> Comp0 $ integerT :--:> g1T :--:> ReturnT g1T
   BLS12_381_G1_equal -> compareT g1T
-  BLS12_381_G1_hashToGroup -> comp0 $ byteStringT :--:> byteStringT :--:> ReturnT g1T
+  BLS12_381_G1_hashToGroup -> Comp0 $ byteStringT :--:> byteStringT :--:> ReturnT g1T
   BLS12_381_G2_add -> combineT g2T
-  BLS12_381_G2_scalarMul -> comp0 $ integerT :--:> g2T :--:> ReturnT g2T
+  BLS12_381_G2_scalarMul -> Comp0 $ integerT :--:> g2T :--:> ReturnT g2T
   BLS12_381_G2_equal -> compareT g2T
-  BLS12_381_G2_hashToGroup -> comp0 $ byteStringT :--:> byteStringT :--:> ReturnT g2T
-  BLS12_381_millerLoop -> comp0 $ g1T :--:> g2T :--:> ReturnT mlResultT
+  BLS12_381_G2_hashToGroup -> Comp0 $ byteStringT :--:> byteStringT :--:> ReturnT g2T
+  BLS12_381_millerLoop -> Comp0 $ g1T :--:> g2T :--:> ReturnT mlResultT
   BLS12_381_mulMlResult -> combineT mlResultT
-  BLS12_381_finalVerify -> comp0 $ mlResultT :--:> mlResultT :--:> ReturnT boolT
-  ByteStringToInteger -> comp0 $ boolT :--:> byteStringT :--:> ReturnT integerT
-  ReadBit -> comp0 $ byteStringT :--:> integerT :--:> ReturnT boolT
-  ReplicateByte -> comp0 $ integerT :--:> integerT :--:> ReturnT byteStringT
-  ShiftByteString -> comp0 $ byteStringT :--:> integerT :--:> ReturnT byteStringT
-  RotateByteString -> comp0 $ byteStringT :--:> integerT :--:> ReturnT byteStringT
+  BLS12_381_finalVerify -> Comp0 $ mlResultT :--:> mlResultT :--:> ReturnT boolT
+  ByteStringToInteger -> Comp0 $ boolT :--:> byteStringT :--:> ReturnT integerT
+  ReadBit -> Comp0 $ byteStringT :--:> integerT :--:> ReturnT boolT
+  ReplicateByte -> Comp0 $ integerT :--:> integerT :--:> ReturnT byteStringT
+  ShiftByteString -> Comp0 $ byteStringT :--:> integerT :--:> ReturnT byteStringT
+  RotateByteString -> Comp0 $ byteStringT :--:> integerT :--:> ReturnT byteStringT
   where
     combineT :: ValT AbstractTy -> CompT AbstractTy
-    combineT t = comp0 $ t :--:> t :--:> ReturnT t
+    combineT t = Comp0 $ t :--:> t :--:> ReturnT t
     compareT :: ValT AbstractTy -> CompT AbstractTy
-    compareT t = comp0 $ t :--:> t :--:> ReturnT boolT
+    compareT t = Comp0 $ t :--:> t :--:> ReturnT boolT
 
 -- | All three-argument primitives provided by Plutus.
 --
@@ -378,19 +373,19 @@ typeThreeArgFunc = \case
   VerifyEcdsaSecp256k1Signature -> signatureT
   VerifySchnorrSecp256k1Signature -> signatureT
   IfThenElse ->
-    comp1 $
+    Comp1 $
       boolT
         :--:> tyvar Z ix0
         :--:> tyvar Z ix0
         :--:> ReturnT (tyvar Z ix0)
   IntegerToByteString ->
-    comp0 $
+    Comp0 $
       boolT :--:> integerT :--:> integerT :--:> ReturnT byteStringT
   AndByteString -> bitwiseT
   OrByteString -> bitwiseT
   XorByteString -> bitwiseT
   ExpModInteger ->
-    comp0 $
+    Comp0 $
       integerT
         :--:> integerT
         :--:> integerT
@@ -398,14 +393,14 @@ typeThreeArgFunc = \case
   where
     signatureT :: CompT AbstractTy
     signatureT =
-      comp0 $
+      Comp0 $
         byteStringT
           :--:> byteStringT
           :--:> byteStringT
           :--:> ReturnT boolT
     bitwiseT :: CompT AbstractTy
     bitwiseT =
-      comp0 $
+      Comp0 $
         boolT
           :--:> byteStringT
           :--:> byteStringT

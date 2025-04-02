@@ -24,6 +24,7 @@ import Covenant.Index (Count, Index, intCount, intIndex)
 import Covenant.Internal.Type
   ( AbstractTy (BoundAt),
     CompT (CompT),
+    CompTInternal (CompTInternal),
     Renamed (Rigid, Unifiable, Wildcard),
     ValT (Abstraction, BuiltinFlat, ThunkT),
   )
@@ -167,7 +168,7 @@ runRenameM (RenameM comp) = evalState (runExceptT comp) . RenameState 0 $ Vector
 --
 -- @since 1.0.0
 renameCompT :: CompT AbstractTy -> RenameM (CompT Renamed)
-renameCompT (CompT abses xs) = RenameM $ do
+renameCompT (CompT abses (CompTInternal xs)) = RenameM $ do
   -- Step up a scope
   modify (stepUpScope abses)
   -- Rename, but only the arguments
@@ -183,7 +184,7 @@ renameCompT (CompT abses xs) = RenameM $ do
   -- Roll back state
   modify dropDownScope
   -- Rebuild and return
-  pure . CompT abses . NonEmpty.snocV renamedArgs $ renamedResult
+  pure . CompT abses . CompTInternal . NonEmpty.snocV renamedArgs $ renamedResult
 
 -- | Rename a value type.
 --

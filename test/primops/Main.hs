@@ -7,14 +7,14 @@ import Covenant.Prim
   )
 import Covenant.Type
   ( AbstractTy (BoundAt),
-    CompT (CompT),
+    CompT,
     Renamed (Unifiable),
+    arity,
     renameCompT,
     runRenameM,
   )
 import Data.Functor.Classes (liftEq)
 import Data.Kind (Type)
-import Data.Vector.NonEmpty qualified as NonEmpty
 import Test.QuickCheck
   ( Arbitrary (arbitrary),
     Property,
@@ -98,9 +98,6 @@ mkRenameProp typingFun = forAll arbitrary $ \f ->
    in case result of
         Left err -> counterexample (show err) False
         Right renamed -> property $ liftEq eqRenamedVar t renamed
-
-arity :: forall (a :: Type). CompT a -> Int
-arity (CompT _ xs) = NonEmpty.length xs - 1
 
 -- In our context, the _only_ variables we have are unifiable. If we see
 -- anything else, we know we've messed up somewhere. Furthermore, the indexes

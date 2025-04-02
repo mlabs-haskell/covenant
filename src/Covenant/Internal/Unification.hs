@@ -16,6 +16,7 @@ import Covenant.Index (Index, intCount, intIndex)
 import Covenant.Internal.Type
   ( BuiltinFlatT,
     CompT (CompT),
+    CompTInternal (CompTInternal),
     Renamed (Rigid, Unifiable, Wildcard),
     ValT (Abstraction, BuiltinFlat, ThunkT),
   )
@@ -54,7 +55,7 @@ data TypeAppError
 
 -- | @since 1.0.0
 checkApp :: CompT Renamed -> [ValT Renamed] -> Either TypeAppError (ValT Renamed)
-checkApp (CompT _ xs) =
+checkApp (CompT _ (CompTInternal xs)) =
   let (curr, rest) = NonEmpty.uncons xs
    in go curr (Vector.toList rest)
   where
@@ -68,7 +69,7 @@ checkApp (CompT _ xs) =
         [] -> case currParam of
           Abstraction (Unifiable index) -> throwError . LeakingUnifiable $ index
           Abstraction (Wildcard scopeId index) -> throwError . LeakingWildcard scopeId $ index
-          ThunkT (CompT _ xs') -> do
+          ThunkT (CompT _ (CompTInternal xs')) -> do
             let remainingUnifiables = NonEmpty.foldl' (\acc t -> acc <> collectUnifiables t) Set.empty xs'
             let requiredIntroductions = Set.size remainingUnifiables
             -- We know that the size of a set cannot be negative, but GHC
@@ -77,7 +78,7 @@ checkApp (CompT _ xs) =
             let indexesToUse = mapMaybe (preview intIndex) [0, 1 .. requiredIntroductions - 1]
             let renames = zipWith (\i replacement -> (i, Abstraction . Unifiable $ replacement)) (Set.toList remainingUnifiables) indexesToUse
             let fixed = fmap (\t -> foldl' (\acc (i, r) -> substitute i r acc) t renames) xs'
-            pure . ThunkT . CompT asCount $ fixed
+            pure . ThunkT . CompT asCount . CompTInternal $ fixed
           _ -> pure currParam
         _ -> throwError . ExcessArgs . Vector.fromList $ args
       _ -> case args of
@@ -96,7 +97,7 @@ collectUnifiables = \case
     Unifiable index -> Set.singleton index
     _ -> Set.empty
   BuiltinFlat _ -> Set.empty
-  ThunkT (CompT _ xs) -> NonEmpty.foldl' (\acc t -> acc <> collectUnifiables t) Set.empty xs
+  ThunkT (CompT _ (CompTInternal xs)) -> NonEmpty.foldl' (\acc t -> acc <> collectUnifiables t) Set.empty xs
 
 substitute :: Index "tyvar" -> ValT Renamed -> ValT Renamed -> ValT Renamed
 substitute index toSub = \case
@@ -106,8 +107,8 @@ substitute index toSub = \case
         then toSub
         else Abstraction t
     _ -> Abstraction t
-  ThunkT (CompT abstractions xs) ->
-    ThunkT . CompT abstractions . fmap (substitute index toSub) $ xs
+  ThunkT (CompT abstractions (CompTInternal xs)) ->
+    ThunkT . CompT abstractions . CompTInternal . fmap (substitute index toSub) $ xs
   BuiltinFlat t -> BuiltinFlat t
 
 unify ::
@@ -159,10 +160,10 @@ unify expected actual =
     -- conditionally with other thunks, provided that we can unify each argument
     -- with its counterpart in the same position, as well as their result types,
     -- without conflicts.
-    expectThunk (CompT _ t1) = case actual of
+    expectThunk (CompT _ (CompTInternal t1)) = case actual of
       Abstraction (Rigid _ _) -> unificationError
       Abstraction _ -> noSubUnify
-      ThunkT (CompT _ t2) -> do
+      ThunkT (CompT _ (CompTInternal t2)) -> do
         unless (comparing NonEmpty.length t1 t2 == EQ) unificationError
         catchError
           (foldM (\acc (l, r) -> unify l r >>= reconcile acc) Map.empty . NonEmpty.zip t1 $ t2)

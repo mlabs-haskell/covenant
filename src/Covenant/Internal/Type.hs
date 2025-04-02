@@ -2,6 +2,7 @@ module Covenant.Internal.Type
   ( AbstractTy (..),
     Renamed (..),
     CompT (..),
+    CompTInternal (..),
     ValT (..),
     BuiltinFlatT (..),
   )
@@ -14,7 +15,12 @@ import Control.Monad.Reader
     runReader,
   )
 import Covenant.DeBruijn (DeBruijn)
-import Covenant.Index (Count, Index, intCount, intIndex)
+import Covenant.Index
+  ( Count,
+    Index,
+    intCount,
+    intIndex,
+  )
 import Data.Functor.Classes (Eq1 (liftEq))
 import Data.Kind (Type)
 import Data.Map.Strict (Map)
@@ -94,6 +100,21 @@ data Renamed
       Show
     )
 
+-- | @since 1.0.0
+newtype CompTInternal (a :: Type) = CompTInternal (NonEmptyVector (ValT a))
+  deriving stock
+    ( -- | @since 1.0.0
+      Eq,
+      -- | @since 1.0.0
+      Show
+    )
+
+-- | @since 1.0.0
+instance Eq1 CompTInternal where
+  {-# INLINEABLE liftEq #-}
+  liftEq f (CompTInternal xs) (CompTInternal ys) =
+    liftEq (liftEq f) xs ys
+
 -- | A computation type, with abstractions indicated by the type argument. In
 -- pretty much any case imaginable, this would be either 'AbstractTy' (in the
 -- ASG), or 'Renamed' (after renaming).
@@ -106,7 +127,7 @@ data Renamed
 -- The /last/ entry in the 'NonEmpty' indicates the return type.
 --
 -- @since 1.0.0
-data CompT (a :: Type) = CompT (Count "tyvar") (NonEmptyVector (ValT a))
+data CompT (a :: Type) = CompT (Count "tyvar") (CompTInternal a)
   deriving stock
     ( -- | @since 1.0.0
       Eq,
@@ -118,7 +139,7 @@ data CompT (a :: Type) = CompT (Count "tyvar") (NonEmptyVector (ValT a))
 instance Eq1 CompT where
   {-# INLINEABLE liftEq #-}
   liftEq f (CompT abses1 xs) (CompT abses2 ys) =
-    abses1 == abses2 && liftEq (liftEq f) xs ys
+    abses1 == abses2 && liftEq f xs ys
 
 -- | @since 1.0.0
 instance Pretty (CompT Renamed) where
@@ -241,7 +262,7 @@ runPrettyM (PrettyM ma) = runReader ma (PrettyContext mempty 0 infiniteVars)
        in zipWith (\x xs -> pretty (x : xs)) aToZ intStrings
 
 prettyCompTWithContext :: forall (ann :: Type). CompT Renamed -> PrettyM ann (Doc ann)
-prettyCompTWithContext (CompT count funArgs)
+prettyCompTWithContext (CompT count (CompTInternal funArgs))
   | review intCount count == 0 = prettyFunTy funArgs
   | otherwise = bindVars count $ \newVars -> do
       funTy <- prettyFunTy funArgs
@@ -301,7 +322,7 @@ isSimpleValT = \case
   _ -> True
   where
     isSimpleCompT :: CompT a -> Bool
-    isSimpleCompT (CompT count args) =
+    isSimpleCompT (CompT count (CompTInternal args)) =
       review intCount count == 0 && NonEmpty.length args == 1
 
 prettyValTWithContext :: forall (ann :: Type). ValT Renamed -> PrettyM ann (Doc ann)
