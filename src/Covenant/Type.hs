@@ -4,7 +4,8 @@
 module Covenant.Type
   ( AbstractTy (..),
     Renamed (..),
-    CompT (..),
+    CompT (Comp0, Comp1, Comp2, Comp3, CompN),
+    CompTBody (ReturnT, (:--:>), ArgsAndResult),
     ValT (..),
     BuiltinFlatT (..),
     RenameError (..),
@@ -12,8 +13,6 @@ module Covenant.Type
     renameCompT,
     RenameM,
     runRenameM,
-    pattern ReturnT,
-    pattern (:--:>),
     TypeAppError (..),
     checkApp,
     arity,
@@ -25,21 +24,20 @@ module Covenant.Type
     g1T,
     g2T,
     mlResultT,
-    comp0,
-    comp1,
-    comp2,
-    comp3,
     unitT,
   )
 where
 
+import Control.Monad (guard)
 import Covenant.DeBruijn (DeBruijn)
 import Covenant.Index
-  ( Index,
+  ( Count,
+    Index,
     count0,
     count1,
     count2,
     count3,
+    intCount,
   )
 import Covenant.Internal.Rename
   ( RenameError
@@ -65,6 +63,7 @@ import Covenant.Internal.Type
         UnitT
       ),
     CompT (CompT),
+    CompTBody (CompTBody),
     Renamed (Rigid, Unifiable, Wildcard),
     ValT (Abstraction, BuiltinFlat, ThunkT),
   )
@@ -78,74 +77,148 @@ import Covenant.Internal.Unification
       ),
     checkApp,
   )
+import Data.Coerce (coerce)
 import Data.Kind (Type)
+import Data.Vector (Vector)
 import Data.Vector qualified as Vector
 import Data.Vector.NonEmpty (NonEmptyVector)
 import Data.Vector.NonEmpty qualified as NonEmpty
+import Optics.Core (preview)
 
--- | Helper for defining the \'bodies\' of computation types, without having to
--- use 'NonEmptyVector' functions.
+-- | The body of a computation type that doesn't take any arguments and produces
+-- the a result of the given value type. Use this just as you would a
+-- data constructor.
+--
+-- = Example
+--
+-- * @'ReturnT' 'integerT'@ is @!Integer@
 --
 -- @since 1.0.0
-pattern ReturnT :: forall (a :: Type). ValT a -> NonEmptyVector (ValT a)
-pattern ReturnT x <- (returnHelper -> Just x)
+pattern ReturnT :: forall (a :: Type). ValT a -> CompTBody a
+pattern ReturnT x <- CompTBody (returnHelper -> Just x)
   where
-    ReturnT x = NonEmpty.singleton x
+    ReturnT x = CompTBody (NonEmpty.singleton x)
 
--- | Helper for defining the \'bodies\' of computation types, without having to
--- use 'NonEmptyVector' for functions. Together with 'ReturnT', we can write:
+-- | Given a type of argument, and the body of another computation type,
+-- construct a copy of the body, adding an extra argument of the argument type.
+-- Use this just as you would a data constructor.
 --
--- @'CompT' count0 ('BuiltinFlat' 'IntT' ':--:>' 'ReturnT' ('BuiltinFlat' 'IntT'))@
+-- = Note
 --
--- instead of:
+-- Together with 'ReturnT', these two patterns provide an exhaustive pattern
+-- match.
 --
--- @'CompT' count0 ('NonEmpty.consV' ('BuiltinFlat' 'IntT') ('Vector.singleton' ('BuiltinFlat' 'IntT')))@
+-- = Example
+--
+-- * @'integerT :--:> ReturnT 'byteStringT'@ is @Integer -> !ByteString@
 --
 -- @since 1.0.0
 pattern (:--:>) ::
   forall (a :: Type).
   ValT a ->
-  NonEmptyVector (ValT a) ->
-  NonEmptyVector (ValT a)
-pattern x :--:> xs <- (NonEmpty.uncons -> traverse NonEmpty.fromVector -> Just (x, xs))
+  CompTBody a ->
+  CompTBody a
+pattern x :--:> xs <- CompTBody (arrowHelper -> Just (x, xs))
   where
-    x :--:> xs = NonEmpty.cons x xs
+    x :--:> xs = CompTBody (NonEmpty.cons x (coerce xs))
 
 infixr 1 :--:>
+
+-- | A view of a computation type as a 'Vector' of its argument types, together
+-- with its result type. Can be used as a data constructor, and is an exhaustive
+-- match.
+--
+-- = Example
+--
+-- * @'ArgsAndResult' ('Vector.fromList' ['integerT', 'integerT']) 'integerT'@
+--   is @Integer -> Integer -> !Integer@
+--
+-- @since 1.0.0
+pattern ArgsAndResult ::
+  forall (a :: Type).
+  Vector (ValT a) ->
+  ValT a ->
+  CompTBody a
+pattern ArgsAndResult args result <- (argsAndResultHelper -> (args, result))
+  where
+    ArgsAndResult args result = CompTBody (NonEmpty.snocV args result)
+
+{-# COMPLETE ArgsAndResult #-}
+
+{-# COMPLETE ReturnT, (:--:>) #-}
 
 -- | Determine the arity of a computation type: that is, how many arguments a
 -- function of this type must be given.
 --
 -- @since 1.0.0
 arity :: forall (a :: Type). CompT a -> Int
-arity (CompT _ xs) = NonEmpty.length xs - 1
+arity (CompT _ (CompTBody xs)) = NonEmpty.length xs - 1
 
--- | Helper for defining computation types that do not bind any type variables.
+-- | A computation type that does not bind any type variables. Use this like a
+-- data constructor.
 --
 -- @since 1.0.0
-comp0 :: forall (a :: Type). NonEmptyVector (ValT a) -> CompT a
-comp0 = CompT count0
+pattern Comp0 ::
+  forall (a :: Type).
+  CompTBody a ->
+  CompT a
+pattern Comp0 xs <- (countHelper 0 -> Just xs)
+  where
+    Comp0 xs = CompT count0 xs
 
--- | Helper for defining a computation type that binds one type variable (that
--- is, something whose type is @forall a . ... -> ...)@.
+-- | A computation type that binds one type variable (that
+-- is, something whose type is @forall a . ... -> ...)@. Use this like a data
+-- constructor.
 --
 -- @since 1.0.0
-comp1 :: NonEmptyVector (ValT AbstractTy) -> CompT AbstractTy
-comp1 = CompT count1
+pattern Comp1 ::
+  forall (a :: Type).
+  CompTBody a ->
+  CompT a
+pattern Comp1 xs <- (countHelper 1 -> Just xs)
+  where
+    Comp1 xs = CompT count1 xs
 
--- | Helper for defining a computation type that binds two type variables (that
--- is, something whose type is @forall a b . ... -> ...)@.
+-- | A computation type that binds two type variables (that
+-- is, something whose type is @forall a b . ... -> ...)@. Use this like a data
+-- constructor.
 --
 -- @since 1.0.0
-comp2 :: NonEmptyVector (ValT AbstractTy) -> CompT AbstractTy
-comp2 = CompT count2
+pattern Comp2 ::
+  forall (a :: Type).
+  CompTBody a ->
+  CompT a
+pattern Comp2 xs <- (countHelper 2 -> Just xs)
+  where
+    Comp2 xs = CompT count2 xs
 
--- | Helper for defining a computation type that binds three type variables
--- (that is, something whose type is @forall a b c . ... -> ...)@.
+-- | A computation type that binds three type variables
+-- (that is, something whose type is @forall a b c . ... -> ...)@. Use this like
+-- a data constructor.
 --
 -- @since 1.0.0
-comp3 :: NonEmptyVector (ValT AbstractTy) -> CompT AbstractTy
-comp3 = CompT count3
+pattern Comp3 ::
+  forall (a :: Type).
+  CompTBody a ->
+  CompT a
+pattern Comp3 xs <- (countHelper 3 -> Just xs)
+  where
+    Comp3 xs = CompT count3 xs
+
+-- | A general way to construct and deconstruct computations which bind an
+-- arbitrary number of type variables. Use this like a data constructor. Unlike
+-- the other @Comp@ patterns, 'CompN' is exhaustive if matched on.
+--
+-- @since 1.0.0
+pattern CompN ::
+  Count "tyvar" ->
+  CompTBody AbstractTy ->
+  CompT AbstractTy
+pattern CompN count xs <- CompT count xs
+  where
+    CompN count xs = CompT count xs
+
+{-# COMPLETE CompN #-}
 
 -- | Helper for defining type variables.
 --
@@ -212,3 +285,26 @@ returnHelper xs = case NonEmpty.uncons xs of
     if Vector.length ys == 0
       then pure y
       else Nothing
+
+arrowHelper ::
+  forall (a :: Type).
+  NonEmptyVector (ValT a) ->
+  Maybe (ValT a, CompTBody a)
+arrowHelper xs = case NonEmpty.uncons xs of
+  (y, ys) -> (y,) . CompTBody <$> NonEmpty.fromVector ys
+
+argsAndResultHelper ::
+  forall (a :: Type).
+  CompTBody a ->
+  (Vector (ValT a), ValT a)
+argsAndResultHelper (CompTBody xs) = NonEmpty.unsnoc xs
+
+countHelper ::
+  forall (a :: Type).
+  Int ->
+  CompT a ->
+  Maybe (CompTBody a)
+countHelper expected (CompT actual xs) = do
+  expectedCount <- preview intCount expected
+  guard (expectedCount == actual)
+  pure xs

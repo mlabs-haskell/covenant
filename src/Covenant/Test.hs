@@ -3,6 +3,7 @@ module Covenant.Test
   )
 where
 
+import Control.Applicative ((<|>))
 import Covenant.Index (count0)
 import Covenant.Type
   ( AbstractTy,
@@ -16,12 +17,12 @@ import Covenant.Type
         StringT,
         UnitT
       ),
-    CompT (CompT),
+    CompT (Comp0, CompN),
+    CompTBody (ArgsAndResult),
     ValT (Abstraction, BuiltinFlat, ThunkT),
   )
 import Data.Coerce (coerce)
 import Data.Vector qualified as Vector
-import Data.Vector.NonEmpty qualified as NonEmpty
 import Test.QuickCheck
   ( Arbitrary (arbitrary, shrink),
     Gen,
@@ -76,21 +77,19 @@ instance Arbitrary Concrete where
                 pure . BuiltinFlat $ BLS12_381_G1_ElementT,
                 pure . BuiltinFlat $ BLS12_381_G2_ElementT,
                 pure . BuiltinFlat $ BLS12_381_MlResultT,
-                ThunkT . CompT count0 <$> (NonEmpty.consV <$> go (size `quot` 4) <*> liftArbitrary (go (size `quot` 4)))
+                ThunkT . Comp0 <$> (ArgsAndResult <$> liftArbitrary (go (size `quot` 4)) <*> go (size `quot` 4))
               ]
   {-# INLINEABLE shrink #-}
   shrink (Concrete v) =
     Concrete <$> case v of
       -- impossible
       Abstraction _ -> []
-      ThunkT (CompT _ ts) ->
-        -- Note (Koz, 06/04/2025): This is needed because non-empty Vectors
-        -- don't have Arbitrary instances.
-        ThunkT . CompT count0 <$> do
-          let asList = NonEmpty.toList ts
-          shrunk <- fmap coerce . shrink . fmap Concrete $ asList
-          case shrunk of
-            [] -> []
-            x : xs -> pure (NonEmpty.consV x . Vector.fromList $ xs)
+      ThunkT (CompN _ (ArgsAndResult args result)) ->
+        ThunkT . CompN count0 <$> do
+          let argsList = Vector.toList args
+          argsList' <- fmap coerce . shrink . fmap Concrete $ argsList
+          result' <- fmap coerce . shrink . Concrete $ result
+          let args' = Vector.fromList argsList'
+          pure (ArgsAndResult args' result) <|> pure (ArgsAndResult args result')
       -- Can't shrink this
       BuiltinFlat _ -> []

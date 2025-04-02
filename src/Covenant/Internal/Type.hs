@@ -2,6 +2,7 @@ module Covenant.Internal.Type
   ( AbstractTy (..),
     Renamed (..),
     CompT (..),
+    CompTBody (..),
     ValT (..),
     BuiltinFlatT (..),
   )
@@ -14,7 +15,12 @@ import Control.Monad.Reader
     runReader,
   )
 import Covenant.DeBruijn (DeBruijn)
-import Covenant.Index (Count, Index, intCount, intIndex)
+import Covenant.Index
+  ( Count,
+    Index,
+    intCount,
+    intIndex,
+  )
 import Data.Functor.Classes (Eq1 (liftEq))
 import Data.Kind (Type)
 import Data.Map.Strict (Map)
@@ -68,7 +74,9 @@ data AbstractTy = BoundAt DeBruijn (Index "tyvar")
       Show
     )
 
--- | @since 1.0.0
+-- | A type abstraction that has undergone renaming from a specific context.
+--
+-- @since 1.0.0
 data Renamed
   = -- | Set by an enclosing scope, and thus is essentially a
     -- concrete type, we just don't know which. First field is its \'true
@@ -94,6 +102,24 @@ data Renamed
       Show
     )
 
+-- | The \'body\' of a computation type, consisting of the types of its
+-- arguments and the type of its result.
+--
+-- @since 1.0.0
+newtype CompTBody (a :: Type) = CompTBody (NonEmptyVector (ValT a))
+  deriving stock
+    ( -- | @since 1.0.0
+      Eq,
+      -- | @since 1.0.0
+      Show
+    )
+
+-- | @since 1.0.0
+instance Eq1 CompTBody where
+  {-# INLINEABLE liftEq #-}
+  liftEq f (CompTBody xs) (CompTBody ys) =
+    liftEq (liftEq f) xs ys
+
 -- | A computation type, with abstractions indicated by the type argument. In
 -- pretty much any case imaginable, this would be either 'AbstractTy' (in the
 -- ASG), or 'Renamed' (after renaming).
@@ -103,10 +129,8 @@ data Renamed
 -- This type has a \'type abstraction boundary\' just before it: the first field
 -- indicates how many type variables it binds.
 --
--- The /last/ entry in the 'NonEmpty' indicates the return type.
---
 -- @since 1.0.0
-data CompT (a :: Type) = CompT (Count "tyvar") (NonEmptyVector (ValT a))
+data CompT (a :: Type) = CompT (Count "tyvar") (CompTBody a)
   deriving stock
     ( -- | @since 1.0.0
       Eq,
@@ -118,7 +142,7 @@ data CompT (a :: Type) = CompT (Count "tyvar") (NonEmptyVector (ValT a))
 instance Eq1 CompT where
   {-# INLINEABLE liftEq #-}
   liftEq f (CompT abses1 xs) (CompT abses2 ys) =
-    abses1 == abses2 && liftEq (liftEq f) xs ys
+    abses1 == abses2 && liftEq f xs ys
 
 -- | @since 1.0.0
 instance Pretty (CompT Renamed) where
@@ -177,10 +201,10 @@ data BuiltinFlatT
 
 -- Helpers
 
--- Keeping the field names for clarity even if we don't use them
 newtype ScopeBoundary = ScopeBoundary Int
   deriving (Show, Eq, Ord, Num) via Int
 
+-- Keeping the field names for clarity even if we don't use them
 data PrettyContext (ann :: Type)
   = PrettyContext
   { _boundIdents :: Map ScopeBoundary (Vector (Doc ann)),
@@ -241,7 +265,7 @@ runPrettyM (PrettyM ma) = runReader ma (PrettyContext mempty 0 infiniteVars)
        in zipWith (\x xs -> pretty (x : xs)) aToZ intStrings
 
 prettyCompTWithContext :: forall (ann :: Type). CompT Renamed -> PrettyM ann (Doc ann)
-prettyCompTWithContext (CompT count funArgs)
+prettyCompTWithContext (CompT count (CompTBody funArgs))
   | review intCount count == 0 = prettyFunTy funArgs
   | otherwise = bindVars count $ \newVars -> do
       funTy <- prettyFunTy funArgs
@@ -301,7 +325,7 @@ isSimpleValT = \case
   _ -> True
   where
     isSimpleCompT :: CompT a -> Bool
-    isSimpleCompT (CompT count args) =
+    isSimpleCompT (CompT count (CompTBody args)) =
       review intCount count == 0 && NonEmpty.length args == 1
 
 prettyValTWithContext :: forall (ann :: Type). ValT Renamed -> PrettyM ann (Doc ann)

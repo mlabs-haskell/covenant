@@ -7,15 +7,13 @@ import Control.Monad (guard)
 import Covenant.DeBruijn (DeBruijn (S, Z), asInt)
 import Covenant.Index
   ( Index,
-    count0,
-    count1,
     ix0,
     ix1,
   )
 import Covenant.Test (Concrete (Concrete))
 import Covenant.Type
   ( AbstractTy,
-    CompT (CompT),
+    CompT (Comp0, Comp1, Comp2),
     Renamed (Rigid, Wildcard),
     TypeAppError
       ( DoesNotUnify,
@@ -27,9 +25,6 @@ import Covenant.Type
         ThunkT
       ),
     checkApp,
-    comp0,
-    comp1,
-    comp2,
     integerT,
     renameCompT,
     renameValT,
@@ -174,7 +169,7 @@ propConst2Different = forAllShrink arbitrary shrink $ \(Concrete t1, Concrete t2
 -- unification error otherwise.
 propUnifyConcrete :: Property
 propUnifyConcrete = forAllShrink gen shr $ \(tA, mtB) ->
-  withRenamedComp (CompT count0 $ tA :--:> ReturnT integerT) $ \f ->
+  withRenamedComp (Comp0 $ tA :--:> ReturnT integerT) $ \f ->
     withRenamedVals (Identity tA) $ \(Identity tA') ->
       case mtB of
         Nothing ->
@@ -209,7 +204,7 @@ propUnifyConcrete = forAllShrink gen shr $ \(tA, mtB) ->
 -- !Integer` to `b`. Result should fail to unify.
 propUnifyRigidConcrete :: Property
 propUnifyRigidConcrete = forAllShrink arbitrary shrink $ \(Concrete t, scope, ix) ->
-  withRenamedComp (comp0 $ tyvar (S scope) ix :--:> ReturnT integerT) $ \f ->
+  withRenamedComp (Comp0 $ tyvar (S scope) ix :--:> ReturnT integerT) $ \f ->
     withRenamedVals (Identity t) $ \(Identity t') ->
       -- This is a little confusing, as we would expect that the true level will
       -- be based on `S scope`, since that's what's in the computation type.
@@ -224,11 +219,11 @@ propUnifyRigidConcrete = forAllShrink arbitrary shrink $ \(Concrete t, scope, ix
 -- !Integer) -> !Integer` to `(A -> !Integer)`. Result should fail to unify.
 propUnifyWildcardConcrete :: Property
 propUnifyWildcardConcrete = forAllShrink arbitrary shrink $ \(Concrete t) ->
-  let thunk = ThunkT . comp1 $ tyvar Z ix0 :--:> ReturnT integerT
-   in withRenamedComp (comp0 $ thunk :--:> ReturnT integerT) $ \f ->
-        let argT = ThunkT . comp0 $ t :--:> ReturnT integerT
+  let thunk = ThunkT . Comp1 $ tyvar Z ix0 :--:> ReturnT integerT
+   in withRenamedComp (Comp0 $ thunk :--:> ReturnT integerT) $ \f ->
+        let argT = ThunkT . Comp0 $ t :--:> ReturnT integerT
          in withRenamedVals (Identity argT) $ \(Identity argT') ->
-              let lhs = ThunkT . CompT count1 $ Abstraction (Wildcard 1 ix0) :--:> ReturnT integerT
+              let lhs = ThunkT . Comp1 $ Abstraction (Wildcard 1 ix0) :--:> ReturnT integerT
                   expected = Left . DoesNotUnify lhs $ argT'
                   actual = checkApp f [argT']
                in expected === actual
@@ -238,9 +233,9 @@ propUnifyWildcardConcrete = forAllShrink arbitrary shrink $ \(Concrete t) ->
 -- to `A`.
 propUnifyWildcardUnifiable :: Property
 propUnifyWildcardUnifiable = forAllShrink arbitrary shrink $ \(Concrete t) ->
-  withRenamedComp (comp0 $ ThunkT (comp1 $ tyvar Z ix0 :--:> ReturnT t) :--:> ReturnT t) $ \f ->
+  withRenamedComp (Comp0 $ ThunkT (Comp1 $ tyvar Z ix0 :--:> ReturnT t) :--:> ReturnT t) $ \f ->
     withRenamedVals (Identity t) $ \(Identity t') ->
-      withRenamedVals (Identity . ThunkT . comp1 $ tyvar Z ix0 :--:> ReturnT t) $ \(Identity arg) ->
+      withRenamedVals (Identity . ThunkT . Comp1 $ tyvar Z ix0 :--:> ReturnT t) $ \(Identity arg) ->
         let expected = Right t'
             actual = checkApp f [arg]
          in expected === actual
@@ -249,7 +244,7 @@ propUnifyWildcardUnifiable = forAllShrink arbitrary shrink $ \(Concrete t) ->
 -- -> !Integer` to `B`. Result should fail to unify.
 propUnifyConcreteRigid :: Property
 propUnifyConcreteRigid = forAllShrink arbitrary shrink $ \(Concrete aT, scope, index) ->
-  withRenamedComp (comp0 $ aT :--:> ReturnT integerT) $ \f ->
+  withRenamedComp (Comp0 $ aT :--:> ReturnT integerT) $ \f ->
     withRenamedVals (Identity $ tyvar scope index) $ \(Identity arg) ->
       withRenamedVals (Identity aT) $ \(Identity aT') ->
         let level = negate . asInt $ scope
@@ -312,7 +307,7 @@ propUnifyRigid = forAllShrink gen shr $ \testData ->
       ((CompT Renamed, ValT Renamed, Either TypeAppError (ValT Renamed)) -> Property) ->
       Property
     withTestData (db, index, mrest) f =
-      withRenamedComp (comp0 $ tyvar (S db) index :--:> ReturnT integerT) $ \fun ->
+      withRenamedComp (Comp0 $ tyvar (S db) index :--:> ReturnT integerT) $ \fun ->
         case mrest of
           Nothing -> withRenamedVals (Identity . tyvar db $ index) $ \(Identity arg) ->
             f (fun, arg, Right integerT)
@@ -329,11 +324,11 @@ propUnifyRigid = forAllShrink gen shr $ \testData ->
 -- -> !Integer` to `(A -> !Integer)`. Result should fail to unify.
 propUnifyWildcardRigid :: Property
 propUnifyWildcardRigid = forAllShrink arbitrary shrink $ \(scope, index) ->
-  let thunk = ThunkT . comp1 $ tyvar Z ix0 :--:> ReturnT integerT
-   in withRenamedComp (comp0 $ thunk :--:> ReturnT integerT) $ \f ->
-        let argT = ThunkT . comp0 $ tyvar (S scope) index :--:> ReturnT integerT
+  let thunk = ThunkT . Comp1 $ tyvar Z ix0 :--:> ReturnT integerT
+   in withRenamedComp (Comp0 $ thunk :--:> ReturnT integerT) $ \f ->
+        let argT = ThunkT . Comp0 $ tyvar (S scope) index :--:> ReturnT integerT
          in withRenamedVals (Identity argT) $ \(Identity argT') ->
-              let lhs = ThunkT . CompT count1 $ Abstraction (Wildcard 1 ix0) :--:> ReturnT integerT
+              let lhs = ThunkT . Comp1 $ Abstraction (Wildcard 1 ix0) :--:> ReturnT integerT
                   expected = Left . DoesNotUnify lhs $ argT'
                   actual = checkApp f [argT']
                in expected === actual
@@ -342,11 +337,11 @@ propUnifyWildcardRigid = forAllShrink arbitrary shrink $ \(scope, index) ->
 
 -- `forall a. a -> !a`
 idT :: CompT AbstractTy
-idT = comp1 $ tyvar Z ix0 :--:> ReturnT (tyvar Z ix0)
+idT = Comp1 $ tyvar Z ix0 :--:> ReturnT (tyvar Z ix0)
 
 -- `forall a b . a -> b -> !a
 const2T :: CompT AbstractTy
-const2T = comp2 $ tyvar Z ix0 :--:> tyvar Z ix1 :--:> ReturnT (tyvar Z ix0)
+const2T = Comp2 $ tyvar Z ix0 :--:> tyvar Z ix1 :--:> ReturnT (tyvar Z ix0)
 
 failLeft ::
   forall (a :: Type) (b :: Type).

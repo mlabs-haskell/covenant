@@ -98,6 +98,7 @@ library
     Covenant.Prim
     Covenant.Test
     Covenant.Type
+    Covenant.Util
 
   other-modules:
     Covenant.Internal.ASG
