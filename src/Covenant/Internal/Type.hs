@@ -2,7 +2,7 @@ module Covenant.Internal.Type
   ( AbstractTy (..),
     Renamed (..),
     CompT (..),
-    CompTInternal (..),
+    CompTBody (..),
     ValT (..),
     BuiltinFlatT (..),
   )
@@ -102,11 +102,11 @@ data Renamed
       Show
     )
 
--- | The \'interior\' of a computation type, consisting of the types of its
+-- | The \'body\' of a computation type, consisting of the types of its
 -- arguments and the type of its result.
 --
 -- @since 1.0.0
-newtype CompTInternal (a :: Type) = CompTInternal (NonEmptyVector (ValT a))
+newtype CompTBody (a :: Type) = CompTBody (NonEmptyVector (ValT a))
   deriving stock
     ( -- | @since 1.0.0
       Eq,
@@ -115,9 +115,9 @@ newtype CompTInternal (a :: Type) = CompTInternal (NonEmptyVector (ValT a))
     )
 
 -- | @since 1.0.0
-instance Eq1 CompTInternal where
+instance Eq1 CompTBody where
   {-# INLINEABLE liftEq #-}
-  liftEq f (CompTInternal xs) (CompTInternal ys) =
+  liftEq f (CompTBody xs) (CompTBody ys) =
     liftEq (liftEq f) xs ys
 
 -- | A computation type, with abstractions indicated by the type argument. In
@@ -130,7 +130,7 @@ instance Eq1 CompTInternal where
 -- indicates how many type variables it binds.
 --
 -- @since 1.0.0
-data CompT (a :: Type) = CompT (Count "tyvar") (CompTInternal a)
+data CompT (a :: Type) = CompT (Count "tyvar") (CompTBody a)
   deriving stock
     ( -- | @since 1.0.0
       Eq,
@@ -265,7 +265,7 @@ runPrettyM (PrettyM ma) = runReader ma (PrettyContext mempty 0 infiniteVars)
        in zipWith (\x xs -> pretty (x : xs)) aToZ intStrings
 
 prettyCompTWithContext :: forall (ann :: Type). CompT Renamed -> PrettyM ann (Doc ann)
-prettyCompTWithContext (CompT count (CompTInternal funArgs))
+prettyCompTWithContext (CompT count (CompTBody funArgs))
   | review intCount count == 0 = prettyFunTy funArgs
   | otherwise = bindVars count $ \newVars -> do
       funTy <- prettyFunTy funArgs
@@ -325,7 +325,7 @@ isSimpleValT = \case
   _ -> True
   where
     isSimpleCompT :: CompT a -> Bool
-    isSimpleCompT (CompT count (CompTInternal args)) =
+    isSimpleCompT (CompT count (CompTBody args)) =
       review intCount count == 0 && NonEmpty.length args == 1
 
 prettyValTWithContext :: forall (ann :: Type). ValT Renamed -> PrettyM ann (Doc ann)

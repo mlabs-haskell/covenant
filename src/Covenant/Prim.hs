@@ -25,7 +25,7 @@ import Covenant.Index (ix0)
 import Covenant.Type
   ( AbstractTy,
     CompT (Comp0, Comp1),
-    CompTInternal (ReturnT, (:--:>)),
+    CompTBody (ReturnT, (:--:>)),
     ValT,
     boolT,
     byteStringT,

@@ -18,7 +18,7 @@ import Covenant.Type
         UnitT
       ),
     CompT (Comp0, CompN),
-    CompTInternal (ArgsAndResult),
+    CompTBody (ArgsAndResult),
     ValT (Abstraction, BuiltinFlat, ThunkT),
   )
 import Data.Coerce (coerce)

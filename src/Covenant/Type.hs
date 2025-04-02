@@ -5,7 +5,7 @@ module Covenant.Type
   ( AbstractTy (..),
     Renamed (..),
     CompT (Comp0, Comp1, Comp2, Comp3, CompN),
-    CompTInternal (ReturnT, (:--:>), ArgsAndResult),
+    CompTBody (ReturnT, (:--:>), ArgsAndResult),
     ValT (..),
     BuiltinFlatT (..),
     RenameError (..),
@@ -63,7 +63,7 @@ import Covenant.Internal.Type
         UnitT
       ),
     CompT (CompT),
-    CompTInternal (CompTInternal),
+    CompTBody (CompTBody),
     Renamed (Rigid, Unifiable, Wildcard),
     ValT (Abstraction, BuiltinFlat, ThunkT),
   )
@@ -94,10 +94,10 @@ import Optics.Core (preview)
 -- * @'ReturnT' 'integerT'@ is @!Integer@
 --
 -- @since 1.0.0
-pattern ReturnT :: forall (a :: Type). ValT a -> CompTInternal a
-pattern ReturnT x <- CompTInternal (returnHelper -> Just x)
+pattern ReturnT :: forall (a :: Type). ValT a -> CompTBody a
+pattern ReturnT x <- CompTBody (returnHelper -> Just x)
   where
-    ReturnT x = CompTInternal (NonEmpty.singleton x)
+    ReturnT x = CompTBody (NonEmpty.singleton x)
 
 -- | Given a type of argument, and the body of another computation type,
 -- construct a copy of the body, adding an extra argument of the argument type.
@@ -116,11 +116,11 @@ pattern ReturnT x <- CompTInternal (returnHelper -> Just x)
 pattern (:--:>) ::
   forall (a :: Type).
   ValT a ->
-  CompTInternal a ->
-  CompTInternal a
-pattern x :--:> xs <- CompTInternal (arrowHelper -> Just (x, xs))
+  CompTBody a ->
+  CompTBody a
+pattern x :--:> xs <- CompTBody (arrowHelper -> Just (x, xs))
   where
-    x :--:> xs = CompTInternal (NonEmpty.cons x (coerce xs))
+    x :--:> xs = CompTBody (NonEmpty.cons x (coerce xs))
 
 infixr 1 :--:>
 
@@ -138,10 +138,10 @@ pattern ArgsAndResult ::
   forall (a :: Type).
   Vector (ValT a) ->
   ValT a ->
-  CompTInternal a
+  CompTBody a
 pattern ArgsAndResult args result <- (argsAndResultHelper -> (args, result))
   where
-    ArgsAndResult args result = CompTInternal (NonEmpty.snocV args result)
+    ArgsAndResult args result = CompTBody (NonEmpty.snocV args result)
 
 {-# COMPLETE ArgsAndResult #-}
 
@@ -152,7 +152,7 @@ pattern ArgsAndResult args result <- (argsAndResultHelper -> (args, result))
 --
 -- @since 1.0.0
 arity :: forall (a :: Type). CompT a -> Int
-arity (CompT _ (CompTInternal xs)) = NonEmpty.length xs - 1
+arity (CompT _ (CompTBody xs)) = NonEmpty.length xs - 1
 
 -- | A computation type that does not bind any type variables. Use this like a
 -- data constructor.
@@ -160,7 +160,7 @@ arity (CompT _ (CompTInternal xs)) = NonEmpty.length xs - 1
 -- @since 1.0.0
 pattern Comp0 ::
   forall (a :: Type).
-  CompTInternal a ->
+  CompTBody a ->
   CompT a
 pattern Comp0 xs <- (countHelper 0 -> Just xs)
   where
@@ -173,7 +173,7 @@ pattern Comp0 xs <- (countHelper 0 -> Just xs)
 -- @since 1.0.0
 pattern Comp1 ::
   forall (a :: Type).
-  CompTInternal a ->
+  CompTBody a ->
   CompT a
 pattern Comp1 xs <- (countHelper 1 -> Just xs)
   where
@@ -186,7 +186,7 @@ pattern Comp1 xs <- (countHelper 1 -> Just xs)
 -- @since 1.0.0
 pattern Comp2 ::
   forall (a :: Type).
-  CompTInternal a ->
+  CompTBody a ->
   CompT a
 pattern Comp2 xs <- (countHelper 2 -> Just xs)
   where
@@ -199,7 +199,7 @@ pattern Comp2 xs <- (countHelper 2 -> Just xs)
 -- @since 1.0.0
 pattern Comp3 ::
   forall (a :: Type).
-  CompTInternal a ->
+  CompTBody a ->
   CompT a
 pattern Comp3 xs <- (countHelper 3 -> Just xs)
   where
@@ -212,7 +212,7 @@ pattern Comp3 xs <- (countHelper 3 -> Just xs)
 -- @since 1.0.0
 pattern CompN ::
   Count "tyvar" ->
-  CompTInternal AbstractTy ->
+  CompTBody AbstractTy ->
   CompT AbstractTy
 pattern CompN count xs <- CompT count xs
   where
@@ -289,21 +289,21 @@ returnHelper xs = case NonEmpty.uncons xs of
 arrowHelper ::
   forall (a :: Type).
   NonEmptyVector (ValT a) ->
-  Maybe (ValT a, CompTInternal a)
+  Maybe (ValT a, CompTBody a)
 arrowHelper xs = case NonEmpty.uncons xs of
-  (y, ys) -> (y,) . CompTInternal <$> NonEmpty.fromVector ys
+  (y, ys) -> (y,) . CompTBody <$> NonEmpty.fromVector ys
 
 argsAndResultHelper ::
   forall (a :: Type).
-  CompTInternal a ->
+  CompTBody a ->
   (Vector (ValT a), ValT a)
-argsAndResultHelper (CompTInternal xs) = NonEmpty.unsnoc xs
+argsAndResultHelper (CompTBody xs) = NonEmpty.unsnoc xs
 
 countHelper ::
   forall (a :: Type).
   Int ->
   CompT a ->
-  Maybe (CompTInternal a)
+  Maybe (CompTBody a)
 countHelper expected (CompT actual xs) = do
   expectedCount <- preview intCount expected
   guard (expectedCount == actual)
