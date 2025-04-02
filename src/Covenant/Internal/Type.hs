@@ -74,7 +74,9 @@ data AbstractTy = BoundAt DeBruijn (Index "tyvar")
       Show
     )
 
--- | @since 1.0.0
+-- | A type abstraction that has undergone renaming from a specific context.
+--
+-- @since 1.0.0
 data Renamed
   = -- | Set by an enclosing scope, and thus is essentially a
     -- concrete type, we just don't know which. First field is its \'true
@@ -100,7 +102,10 @@ data Renamed
       Show
     )
 
--- | @since 1.0.0
+-- | The \'interior\' of a computation type, consisting of the types of its
+-- arguments and the type of its result.
+--
+-- @since 1.0.0
 newtype CompTInternal (a :: Type) = CompTInternal (NonEmptyVector (ValT a))
   deriving stock
     ( -- | @since 1.0.0
@@ -123,8 +128,6 @@ instance Eq1 CompTInternal where
 --
 -- This type has a \'type abstraction boundary\' just before it: the first field
 -- indicates how many type variables it binds.
---
--- The /last/ entry in the 'NonEmpty' indicates the return type.
 --
 -- @since 1.0.0
 data CompT (a :: Type) = CompT (Count "tyvar") (CompTInternal a)
@@ -198,10 +201,10 @@ data BuiltinFlatT
 
 -- Helpers
 
--- Keeping the field names for clarity even if we don't use them
 newtype ScopeBoundary = ScopeBoundary Int
   deriving (Show, Eq, Ord, Num) via Int
 
+-- Keeping the field names for clarity even if we don't use them
 data PrettyContext (ann :: Type)
   = PrettyContext
   { _boundIdents :: Map ScopeBoundary (Vector (Doc ann)),

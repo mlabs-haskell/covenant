@@ -85,13 +85,34 @@ import Data.Vector.NonEmpty (NonEmptyVector)
 import Data.Vector.NonEmpty qualified as NonEmpty
 import Optics.Core (preview)
 
--- | @since 1.0.0
+-- | The body of a computation type that doesn't take any arguments and produces
+-- the a result of the given value type. Use this just as you would a
+-- data constructor.
+--
+-- = Example
+--
+-- * @'ReturnT' 'integerT'@ is @!Integer@
+--
+-- @since 1.0.0
 pattern ReturnT :: forall (a :: Type). ValT a -> CompTInternal a
 pattern ReturnT x <- CompTInternal (returnHelper -> Just x)
   where
     ReturnT x = CompTInternal (NonEmpty.singleton x)
 
--- | @since 1.0.0
+-- | Given a type of argument, and the body of another computation type,
+-- construct a copy of the body, adding an extra argument of the argument type.
+-- Use this just as you would a data constructor.
+--
+-- = Note
+--
+-- Together with 'ReturnT', these two patterns provide an exhaustive pattern
+-- match.
+--
+-- = Example
+--
+-- * @'integerT :--:> ReturnT 'byteStringT'@ is @Integer -> !ByteString@
+--
+-- @since 1.0.0
 pattern (:--:>) ::
   forall (a :: Type).
   ValT a ->
@@ -103,7 +124,16 @@ pattern x :--:> xs <- CompTInternal (arrowHelper -> Just (x, xs))
 
 infixr 1 :--:>
 
--- | @since 1.0.0
+-- | A view of a computation type as a 'Vector' of its argument types, together
+-- with its result type. Can be used as a data constructor, and is an exhaustive
+-- match.
+--
+-- = Example
+--
+-- * @'ArgsAndResult' ('Vector.fromList' ['integerT', 'integerT']) 'integerT'@
+--   is @Integer -> Integer -> !Integer@
+--
+-- @since 1.0.0
 pattern ArgsAndResult ::
   forall (a :: Type).
   Vector (ValT a) ->
@@ -124,7 +154,8 @@ pattern ArgsAndResult args result <- (argsAndResultHelper -> (args, result))
 arity :: forall (a :: Type). CompT a -> Int
 arity (CompT _ (CompTInternal xs)) = NonEmpty.length xs - 1
 
--- | A computation type that does not bind any type variables.
+-- | A computation type that does not bind any type variables. Use this like a
+-- data constructor.
 --
 -- @since 1.0.0
 pattern Comp0 ::
@@ -136,7 +167,8 @@ pattern Comp0 xs <- (countHelper 0 -> Just xs)
     Comp0 xs = CompT count0 xs
 
 -- | A computation type that binds one type variable (that
--- is, something whose type is @forall a . ... -> ...)@.
+-- is, something whose type is @forall a . ... -> ...)@. Use this like a data
+-- constructor.
 --
 -- @since 1.0.0
 pattern Comp1 ::
@@ -148,7 +180,8 @@ pattern Comp1 xs <- (countHelper 1 -> Just xs)
     Comp1 xs = CompT count1 xs
 
 -- | A computation type that binds two type variables (that
--- is, something whose type is @forall a b . ... -> ...)@.
+-- is, something whose type is @forall a b . ... -> ...)@. Use this like a data
+-- constructor.
 --
 -- @since 1.0.0
 pattern Comp2 ::
@@ -160,7 +193,8 @@ pattern Comp2 xs <- (countHelper 2 -> Just xs)
     Comp2 xs = CompT count2 xs
 
 -- | A computation type that binds three type variables
--- (that is, something whose type is @forall a b c . ... -> ...)@.
+-- (that is, something whose type is @forall a b c . ... -> ...)@. Use this like
+-- a data constructor.
 --
 -- @since 1.0.0
 pattern Comp3 ::
@@ -172,7 +206,8 @@ pattern Comp3 xs <- (countHelper 3 -> Just xs)
     Comp3 xs = CompT count3 xs
 
 -- | A general way to construct and deconstruct computations which bind an
--- arbitrary number of type variables.
+-- arbitrary number of type variables. Use this like a data constructor. Unlike
+-- the other @Comp@ patterns, 'CompN' is exhaustive if matched on.
 --
 -- @since 1.0.0
 pattern CompN ::
