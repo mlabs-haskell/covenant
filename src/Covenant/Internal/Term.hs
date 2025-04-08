@@ -5,6 +5,7 @@ module Covenant.Internal.Term
     CompNodeInfo (..),
     ValNodeInfo (..),
     ASGNode (..),
+    ASGNodeType (..),
   )
 where
 
@@ -107,3 +108,27 @@ data ASGNode
   = ACompNode (CompT AbstractTy) CompNodeInfo
   | AValNode (ValT AbstractTy) ValNodeInfo
   | AnError
+  deriving stock
+    ( -- | @since 1.0.0
+      Eq,
+      -- | @since 1.0.0
+      Ord,
+      -- | @since 1.0.0
+      Show
+    )
+
+-- | Helper data type representing the type of any ASG node whatsoever.
+--
+-- @since 1.0.0
+data ASGNodeType
+  = CompNodeType (CompT AbstractTy)
+  | ValNodeType (ValT AbstractTy)
+  | ErrorNodeType
+  deriving stock
+    ( -- | @since 1.0.0
+      Eq,
+      -- | @since 1.0.0
+      Ord,
+      -- | @since 1.0.0
+      Show
+    )
