@@ -1,4 +1,4 @@
-module Covenant.Term
+module Covenant.Internal.Term
   ( Id (..),
     Arg (..),
     Ref (..),
