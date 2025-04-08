@@ -10,10 +10,18 @@
 module Covenant.Constant
   ( -- * Types
     AConstant (..),
+
+    -- * Functions
+    typeConstant,
   )
 where
 
+import Covenant.Internal.Type
+  ( BuiltinFlatT (BoolT, ByteStringT, IntegerT, StringT, UnitT),
+    ValT (BuiltinFlat),
+  )
 import Data.ByteString (ByteString)
+import Data.Kind (Type)
 import Data.Text (Text)
 import Test.QuickCheck
   ( Arbitrary (arbitrary, shrink),
@@ -40,6 +48,18 @@ data AConstant
       -- | @since 1.0.0
       Show
     )
+
+-- | @since 1.0.0
+typeConstant ::
+  forall (a :: Type).
+  AConstant -> ValT a
+typeConstant =
+  BuiltinFlat . \case
+    AUnit -> UnitT
+    ABoolean _ -> BoolT
+    AnInteger _ -> IntegerT
+    AByteString _ -> ByteStringT
+    AString _ -> StringT
 
 -- | @since 1.0.0
 instance Arbitrary AConstant where
