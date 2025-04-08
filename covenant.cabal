@@ -96,6 +96,7 @@ library
     Covenant.Index
     Covenant.Ledger
     Covenant.Prim
+    Covenant.Term
     Covenant.Test
     Covenant.Type
     Covenant.Util
