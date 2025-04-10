@@ -71,6 +71,8 @@ data AbstractTy = BoundAt DeBruijn (Index "tyvar")
     ( -- | @since 1.0.0
       Eq,
       -- | @since 1.0.0
+      Ord,
+      -- | @since 1.0.0
       Show
     )
 
@@ -111,6 +113,8 @@ newtype CompTBody (a :: Type) = CompTBody (NonEmptyVector (ValT a))
     ( -- | @since 1.0.0
       Eq,
       -- | @since 1.0.0
+      Ord,
+      -- | @since 1.0.0
       Show
     )
 
@@ -134,6 +138,8 @@ data CompT (a :: Type) = CompT (Count "tyvar") (CompTBody a)
   deriving stock
     ( -- | @since 1.0.0
       Eq,
+      -- | @since 1.0.0
+      Ord,
       -- | @since 1.0.0
       Show
     )
@@ -163,6 +169,8 @@ data ValT (a :: Type)
   deriving stock
     ( -- | @since 1.0.0
       Eq,
+      -- | @since 1.0.0
+      Ord,
       -- | @since 1.0.0
       Show
     )
@@ -195,6 +203,8 @@ data BuiltinFlatT
   deriving stock
     ( -- | @since 1.0.0
       Eq,
+      -- | @since 1.0.0
+      Ord,
       -- | @since 1.0.0
       Show
     )

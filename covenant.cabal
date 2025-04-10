@@ -6,8 +6,8 @@ description: Someday something will go here.
 homepage: https://github.com/mlabs-haskell/covenant
 license: Apache-2.0
 license-file: LICENSE
-author: Koz Ross, Farseen, Sean Hunter
-maintainer: koz@mlabs.city, farseen@mlabs.city, sean@mlabs.city
+author: Koz Ross, Sean Hunter
+maintainer: koz@mlabs.city, sean@mlabs.city
 bug-reports: https://github.com/mlabs-haskell/covenant/issues
 copyright: (C) MLabs 2024
 category: Covenant
@@ -90,7 +90,6 @@ library
   exposed-modules:
     Control.Monad.Action
     Control.Monad.HashCons
-    Covenant.ASG
     Covenant.Constant
     Covenant.DeBruijn
     Covenant.Index
@@ -101,11 +100,8 @@ library
     Covenant.Util
 
   other-modules:
-    Covenant.Internal.ASG
-    Covenant.Internal.ASGNode
-    Covenant.Internal.PrimType
     Covenant.Internal.Rename
-    Covenant.Internal.TyExpr
+    Covenant.Internal.Term
     Covenant.Internal.Type
     Covenant.Internal.Unification
 
