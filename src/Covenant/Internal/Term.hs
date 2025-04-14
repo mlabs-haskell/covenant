@@ -1,5 +1,6 @@
 module Covenant.Internal.Term
-  ( Id (..),
+  ( CovenantTypeError (..),
+    Id (..),
     typeId,
     Arg (..),
     typeArg,
@@ -23,7 +24,13 @@ import Data.Vector (Vector)
 import Data.Word (Word64)
 
 -- | @since 1.0.0
-newtype CovenantTypeError = BrokenIdReference Id
+data CovenantTypeError
+  = BrokenIdReference Id
+  | ForceCompType (CompT AbstractTy)
+  | ForceNonThunk (ValT AbstractTy)
+  | ForceError
+  | ThunkValType (ValT AbstractTy)
+  | ThunkError
 
 -- | A unique identifier for a node in a Covenant program.
 --

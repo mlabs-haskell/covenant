@@ -90,6 +90,7 @@ library
   exposed-modules:
     Control.Monad.Action
     Control.Monad.HashCons
+    Covenant.ASG
     Covenant.Constant
     Covenant.DeBruijn
     Covenant.Index
