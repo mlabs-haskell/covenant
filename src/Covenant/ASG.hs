@@ -1,6 +1,8 @@
 module Covenant.ASG
-  ( Id,
+  ( ScopeInfo,
+    Id,
     Ref,
+    Arg,
     ASGNode,
     CovenantTypeError
       ( BrokenIdReference,
@@ -8,12 +10,26 @@ module Covenant.ASG
         ForceNonThunk,
         ForceError,
         ThunkValType,
-        ThunkError
+        ThunkError,
+        ApplyToValType,
+        ApplyToError,
+        ApplyCompType,
+        RenameFunctionFailed,
+        RenameArgumentFailed,
+        NoSuchArgument,
+        ReturnCompType
       ),
+    RenameError
+      ( InvalidAbstractionReference,
+        IrrelevantAbstraction,
+        UndeterminedAbstraction
+      ),
+    arg,
     builtin1,
     builtin2,
     builtin3,
     force,
+    ret,
     err,
     lit,
     thunk,
@@ -22,21 +38,40 @@ where
 
 import Control.Monad.Except (MonadError (throwError))
 import Control.Monad.HashCons (MonadHashCons (refTo))
+import Control.Monad.Reader (MonadReader, asks)
 import Covenant.Constant (AConstant, typeConstant)
+import Covenant.DeBruijn (DeBruijn, asInt)
+import Covenant.Index (Index, count0, intIndex)
+import Covenant.Internal.Rename
+  ( RenameError
+      ( InvalidAbstractionReference,
+        IrrelevantAbstraction,
+        UndeterminedAbstraction
+      ),
+  )
 import Covenant.Internal.Term
   ( ASGNode (ACompNode, AValNode, AnError),
     ASGNodeType (CompNodeType, ErrorNodeType, ValNodeType),
+    Arg (Arg),
     CompNodeInfo
       ( Builtin1Internal,
         Builtin2Internal,
         Builtin3Internal,
-        ForceInternal
+        ForceInternal,
+        ReturnInternal
       ),
     CovenantTypeError
-      ( BrokenIdReference,
+      ( ApplyCompType,
+        ApplyToError,
+        ApplyToValType,
+        BrokenIdReference,
         ForceCompType,
         ForceError,
         ForceNonThunk,
+        NoSuchArgument,
+        RenameArgumentFailed,
+        RenameFunctionFailed,
+        ReturnCompType,
         ThunkError,
         ThunkValType
       ),
@@ -46,7 +81,12 @@ import Covenant.Internal.Term
     typeId,
     typeRef,
   )
-import Covenant.Internal.Type (ValT (ThunkT))
+import Covenant.Internal.Type
+  ( AbstractTy,
+    CompT (CompT),
+    CompTBody (CompTBody),
+    ValT (ThunkT),
+  )
 import Covenant.Prim
   ( OneArgFunc,
     ThreeArgFunc,
@@ -55,7 +95,51 @@ import Covenant.Prim
     typeThreeArgFunc,
     typeTwoArgFunc,
   )
+import Data.Coerce (coerce)
 import Data.Kind (Type)
+import Data.Vector (Vector)
+import Data.Vector.NonEmpty qualified as NonEmpty
+import Optics.Core
+  ( A_Lens,
+    LabelOptic (labelOptic),
+    ix,
+    lens,
+    preview,
+    review,
+    (%),
+  )
+
+-- | @since 1.0.0
+newtype ScopeInfo = ScopeInfo (Vector (Vector (ValT AbstractTy)))
+  deriving stock
+    ( -- | @since 1.0.0
+      Eq,
+      -- | @since 1.0.0
+      Show
+    )
+
+-- | @since 1.0.0
+instance
+  (k ~ A_Lens, a ~ Vector (Vector (ValT AbstractTy)), b ~ Vector (Vector (ValT AbstractTy))) =>
+  LabelOptic "argumentInfo" k ScopeInfo ScopeInfo a b
+  where
+  {-# INLINEABLE labelOptic #-}
+  labelOptic = lens coerce (\_ v -> ScopeInfo v)
+
+-- | @since 1.0.0
+arg ::
+  forall (m :: Type -> Type).
+  (MonadError CovenantTypeError m, MonadReader ScopeInfo m) =>
+  DeBruijn ->
+  Index "arg" ->
+  m Arg
+arg scope index = do
+  let scopeAsInt = asInt scope
+  let indexAsInt = review intIndex index
+  lookedUp <- asks (preview (#argumentInfo % ix scopeAsInt % ix indexAsInt))
+  case lookedUp of
+    Nothing -> throwError . NoSuchArgument scope $ index
+    Just t -> pure . Arg scope index $ t
 
 -- | @since 1.0.0
 builtin1 ::
@@ -101,6 +185,21 @@ force r = do
       _ -> throwError . ForceNonThunk $ t
     CompNodeType t -> throwError . ForceCompType $ t
     ErrorNodeType -> throwError ForceError
+
+-- | @since 1.0.0
+ret ::
+  forall (m :: Type -> Type).
+  (MonadHashCons Id ASGNode m, MonadError CovenantTypeError m) =>
+  Ref ->
+  m Id
+ret r = do
+  refT <- typeRef r
+  case refT of
+    ValNodeType t -> do
+      let t' = CompT count0 . CompTBody . NonEmpty.singleton $ t
+      refTo . ACompNode t' . ReturnInternal $ r
+    CompNodeType t -> throwError . ReturnCompType $ t
+    ErrorNodeType -> err
 
 -- | @since 1.0.0
 err ::

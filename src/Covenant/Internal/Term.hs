@@ -17,6 +17,9 @@ where
 import Control.Monad.Except (MonadError (throwError))
 import Control.Monad.HashCons (MonadHashCons (lookupRef))
 import Covenant.Constant (AConstant)
+import Covenant.DeBruijn (DeBruijn)
+import Covenant.Index (Index)
+import Covenant.Internal.Rename (RenameError)
 import Covenant.Internal.Type (AbstractTy, CompT, ValT)
 import Covenant.Prim (OneArgFunc, ThreeArgFunc, TwoArgFunc)
 import Data.Kind (Type)
@@ -31,6 +34,19 @@ data CovenantTypeError
   | ForceError
   | ThunkValType (ValT AbstractTy)
   | ThunkError
+  | ApplyToValType (ValT AbstractTy)
+  | ApplyToError
+  | ApplyCompType (CompT AbstractTy)
+  | RenameFunctionFailed (CompT AbstractTy) RenameError
+  | RenameArgumentFailed (ValT AbstractTy) RenameError
+  | NoSuchArgument DeBruijn (Index "arg")
+  | ReturnCompType (CompT AbstractTy)
+  deriving stock
+    ( -- | @since 1.0.0
+      Eq,
+      -- | @since 1.0.0
+      Show
+    )
 
 -- | A unique identifier for a node in a Covenant program.
 --
@@ -68,7 +84,7 @@ typeId i = do
 -- | An argument passed to a function in a Covenant program.
 --
 -- @since 1.0.0
-data Arg = Arg Word64 (ValT AbstractTy)
+data Arg = Arg DeBruijn (Index "arg") (ValT AbstractTy)
   deriving stock
     ( -- | @since 1.0.0
       Eq,
@@ -80,7 +96,7 @@ data Arg = Arg Word64 (ValT AbstractTy)
 
 -- | @since 1.0.0
 typeArg :: Arg -> ValT AbstractTy
-typeArg (Arg _ t) = t
+typeArg (Arg _ _ t) = t
 
 -- | A general reference in a Covenant program. This is one of the following:
 --
