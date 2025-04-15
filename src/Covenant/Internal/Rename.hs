@@ -3,6 +3,7 @@ module Covenant.Internal.Rename
     RenameError (..),
     runRenameM,
     renameValT,
+    renameDataDecl,
     renameCompT,
   )
 where
@@ -26,7 +27,8 @@ import Covenant.Internal.Type
     CompT (CompT),
     CompTBody (CompTBody),
     Renamed (Rigid, Unifiable, Wildcard),
-    ValT (Abstraction, BuiltinFlat, ThunkT),
+    ValT (Abstraction, BuiltinFlat, ThunkT, Datatype), Constructor (Constructor),
+    DataDeclaration(DataDeclaration)
   )
 import Data.Coerce (coerce)
 import Data.Kind (Type)
@@ -47,6 +49,8 @@ import Optics.Core
     view,
     (%),
   )
+import Data.Maybe (fromJust)
+import Optics.Extra (preview)
 
 -- Used during renaming. Contains a source of fresh indices for wildcards, as
 -- well as tracking:
@@ -194,6 +198,35 @@ renameValT = \case
   Abstraction t -> Abstraction <$> renameAbstraction t
   ThunkT t -> ThunkT <$> renameCompT t
   BuiltinFlat t -> pure . BuiltinFlat $ t
+  -- Assumes kind-checking has occurred 
+  Datatype tn xs -> RenameM $ do
+    let abses = fromJust $ preview intCount (Vector.length xs)
+    -- Assume this is the right thing to do here?
+    modify (stepUpScope abses)
+    -- This Vector here doesn't represent a function, but a product, so we there is no "return" type to treat specially (I think!)
+    renamedXS <-
+      Vector.generateM
+        (Vector.length xs)
+        (\i -> coerce . renameValT $ xs Vector.! i)
+    ourAbstractions <- gets (view (#tracker % to Vector.head % _1))
+    unless (Vector.and ourAbstractions) (throwError UndeterminedAbstraction)
+    modify dropDownScope
+    pure $ Datatype tn renamedXS
+
+renameDataDecl :: DataDeclaration AbstractTy -> RenameM (DataDeclaration Renamed)
+renameDataDecl (DataDeclaration tn cnt ctors) = RenameM $ do
+  modify (stepUpScope cnt)
+  renamedCtors <-
+    Vector.generateM
+      (Vector.length ctors)
+      (\i -> coerce . renameCtor $ ctors Vector.! i)
+  ourAbstractions <- gets (view (#tracker % to Vector.head % _1))
+  unless (Vector.and ourAbstractions) (throwError UndeterminedAbstraction)
+  modify dropDownScope
+  pure $ DataDeclaration tn cnt renamedCtors 
+ where
+   renameCtor :: Constructor AbstractTy -> RenameM (Constructor Renamed)
+   renameCtor (Constructor cn args) = Constructor cn <$> traverse renameValT args
 
 -- Helpers
 

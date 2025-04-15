@@ -12,13 +12,13 @@ import Data.Ord (comparing)
 import Data.Foldable (foldl')
 #endif
 import Control.Monad.Except (catchError, throwError)
-import Covenant.Index (Index, intCount, intIndex)
+import Covenant.Index (Index, intCount, intIndex, Count)
 import Covenant.Internal.Type
   ( BuiltinFlatT,
     CompT (CompT),
     CompTBody (CompTBody),
     Renamed (Rigid, Unifiable, Wildcard),
-    ValT (Abstraction, BuiltinFlat, ThunkT),
+    ValT (Abstraction, BuiltinFlat, ThunkT, Datatype), TyName,
   )
 import Data.Kind (Type)
 import Data.Map (Map)
@@ -98,6 +98,7 @@ collectUnifiables = \case
     _ -> Set.empty
   BuiltinFlat _ -> Set.empty
   ThunkT (CompT _ (CompTBody xs)) -> NonEmpty.foldl' (\acc t -> acc <> collectUnifiables t) Set.empty xs
+  Datatype{} -> error "Don't unify datatypes until BBF implemented" -- Vector.foldl' (\acc t -> acc <> collectUnifiables t) Set.empty xs
 
 substitute :: Index "tyvar" -> ValT Renamed -> ValT Renamed -> ValT Renamed
 substitute index toSub = \case
@@ -110,6 +111,7 @@ substitute index toSub = \case
   ThunkT (CompT abstractions (CompTBody xs)) ->
     ThunkT . CompT abstractions . CompTBody . fmap (substitute index toSub) $ xs
   BuiltinFlat t -> BuiltinFlat t
+  Datatype{} -> error "Don't unify datatypes until BBF implemented" -- Datatype tn abstractions $ substitute index toSub <$> xs
 
 unify ::
   ValT Renamed ->
@@ -125,9 +127,11 @@ unify expected actual =
           Wildcard scopeId1 index1 -> expectWildcard scopeId1 index1
         ThunkT t1 -> expectThunk t1
         BuiltinFlat t1 -> expectFlatBuiltin t1
+        Datatype{} -> error "Don't try to unify datatypes yet" -- expectDatatype tn abses xs
     )
     (promoteUnificationError expected actual)
   where
+
     unificationError :: forall (a :: Type). Either TypeAppError a
     unificationError = Left . DoesNotUnify expected $ actual
     noSubUnify :: forall (k :: Type) (a :: Type). Either TypeAppError (Map k a)
