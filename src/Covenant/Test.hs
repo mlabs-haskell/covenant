@@ -6,7 +6,7 @@ module Covenant.Test
 where
 
 import Control.Applicative ((<|>))
-import Covenant.Index (count0)
+import Covenant.Index (count0, Count, intCount)
 import Covenant.Type
   ( AbstractTy,
     BuiltinFlatT
@@ -52,11 +52,14 @@ import Data.Map.Strict (Map)
 import Data.Map.Strict qualified as M
 import Optics.Operators ((^.), (^..))
 import Data.Foldable (traverse_)
-import Optics.Core ((%), folded, Lens', lens, view, over)
+import Optics.Core ((%), folded, Lens', lens, view, over, review)
 import Control.Monad.State.Strict (StateT, runStateT, evalStateT, MonadState (..))
 import Control.Monad.State.Class (MonadState, gets, modify)
 import Control.Monad (void)
 import GHC.Word (Word32)
+import Data.Vector.NonEmpty (NonEmptyVector)
+import Data.Vector.NonEmpty qualified as NonEmptyVector
+import Data.Maybe (fromJust)
 
 -- | Wrapper for 'ValT' to provide an 'Arbitrary' instance to generate only
 -- value types without any type variables.
@@ -133,20 +136,23 @@ data DataGen = DataGen {
         _dgDecls :: Map TyName (DataDeclaration AbstractTy),
         _dgCtors :: Set ConstructorName,
         _dgCurrentScope :: ScopeBoundary,
-        _dgBoundVars :: Map ScopeBoundary Word32
+        -- This was the simplest way I could think of to enforce the "Only want nonempty elements" invariant
+        _dgBoundVars :: Map ScopeBoundary (NonEmptyVector ()),
+        -- We need this for recursive types. We can't lookup the arity in dgDecls if we want to recurse b/c it won't be there until we've finished generating the whole decl
+        _dgArities :: Map TyName (Count "tyvar")
         }
 
 dgDecls :: Lens' DataGen (Map TyName (DataDeclaration AbstractTy))
-dgDecls = lens (\(DataGen a _ _ _) -> a) (\(DataGen _ b c d) a -> DataGen a b c d)
+dgDecls = lens (\(DataGen a _ _ _ _) -> a) (\(DataGen _ b c d e) a -> DataGen a b c d e)
 
 dgConstructors :: Lens' DataGen (Set ConstructorName)
-dgConstructors = lens (\(DataGen _ b _ _) -> b) (\(DataGen a _ c d) b -> DataGen a b c d)
+dgConstructors = lens (\(DataGen _ b _ _ _) -> b) (\(DataGen a _ c d e) b -> DataGen a b c d e)
 
 dgCurrentScope :: Lens' DataGen ScopeBoundary
-dgCurrentScope = lens (\(DataGen _ _ c _) -> c) (\(DataGen a b _ d) c -> DataGen a b c d)
+dgCurrentScope = lens (\(DataGen _ _ c _ _) -> c) (\(DataGen a b _ d e) c -> DataGen a b c d e)
 
-dgBoundVars :: Lens' DataGen (Map ScopeBoundary Word32)
-dgBoundVars = lens (\(DataGen _ _ _ d) -> d) (\(DataGen a b c _) d -> DataGen a b c d)
+dgBoundVars :: Lens' DataGen (Map ScopeBoundary (NonEmptyVector ()))
+dgBoundVars = lens (\(DataGen _ _ _ d _) -> d) (\(DataGen a b c _ e) d -> DataGen a b c d e)
 
 
 
@@ -156,8 +162,24 @@ newtype DataGenM a = DataGenM (StateT DataGen Gen a)
  deriving newtype (Functor, Applicative, Monad)
  deriving (MonadState DataGen) via StateT DataGen Gen
 
-runDataGenM :: DataGenM a -> Gen a
-runDataGenM (DataGenM ma) = evalStateT ma (DataGen M.empty Set.empty 0 M.empty)
+crossBoundary :: DataGenM ()
+crossBoundary = modify $ over dgCurrentScope (+ 1)
+
+bindVars :: Count "tyvar" -> DataGenM ()
+bindVars count'
+  | count == 0 = crossBoundary
+  | otherwise = do
+      crossBoundary
+      let vars = fromJust $ NonEmptyVector.replicate count () -- safe even though the types don't know that
+      here <- gets (view dgCurrentScope)
+      modify $ over dgBoundVars (M.insert here vars)
+ where
+   count :: Int
+   count = review intCount count'
+
+
+runDataGenM :: forall (a :: Type). DataGenM a -> Gen a
+runDataGenM (DataGenM ma) = evalStateT ma (DataGen M.empty Set.empty 0 M.empty M.empty)
 
 liftGen :: forall (a :: Type). Gen a -> DataGenM a
 liftGen ma = DataGenM (lift ma)
@@ -240,8 +262,9 @@ arbitraryNestedConcrete :: DataGenM  NestedConcreteDataDecl
 arbitraryNestedConcrete = NestedConcreteDataDecl <$> do
   tyNm <-  freshTyName
   let nullary :: DataGenM (DataDeclaration AbstractTy)
-      nullary = liftGen $ do
-        ctorNm <- arbitrary @ConstructorName
+      nullary = do
+        ctorNm <- freshConstructorName
+        modify (over dgConstructors (Set.insert ctorNm))
         pure $ DataDeclaration tyNm count0 (Vector.singleton (Constructor ctorNm Vector.empty))
 
       nonNestedConcrete :: DataGenM (DataDeclaration AbstractTy)
