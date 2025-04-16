@@ -9,9 +9,12 @@ module Covenant.Internal.Type
     ValT (..),
     BuiltinFlatT (..),
     TyName (..),
+    ScopeBoundary(..), -- used in the generators
     runTyName,
     runConstructorName,
-    datatypeName
+    datatypeName,
+    datatypeConstructors,
+    constructorName
   )
 where
 

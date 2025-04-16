@@ -34,10 +34,10 @@ import Test.QuickCheck
     elements,
     liftArbitrary,
     oneof,
-    sized, generate,
+    sized, generate, frequency, scale,
   )
 import Test.QuickCheck.Instances.Vector ()
-import Covenant.Internal.Type (ValT(..), DataDeclaration (DataDeclaration), ConstructorName(..), TyName(..), runConstructorName, Constructor (Constructor), datatypeName)
+import Covenant.Internal.Type (ValT(..), DataDeclaration (DataDeclaration), ConstructorName(..), TyName(..), runConstructorName, Constructor (Constructor), datatypeName, datatypeConstructors, constructorName, ScopeBoundary)
 import Data.Text (Text)
 import Data.Text qualified as T
 import Test.QuickCheck.Gen (suchThat, resize, chooseInt)
@@ -50,8 +50,13 @@ import Test.QuickCheck.Instances.Containers ()
 import Control.Monad.Reader (Reader, ReaderT (..), MonadTrans (..), MonadReader (..), asks)
 import Data.Map.Strict (Map)
 import Data.Map.Strict qualified as M
-import Optics.Operators ((^.))
+import Optics.Operators ((^.), (^..))
 import Data.Foldable (traverse_)
+import Optics.Core ((%), folded, Lens', lens, view, over)
+import Control.Monad.State.Strict (StateT, runStateT, evalStateT, MonadState (..))
+import Control.Monad.State.Class (MonadState, gets, modify)
+import Control.Monad (void)
+import GHC.Word (Word32)
 
 -- | Wrapper for 'ValT' to provide an 'Arbitrary' instance to generate only
 -- value types without any type variables.
@@ -122,6 +127,42 @@ instance Arbitrary Concrete where
    i.e., no tyvars & the argument to every constructor is a Concrete as defined above
 -}
 
+-- Information we need to correctly generate concrete types. Contains a map of all the already-generated types & the set of
+-- already generated constructor names for the current type. Need the latter to avoid duplicates in the same datatype
+data DataGen = DataGen {
+        _dgDecls :: Map TyName (DataDeclaration AbstractTy),
+        _dgCtors :: Set ConstructorName,
+        _dgCurrentScope :: ScopeBoundary,
+        _dgBoundVars :: Map ScopeBoundary Word32
+        }
+
+dgDecls :: Lens' DataGen (Map TyName (DataDeclaration AbstractTy))
+dgDecls = lens (\(DataGen a _ _ _) -> a) (\(DataGen _ b c d) a -> DataGen a b c d)
+
+dgConstructors :: Lens' DataGen (Set ConstructorName)
+dgConstructors = lens (\(DataGen _ b _ _) -> b) (\(DataGen a _ c d) b -> DataGen a b c d)
+
+dgCurrentScope :: Lens' DataGen ScopeBoundary
+dgCurrentScope = lens (\(DataGen _ _ c _) -> c) (\(DataGen a b _ d) c -> DataGen a b c d)
+
+dgBoundVars :: Lens' DataGen (Map ScopeBoundary Word32)
+dgBoundVars = lens (\(DataGen _ _ _ d) -> d) (\(DataGen a b c _) d -> DataGen a b c d)
+
+
+
+-- Monadic stack for generating monomorphic datatype declarations. Need a different one for polymorphic ones to track the level & available variables
+-- In theory this could be a reader but it becomes super awkward to work, StateT is easier
+newtype DataGenM a = DataGenM (StateT DataGen Gen a)
+ deriving newtype (Functor, Applicative, Monad)
+ deriving (MonadState DataGen) via StateT DataGen Gen
+
+runDataGenM :: DataGenM a -> Gen a
+runDataGenM (DataGenM ma) = evalStateT ma (DataGen M.empty Set.empty 0 M.empty)
+
+liftGen :: forall (a :: Type). Gen a -> DataGenM a
+liftGen ma = DataGenM (lift ma)
+
+
 uniqueVector :: forall (a :: Type). (Arbitrary a, Ord a) => Gen (Vector a)
 uniqueVector = Vector.fromList . Set.toList <$> arbitrary @(Set a)
 
@@ -140,9 +181,21 @@ instance Arbitrary ConstructorName where
         let caps = ['A'..'Z']
             lower = ['a'..'z']
         x <- arbitrary `suchThat` (`elem` caps)
-        xs <- arbitrary `suchThat` all (`elem` (caps <> lower))
+        xs <- scale (* 4) $ arbitrary `suchThat` all (`elem` (caps <> lower))
         pure . T.pack $ (x:xs)
   -- Default shrink should be fine? The name of constructors doesn't affect much
+
+freshConstructorName :: DataGenM ConstructorName
+freshConstructorName = do
+  datatypes <- gets (M.elems . view dgDecls)
+  let allCtorNames = Set.fromList $ datatypes ^.. (folded % datatypeConstructors % folded % constructorName)
+  liftGen $ arbitrary @ConstructorName `suchThat` (`Set.notMember` allCtorNames)
+
+freshTyName :: DataGenM TyName
+freshTyName = do
+  datatypes <- gets (M.elems . view dgDecls)
+  let allDataTypeNames = Set.fromList $ datatypes ^.. (folded % datatypeName)
+  liftGen $ arbitrary @TyName `suchThat` (`Set.notMember` allDataTypeNames)
 
 instance Arbitrary TyName where
   arbitrary = TyName . runConstructorName <$> arbitrary
@@ -151,20 +204,117 @@ newtype ConcreteConstructor = ConcreteConstructor (Constructor AbstractTy)
   deriving Eq via (Constructor AbstractTy)
   deriving stock Show
 
-instance Arbitrary ConcreteConstructor where
-  arbitrary = ConcreteConstructor <$> sized go
-    where
-      go :: Int -> Gen (Constructor AbstractTy)
-      go size = do
+genConcreteConstructor :: DataGenM ConcreteConstructor
+genConcreteConstructor = ConcreteConstructor <$> go
+  where
+    go :: DataGenM (Constructor AbstractTy)
+    go = do
+      ctorNm <- freshConstructorName
+      numArgs <- liftGen $ chooseInt (0,5)
+      args <- liftGen $ Vector.replicateM numArgs (arbitrary @Concrete)
+      modify (over dgConstructors (Set.insert ctorNm))
+      pure $ Constructor ctorNm (coerce <$> args)
+
+genConcreteDataDecl :: DataGenM ConcreteDataDecl
+genConcreteDataDecl = ConcreteDataDecl <$> do
+  tyNm <- freshTyName
+  numArgs <- liftGen $ chooseInt (0,5)
+  ctors <- coerce <$> Vector.replicateM numArgs genConcreteConstructor
+  let decl = DataDeclaration tyNm count0 ctors
+  modify (over dgDecls (M.insert tyNm decl))
+  pure decl
+
+{- Concrete datatypes which may contain other concrete datatypes as constructor args. (Still no TyVars)
+
+   Going to try to add the capability for these to be recursive. Won't give us anything *that* interesting but
+   should give us things like: data IntList = Empty | IntListCons Int IntList
+-}
+
+newtype NestedConcreteDataDecl = NestedConcreteDataDecl (DataDeclaration AbstractTy)
+  deriving Eq via (DataDeclaration AbstractTy)
+  deriving stock Show
+
+newtype NestedConcreteCtor = NestedConcreteCtor (Constructor AbstractTy)
+
+arbitraryNestedConcrete :: DataGenM  NestedConcreteDataDecl
+arbitraryNestedConcrete = NestedConcreteDataDecl <$> do
+  tyNm <-  freshTyName
+  let nullary :: DataGenM (DataDeclaration AbstractTy)
+      nullary = liftGen $ do
         ctorNm <- arbitrary @ConstructorName
-        args <-  resize (size `quot` 4) (arbitrary @[Concrete])
-        pure $ Constructor ctorNm (Vector.fromList . fmap coerce $ args)
+        pure $ DataDeclaration tyNm count0 (Vector.singleton (Constructor ctorNm Vector.empty))
 
-  -- For this one, I think we just want to shrink the args normally. This is probably equivalent to the derived method?
-  shrink (ConcreteConstructor (Constructor nm args)) = do
-    args' <- coerce <$> shrink (Concrete <$> args)
-    pure . ConcreteConstructor . Constructor nm $ args'
+      nonNestedConcrete :: DataGenM (DataDeclaration AbstractTy)
+      nonNestedConcrete =  do
+        numCtors <- liftGen $ chooseInt (0,5)
+        ctors <- fmap coerce <$> Vector.replicateM numCtors genConcreteConstructor
+        pure $ DataDeclaration tyNm count0 ctors
 
+      nested :: DataGenM (DataDeclaration AbstractTy)
+      nested = do
+        alreadyGenerated <- get
+        numCtors <- liftGen $ chooseInt (0,5)
+        ctors <- Vector.replicateM numCtors nestedCtor
+        pure $ DataDeclaration tyNm count0 (coerce <$> ctors)
+
+  options <- sequence [nullary,nonNestedConcrete,nested]
+  res <- liftGen $ oneof (pure <$> options)
+  modify (over dgDecls (M.insert tyNm res))
+  pure res
+
+nestedCtor :: DataGenM NestedConcreteCtor
+nestedCtor = do
+  alreadyGenerated <- gets (view dgDecls)
+  -- I dunno how to thread the "size" through to this, so this is kind of a hack.
+  numArgs <- liftGen $ chooseInt (0,5)
+  args <- Vector.replicateM numArgs nestedCtorArg
+  ctorNm <-  freshConstructorName
+  modify (over dgConstructors (Set.insert ctorNm))
+  pure . coerce $ Constructor ctorNm args
+ where
+   nestedCtorArg :: DataGenM (ValT AbstractTy)
+   nestedCtorArg = do
+     userTyNames <- gets (M.keys . view dgDecls)
+     if null userTyNames
+       then coerce <$> liftGen (arbitrary @Concrete)
+       else do 
+         let userTypes = (`Datatype` Vector.empty) <$> userTyNames
+         liftGen $ frequency [(8,elements userTypes), (2, coerce <$> arbitrary @Concrete)]
+
+nestedConcreteDatatypes :: Int -> DataGenM (Map TyName (DataDeclaration AbstractTy))
+nestedConcreteDatatypes n
+  | n <= 0 = gets (view dgDecls)
+  | otherwise = do
+      void $  arbitraryNestedConcrete
+      nestedConcreteDatatypes (n-1)
+
+-- Utilities for repl testing (so I don't have to type them every time I :r) - delete the eventually, probably
+genConcreteDecl :: IO (DataDeclaration AbstractTy)
+genConcreteDecl = coerce <$> generate (runDataGenM genConcreteDataDecl)
+
+-- for convenience
+unsafeRename :: forall (a :: Type). RenameM a -> IO a
+unsafeRename act = case runRenameM act of
+  Left err -> throwIO (userError $ show err)
+  Right res -> pure res
+
+genNestedConcrete :: Int -> IO [DataDeclaration AbstractTy]
+genNestedConcrete n = generate go
+  where
+    go :: Gen [DataDeclaration AbstractTy]
+    go = M.elems <$> runDataGenM (nestedConcreteDatatypes n)
+
+prettyTestConcrete :: IO ()
+prettyTestConcrete = genConcreteDecl >>= \decl ->
+  unsafeRename (renameDataDecl decl) >>= \renamed ->
+  putDoc (hardline <> pretty renamed <+> hardline <> hardline)
+
+prettyNestedConcrete :: Int -> IO ()
+prettyNestedConcrete n = genNestedConcrete n >>= \decls ->
+  traverse (unsafeRename . renameDataDecl) decls >>= \renamed ->
+  traverse_ (\decl -> putDoc $ hardline <> pretty decl <> hardline <> hardline) renamed
+
+{- I don't think these instances should exist. We should always generate a set of datatypes, using these instances is probably always a mistake
 
 instance Arbitrary ConcreteDataDecl where
   arbitrary = ConcreteDataDecl <$>  do
@@ -187,88 +337,18 @@ instance Arbitrary ConcreteDataDecl where
         res2 = ConcreteDataDecl $ DataDeclaration nm count0 (coerce ctorsS2')
     pure res1 <|> pure res2
 
-{- Concrete datatypes which may contain other concrete datatypes as constructor args. (Still no TyVars)
-
-   Going to try to add the capability for these to be recursive. Won't give us anything *that* interesting but
-   should give us things like: data IntList = Empty | IntListCons Int IntList
--}
-
-newtype NestedConcreteDataDecl = NestedConcreteDataDecl (DataDeclaration AbstractTy)
-  deriving Eq via (DataDeclaration AbstractTy)
-  deriving stock Show
-
-newtype NestedConcreteCtor = NestedConcreteCtor (Constructor AbstractTy)
-
-arbitraryNestedConcrete :: ReaderT (Map TyName (DataDeclaration AbstractTy)) Gen NestedConcreteDataDecl
-arbitraryNestedConcrete = NestedConcreteDataDecl <$> do
-  tyNm <- lift $ arbitrary @TyName
-  let nullary :: ReaderT (Map TyName (DataDeclaration AbstractTy)) Gen (DataDeclaration AbstractTy)
-      nullary = lift $ do
+instance Arbitrary ConcreteConstructor where
+  arbitrary = ConcreteConstructor <$> sized go
+    where
+      go :: Int -> Gen (Constructor AbstractTy)
+      go size = do
         ctorNm <- arbitrary @ConstructorName
-        pure $ DataDeclaration tyNm count0 (Vector.singleton (Constructor ctorNm Vector.empty))
+        args <-  resize (size `quot` 4) (arbitrary @[Concrete])
+        pure $ Constructor ctorNm (Vector.fromList . fmap coerce $ args)
 
-      nonNestedConcrete :: ReaderT (Map TyName (DataDeclaration AbstractTy)) Gen (DataDeclaration AbstractTy)
-      nonNestedConcrete = lift $ do
-        ctors <- fmap coerce <$> (arbitrary @[ConcreteConstructor])
-        pure $ DataDeclaration tyNm count0 (Vector.fromList ctors)
+  -- For this one, I think we just want to shrink the args normally. This is probably equivalent to the derived method?
+  shrink (ConcreteConstructor (Constructor nm args)) = do
+    args' <- coerce <$> shrink (Concrete <$> args)
+    pure . ConcreteConstructor . Constructor nm $ args'
 
-      nested :: ReaderT (Map TyName (DataDeclaration AbstractTy)) Gen (DataDeclaration AbstractTy)
-      nested = do
-        alreadyGenerated <- ask
-        numCtors <- lift $ chooseInt (0,5)
-        ctors <- Vector.replicateM numCtors nestedCtor
-        pure $ DataDeclaration tyNm count0 (coerce <$> ctors)
-
-  options <- sequence [nullary,nonNestedConcrete,nested]
-  lift $ oneof (pure <$> options)
-
-nestedCtor :: ReaderT (Map TyName (DataDeclaration AbstractTy)) Gen NestedConcreteCtor
-nestedCtor = do
-  alreadyGenerated <- ask
-  -- I dunno how to thread the "size" through to this, so this is kind of a hack.
-  numArgs <- lift $ chooseInt (0,5)
-  args <- Vector.replicateM numArgs nestedCtorArg
-  ctorNm <- lift $ arbitrary @ConstructorName
-  pure . coerce $ Constructor ctorNm args
- where
-   nestedCtorArg :: ReaderT (Map TyName (DataDeclaration AbstractTy)) Gen (ValT AbstractTy)
-   nestedCtorArg = do
-     userTyNames <- asks M.keys
-     if null userTyNames
-       then coerce <$> lift (arbitrary @Concrete)
-       else do
-         let userTypes = (`Datatype` Vector.empty) <$> userTyNames
-         lift $ oneof [elements userTypes, coerce <$> arbitrary @Concrete]
-
-nestedConcreteDatatypes :: Int -> ReaderT (Map TyName (DataDeclaration AbstractTy)) Gen (Map TyName (DataDeclaration AbstractTy))
-nestedConcreteDatatypes n
-  | n <= 0 = ask
-  | otherwise = do
-      firstDecl <- coerce <$> arbitraryNestedConcrete
-      local (M.insert (firstDecl ^. datatypeName) firstDecl) $ nestedConcreteDatatypes (n-1) 
-
--- Utilities for repl testing (so I don't have to type them every time I :r) - delete the eventually, probably
-genConcreteDecl :: IO (DataDeclaration AbstractTy)
-genConcreteDecl = coerce <$> generate (arbitrary @ConcreteDataDecl)
-
--- for convenience
-unsafeRename :: forall (a :: Type). RenameM a -> IO a
-unsafeRename act = case runRenameM act of
-  Left err -> throwIO (userError $ show err)
-  Right res -> pure res
-
-genNestedConcrete :: Int -> IO [DataDeclaration AbstractTy]
-genNestedConcrete n = generate go
-  where
-    go :: Gen [DataDeclaration AbstractTy]
-    go = M.elems <$> runReaderT (nestedConcreteDatatypes n) M.empty
-
-prettyTestConcrete :: IO ()
-prettyTestConcrete = genConcreteDecl >>= \decl ->
-  unsafeRename (renameDataDecl decl) >>= \renamed ->
-  putDoc (hardline <> pretty renamed <+> hardline <> hardline)
-
-prettyNestedConcrete :: Int -> IO ()
-prettyNestedConcrete n = genNestedConcrete n >>= \decls ->
-  traverse (unsafeRename . renameDataDecl) decls >>= \renamed ->
-  traverse_ (\decl -> putDoc $ hardline <> pretty decl <> hardline <> hardline) renamed
+-}
