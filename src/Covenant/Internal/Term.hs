@@ -41,6 +41,11 @@ data CovenantTypeError
   | RenameArgumentFailed (ValT AbstractTy) RenameError
   | NoSuchArgument DeBruijn (Index "arg")
   | ReturnCompType (CompT AbstractTy)
+  | LambdaResultsInValType (ValT AbstractTy)
+  | LambdaResultsInNonReturn (CompT AbstractTy)
+  | ReturnWrapsError
+  | ReturnWrapsCompType (CompT AbstractTy)
+  | WrongReturnType (ValT AbstractTy) (ValT AbstractTy)
   deriving stock
     ( -- | @since 1.0.0
       Eq,

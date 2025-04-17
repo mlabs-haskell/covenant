@@ -17,7 +17,12 @@ module Covenant.ASG
         RenameFunctionFailed,
         RenameArgumentFailed,
         NoSuchArgument,
-        ReturnCompType
+        ReturnCompType,
+        LambdaResultsInValType,
+        LambdaResultsInNonReturn,
+        ReturnWrapsError,
+        ReturnWrapsCompType,
+        WrongReturnType
       ),
     RenameError
       ( InvalidAbstractionReference,
@@ -30,6 +35,7 @@ module Covenant.ASG
     builtin3,
     force,
     ret,
+    lam,
     err,
     lit,
     thunk,
@@ -37,8 +43,8 @@ module Covenant.ASG
 where
 
 import Control.Monad.Except (MonadError (throwError))
-import Control.Monad.HashCons (MonadHashCons (refTo))
-import Control.Monad.Reader (MonadReader, asks)
+import Control.Monad.HashCons (MonadHashCons (lookupRef, refTo))
+import Control.Monad.Reader (MonadReader (local), asks)
 import Covenant.Constant (AConstant, typeConstant)
 import Covenant.DeBruijn (DeBruijn, asInt)
 import Covenant.Index (Index, count0, intIndex)
@@ -58,6 +64,7 @@ import Covenant.Internal.Term
         Builtin2Internal,
         Builtin3Internal,
         ForceInternal,
+        LamInternal,
         ReturnInternal
       ),
     CovenantTypeError
@@ -68,12 +75,17 @@ import Covenant.Internal.Term
         ForceCompType,
         ForceError,
         ForceNonThunk,
+        LambdaResultsInNonReturn,
+        LambdaResultsInValType,
         NoSuchArgument,
         RenameArgumentFailed,
         RenameFunctionFailed,
         ReturnCompType,
+        ReturnWrapsCompType,
+        ReturnWrapsError,
         ThunkError,
-        ThunkValType
+        ThunkValType,
+        WrongReturnType
       ),
     Id,
     Ref,
@@ -98,12 +110,14 @@ import Covenant.Prim
 import Data.Coerce (coerce)
 import Data.Kind (Type)
 import Data.Vector (Vector)
+import Data.Vector qualified as Vector
 import Data.Vector.NonEmpty qualified as NonEmpty
 import Optics.Core
   ( A_Lens,
     LabelOptic (labelOptic),
     ix,
     lens,
+    over,
     preview,
     review,
     (%),
@@ -200,6 +214,36 @@ ret r = do
       refTo . ACompNode t' . ReturnInternal $ r
     CompNodeType t -> throwError . ReturnCompType $ t
     ErrorNodeType -> err
+
+-- | @since 1.0.0
+lam ::
+  forall (m :: Type -> Type).
+  (MonadHashCons Id ASGNode m, MonadError CovenantTypeError m, MonadReader ScopeInfo m) =>
+  CompT AbstractTy ->
+  m Id ->
+  m Id
+lam expectedT@(CompT _ (CompTBody xs)) bodyComp = do
+  let (args, resultT) = NonEmpty.unsnoc xs
+  bodyId <- local (over #argumentInfo (Vector.cons args)) bodyComp
+  bodyNode <- lookupRef bodyId
+  case bodyNode of
+    Nothing -> throwError . BrokenIdReference $ bodyId
+    -- This unifies with anything, so we're fine
+    Just AnError -> refTo . ACompNode expectedT . LamInternal $ bodyId
+    Just (ACompNode t specs) -> case specs of
+      ReturnInternal r -> do
+        rT <- typeRef r
+        case rT of
+          -- Note (Koz, 17/04/2025): I am not 100% sure about this, but I can't
+          -- see how anything else would make sense.
+          ValNodeType actualT ->
+            if resultT == actualT
+              then refTo . ACompNode expectedT . LamInternal $ bodyId
+              else throwError . WrongReturnType resultT $ actualT
+          ErrorNodeType -> throwError ReturnWrapsError
+          CompNodeType t' -> throwError . ReturnWrapsCompType $ t'
+      _ -> throwError . LambdaResultsInNonReturn $ t
+    Just (AValNode t _) -> throwError . LambdaResultsInValType $ t
 
 -- | @since 1.0.0
 err ::
