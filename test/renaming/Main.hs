@@ -132,7 +132,7 @@ testConstT2 = do
           Abstraction (Unifiable ix0)
             :--:> ReturnT
               ( ThunkT . Comp1 $
-                  Abstraction (Wildcard 1 ix0)
+                  Abstraction (Wildcard 1 2 ix0)
                     :--:> ReturnT (Abstraction (Unifiable ix0))
               )
   let result = runRenameM . renameCompT $ constT
