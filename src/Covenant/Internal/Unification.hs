@@ -40,7 +40,7 @@ data TypeAppError
   | -- | A wildcard (thus, a skolem) escaped its scope.
     LeakingWildcard Word64 Int (Index "tyvar")
   | -- | We were given too many arguments.
-    ExcessArgs (Vector (Maybe (ValT Renamed)))
+    ExcessArgs (CompT Renamed) (Vector (Maybe (ValT Renamed)))
   | -- | We weren't given enough arguments.
     InsufficientArgs
   | -- | The expected type (first field) and actual type (second field) do not
@@ -55,7 +55,7 @@ data TypeAppError
 
 -- | @since 1.0.0
 checkApp :: CompT Renamed -> [Maybe (ValT Renamed)] -> Either TypeAppError (ValT Renamed)
-checkApp (CompT _ (CompTBody xs)) =
+checkApp f@(CompT _ (CompTBody xs)) =
   let (curr, rest) = NonEmpty.uncons xs
    in go curr (Vector.toList rest)
   where
@@ -69,7 +69,7 @@ checkApp (CompT _ (CompTBody xs)) =
         -- If we got here, currParam is the resulting type after all
         -- substitutions have been applied.
         [] -> fixUp currParam
-        _ -> throwError . ExcessArgs . Vector.fromList $ args
+        _ -> throwError . ExcessArgs f . Vector.fromList $ args
       _ -> case args of
         [] -> throwError InsufficientArgs
         (currArg : restArgs) -> do
