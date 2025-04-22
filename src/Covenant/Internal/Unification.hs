@@ -42,7 +42,7 @@ data TypeAppError
   | -- | We were given too many arguments.
     ExcessArgs (CompT Renamed) (Vector (Maybe (ValT Renamed)))
   | -- | We weren't given enough arguments.
-    InsufficientArgs
+    InsufficientArgs (CompT Renamed)
   | -- | The expected type (first field) and actual type (second field) do not
     -- unify.
     DoesNotUnify (ValT Renamed) (ValT Renamed)
@@ -71,7 +71,7 @@ checkApp f@(CompT _ (CompTBody xs)) =
         [] -> fixUp currParam
         _ -> throwError . ExcessArgs f . Vector.fromList $ args
       _ -> case args of
-        [] -> throwError InsufficientArgs
+        [] -> throwError . InsufficientArgs $ f
         (currArg : restArgs) -> do
           newRestParams <- case currArg of
             -- An error argument unifies with anything, as it's effectively
@@ -82,7 +82,7 @@ checkApp f@(CompT _ (CompTBody xs)) =
               subs <- catchError (unify currParam currArg') (promoteUnificationError currParam currArg')
               pure . Map.foldlWithKey' applySub restParams $ subs
           case newRestParams of
-            [] -> throwError InsufficientArgs
+            [] -> throwError . InsufficientArgs $ f
             (currParam' : restParams') -> go currParam' restParams' restArgs
 
 -- Helpers

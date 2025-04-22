@@ -99,7 +99,7 @@ propTooManyArgs = forAllShrink gen shr $ \excessArgs ->
       case renamedExcessArgs of
         [] -> discard -- should be impossible
         _ : extraArgs ->
-          let expected = Left . ExcessArgs . Vector.fromList . fmap Just $ extraArgs
+          let expected = Left . ExcessArgs renamedIdT . Vector.fromList . fmap Just $ extraArgs
               actual = checkApp renamedIdT (fmap Just renamedExcessArgs)
            in expected === actual
   where
@@ -126,7 +126,7 @@ propTooManyArgs = forAllShrink gen shr $ \excessArgs ->
 unitInsufficientArgs :: IO ()
 unitInsufficientArgs = do
   renamedIdT <- failLeft . runRenameM . renameCompT $ idT
-  let expected = Left InsufficientArgs
+  let expected = Left . InsufficientArgs $ renamedIdT
   let actual = checkApp renamedIdT []
   assertEqual "" expected actual
 
