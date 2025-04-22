@@ -99,8 +99,8 @@ propTooManyArgs = forAllShrink gen shr $ \excessArgs ->
       case renamedExcessArgs of
         [] -> discard -- should be impossible
         _ : extraArgs ->
-          let expected = Left . ExcessArgs . Vector.fromList $ extraArgs
-              actual = checkApp renamedIdT renamedExcessArgs
+          let expected = Left . ExcessArgs renamedIdT . Vector.fromList . fmap Just $ extraArgs
+              actual = checkApp renamedIdT (fmap Just renamedExcessArgs)
            in expected === actual
   where
     -- Note (Koz, 14/04/2025): The default size of 100 makes it rather painful
@@ -126,7 +126,7 @@ propTooManyArgs = forAllShrink gen shr $ \excessArgs ->
 unitInsufficientArgs :: IO ()
 unitInsufficientArgs = do
   renamedIdT <- failLeft . runRenameM . renameCompT $ idT
-  let expected = Left InsufficientArgs
+  let expected = Left . InsufficientArgs $ renamedIdT
   let actual = checkApp renamedIdT []
   assertEqual "" expected actual
 
@@ -137,7 +137,7 @@ propIdConcrete = forAllShrink arbitrary shrink $ \(Concrete t) ->
   withRenamedComp idT $ \renamedIdT ->
     withRenamedVals (Identity t) $ \(Identity t') ->
       let expected = Right t'
-          actual = checkApp renamedIdT [t']
+          actual = checkApp renamedIdT [Just t']
        in expected === actual
 
 -- Try to apply `forall a b . a -> b -> !a` to two identical concrete types.
@@ -147,7 +147,7 @@ propConst2Same = forAllShrink arbitrary shrink $ \(Concrete t) ->
   withRenamedComp const2T $ \renamedConst2T ->
     withRenamedVals (Identity t) $ \(Identity t') ->
       let expected = Right t'
-          actual = checkApp renamedConst2T [t', t']
+          actual = checkApp renamedConst2T [Just t', Just t']
        in expected === actual
 
 -- Try to apply `forall a b . a -> b -> !a` to two random _different_ concrete
@@ -160,7 +160,7 @@ propConst2Different = forAllShrink arbitrary shrink $ \(Concrete t1, Concrete t2
       withRenamedVals (Identity t1) $ \(Identity t1') ->
         withRenamedVals (Identity t2) $ \(Identity t2') ->
           let expected = Right t1'
-              actual = checkApp renamedConst2T [t1', t2']
+              actual = checkApp renamedConst2T [Just t1', Just t2']
            in expected === actual
 
 -- Randomly pick a concrete type `A`, then pick a type `b` which is either `A`
@@ -174,14 +174,14 @@ propUnifyConcrete = forAllShrink gen shr $ \(tA, mtB) ->
       case mtB of
         Nothing ->
           let expected = Right integerT
-              actual = checkApp f [tA']
+              actual = checkApp f [Just tA']
            in expected === actual
         Just tB ->
           if tA == tB
             then discard
             else withRenamedVals (Identity tB) $ \(Identity arg) ->
               let expected = Left . DoesNotUnify tA' $ arg
-                  actual = checkApp f [arg]
+                  actual = checkApp f [Just arg]
                in expected === actual
   where
     -- This ensures that our cases occur with equal frequency.
@@ -212,7 +212,7 @@ propUnifyRigidConcrete = forAllShrink arbitrary shrink $ \(Concrete t, scope, ix
       -- stepdown' for `f` even though we bind no variables.
       let trueLevel = negate . asInt $ scope
           expected = Left . DoesNotUnify (Abstraction . Rigid trueLevel $ ix) $ t'
-          actual = checkApp f [t']
+          actual = checkApp f [Just t']
        in expected === actual
 
 -- Randomly pick a concrete type A, then try to apply `(forall a . a ->
@@ -225,7 +225,7 @@ propUnifyWildcardConcrete = forAllShrink arbitrary shrink $ \(Concrete t) ->
          in withRenamedVals (Identity argT) $ \(Identity argT') ->
               let lhs = ThunkT . Comp1 $ Abstraction (Wildcard 1 2 ix0) :--:> ReturnT integerT
                   expected = Left . DoesNotUnify lhs $ argT'
-                  actual = checkApp f [argT']
+                  actual = checkApp f [Just argT']
                in expected === actual
 
 -- Randomly generate a concrete type A, then try to apply
@@ -237,7 +237,7 @@ propUnifyWildcardUnifiable = forAllShrink arbitrary shrink $ \(Concrete t) ->
     withRenamedVals (Identity t) $ \(Identity t') ->
       withRenamedVals (Identity . ThunkT . Comp1 $ tyvar Z ix0 :--:> ReturnT t) $ \(Identity arg) ->
         let expected = Right t'
-            actual = checkApp f [arg]
+            actual = checkApp f [Just arg]
          in expected === actual
 
 -- Randomly generate a concrete type A, and a rigid type B, then try to apply `A
@@ -249,7 +249,7 @@ propUnifyConcreteRigid = forAllShrink arbitrary shrink $ \(Concrete aT, scope, i
       withRenamedVals (Identity aT) $ \(Identity aT') ->
         let level = negate . asInt $ scope
             expected = Left . DoesNotUnify aT' . Abstraction . Rigid level $ index
-            actual = checkApp f [arg]
+            actual = checkApp f [Just arg]
          in expected === actual
 
 -- Randomly generate a rigid type A, then try to apply `forall a . a -> !a` to
@@ -259,7 +259,7 @@ propUnifyUnifiableRigid = forAllShrink arbitrary shrink $ \(scope, index) ->
   withRenamedComp idT $ \f ->
     withRenamedVals (Identity $ tyvar scope index) $ \(Identity arg) ->
       let expected = Right arg
-          actual = checkApp f [arg]
+          actual = checkApp f [Just arg]
        in expected === actual
 
 -- Randomly generate a scope S and an index I, then another scope S' and another
@@ -271,7 +271,7 @@ propUnifyUnifiableRigid = forAllShrink arbitrary shrink $ \(scope, index) ->
 propUnifyRigid :: Property
 propUnifyRigid = forAllShrink gen shr $ \testData ->
   withTestData testData $ \(f, arg, expected) ->
-    let actual = checkApp f [arg]
+    let actual = checkApp f [Just arg]
      in expected === actual
   where
     gen :: Gen (DeBruijn, Index "tyvar", Maybe (Either DeBruijn (Index "tyvar")))
@@ -330,7 +330,7 @@ propUnifyWildcardRigid = forAllShrink arbitrary shrink $ \(scope, index) ->
          in withRenamedVals (Identity argT) $ \(Identity argT') ->
               let lhs = ThunkT . Comp1 $ Abstraction (Wildcard 1 2 ix0) :--:> ReturnT integerT
                   expected = Left . DoesNotUnify lhs $ argT'
-                  actual = checkApp f [argT']
+                  actual = checkApp f [Just argT']
                in expected === actual
 
 -- Helpers
