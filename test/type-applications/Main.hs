@@ -223,7 +223,7 @@ propUnifyWildcardConcrete = forAllShrink arbitrary shrink $ \(Concrete t) ->
    in withRenamedComp (Comp0 $ thunk :--:> ReturnT integerT) $ \f ->
         let argT = ThunkT . Comp0 $ t :--:> ReturnT integerT
          in withRenamedVals (Identity argT) $ \(Identity argT') ->
-              let lhs = ThunkT . Comp1 $ Abstraction (Wildcard 1 ix0) :--:> ReturnT integerT
+              let lhs = ThunkT . Comp1 $ Abstraction (Wildcard 1 2 ix0) :--:> ReturnT integerT
                   expected = Left . DoesNotUnify lhs $ argT'
                   actual = checkApp f [Just argT']
                in expected === actual
@@ -328,7 +328,7 @@ propUnifyWildcardRigid = forAllShrink arbitrary shrink $ \(scope, index) ->
    in withRenamedComp (Comp0 $ thunk :--:> ReturnT integerT) $ \f ->
         let argT = ThunkT . Comp0 $ tyvar (S scope) index :--:> ReturnT integerT
          in withRenamedVals (Identity argT) $ \(Identity argT') ->
-              let lhs = ThunkT . Comp1 $ Abstraction (Wildcard 1 ix0) :--:> ReturnT integerT
+              let lhs = ThunkT . Comp1 $ Abstraction (Wildcard 1 2 ix0) :--:> ReturnT integerT
                   expected = Left . DoesNotUnify lhs $ argT'
                   actual = checkApp f [Just argT']
                in expected === actual

@@ -38,7 +38,7 @@ data TypeAppError
   = -- | The final type after all arguments are applied is @forall a . a@.
     LeakingUnifiable (Index "tyvar")
   | -- | A wildcard (thus, a skolem) escaped its scope.
-    LeakingWildcard Word64 (Index "tyvar")
+    LeakingWildcard Word64 Int (Index "tyvar")
   | -- | We were given too many arguments.
     ExcessArgs (Vector (Maybe (ValT Renamed)))
   | -- | We weren't given enough arguments.
@@ -132,7 +132,7 @@ fixUp = \case
   -- We have a result that's effectively `forall a . a` but not an error
   Abstraction (Unifiable index) -> throwError . LeakingUnifiable $ index
   -- We're doing the equivalent of failing the `ST` trick
-  Abstraction (Wildcard scopeId index) -> throwError . LeakingWildcard scopeId $ index
+  Abstraction (Wildcard scopeId trueLevel index) -> throwError . LeakingWildcard scopeId trueLevel $ index
   -- We may have a result with fewer unifiables than we started with
   -- This can be a problem, as we might be referring to unifiables that don't
   -- exist anymore
@@ -174,7 +174,7 @@ unify expected actual =
           -- Unifiables unify with everything, and require a substitutional rewrite.
           Unifiable index1 -> pure . Map.singleton index1 $ actual
           Rigid level1 index1 -> expectRigid level1 index1
-          Wildcard scopeId1 index1 -> expectWildcard scopeId1 index1
+          Wildcard scopeId1 _ index1 -> expectWildcard scopeId1 index1
         ThunkT t1 -> expectThunk t1
         BuiltinFlat t1 -> expectFlatBuiltin t1
     )
@@ -202,7 +202,7 @@ unify expected actual =
     -- else. No substitutional rewrites are needed.
     expectWildcard scopeId1 index1 = case actual of
       Abstraction (Unifiable _) -> noSubUnify
-      Abstraction (Wildcard scopeId2 index2) ->
+      Abstraction (Wildcard scopeId2 _ index2) ->
         if scopeId1 /= scopeId2 || index1 == index2
           then noSubUnify
           else unificationError

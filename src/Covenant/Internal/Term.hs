@@ -1,19 +1,52 @@
 module Covenant.Internal.Term
-  ( Id (..),
+  ( CovenantTypeError (..),
+    Id (..),
+    typeId,
     Arg (..),
+    typeArg,
     Ref (..),
+    typeRef,
     CompNodeInfo (..),
     ValNodeInfo (..),
     ASGNode (..),
+    typeASGNode,
     ASGNodeType (..),
   )
 where
 
+import Control.Monad.Except (MonadError (throwError))
+import Control.Monad.HashCons (MonadHashCons (lookupRef))
 import Covenant.Constant (AConstant)
+import Covenant.DeBruijn (DeBruijn)
+import Covenant.Index (Index)
+import Covenant.Internal.Rename (RenameError)
 import Covenant.Internal.Type (AbstractTy, CompT, ValT)
 import Covenant.Prim (OneArgFunc, ThreeArgFunc, TwoArgFunc)
+import Data.Kind (Type)
 import Data.Vector (Vector)
 import Data.Word (Word64)
+
+-- | @since 1.0.0
+data CovenantTypeError
+  = BrokenIdReference Id
+  | ForceCompType (CompT AbstractTy)
+  | ForceNonThunk (ValT AbstractTy)
+  | ForceError
+  | ThunkValType (ValT AbstractTy)
+  | ThunkError
+  | ApplyToValType (ValT AbstractTy)
+  | ApplyToError
+  | ApplyCompType (CompT AbstractTy)
+  | RenameFunctionFailed (CompT AbstractTy) RenameError
+  | RenameArgumentFailed (ValT AbstractTy) RenameError
+  | NoSuchArgument DeBruijn (Index "arg")
+  | ReturnCompType (CompT AbstractTy)
+  deriving stock
+    ( -- | @since 1.0.0
+      Eq,
+      -- | @since 1.0.0
+      Show
+    )
 
 -- | A unique identifier for a node in a Covenant program.
 --
@@ -37,10 +70,21 @@ newtype Id = Id Word64
       Show
     )
 
+-- | @since 1.0.0
+typeId ::
+  forall (m :: Type -> Type).
+  (MonadHashCons Id ASGNode m, MonadError CovenantTypeError m) =>
+  Id -> m ASGNodeType
+typeId i = do
+  lookedUp <- lookupRef i
+  case lookedUp of
+    Nothing -> throwError . BrokenIdReference $ i
+    Just node -> pure . typeASGNode $ node
+
 -- | An argument passed to a function in a Covenant program.
 --
 -- @since 1.0.0
-data Arg = Arg Word64 (ValT AbstractTy)
+data Arg = Arg DeBruijn (Index "arg") (ValT AbstractTy)
   deriving stock
     ( -- | @since 1.0.0
       Eq,
@@ -49,6 +93,10 @@ data Arg = Arg Word64 (ValT AbstractTy)
       -- | @since 1.0.0
       Show
     )
+
+-- | @since 1.0.0
+typeArg :: Arg -> ValT AbstractTy
+typeArg (Arg _ _ t) = t
 
 -- | A general reference in a Covenant program. This is one of the following:
 --
@@ -65,6 +113,15 @@ data Ref = AnArg Arg | AnId Id
       -- | @since 1.0.0
       Show
     )
+
+-- | @since 1.0.0
+typeRef ::
+  forall (m :: Type -> Type).
+  (MonadHashCons Id ASGNode m, MonadError CovenantTypeError m) =>
+  Ref -> m ASGNodeType
+typeRef = \case
+  AnArg arg -> pure . ValNodeType . typeArg $ arg
+  AnId i -> typeId i
 
 -- | Computation-term-specific node information.
 --
@@ -116,6 +173,13 @@ data ASGNode
       -- | @since 1.0.0
       Show
     )
+
+-- | @since 1.0.0
+typeASGNode :: ASGNode -> ASGNodeType
+typeASGNode = \case
+  ACompNode t _ -> CompNodeType t
+  AValNode t _ -> ValNodeType t
+  AnError -> ErrorNodeType
 
 -- | Helper data type representing the type of any ASG node whatsoever.
 --
