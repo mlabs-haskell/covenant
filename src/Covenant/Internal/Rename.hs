@@ -246,7 +246,7 @@ renameAbstraction (BoundAt scope index) = RenameM $ do
             -- This is a unifiable variable
             then Unifiable index
             -- This is a wildcard variable
-            else Wildcard uniqueScopeId index
+            else Wildcard uniqueScopeId trueLevel index
 
 -- Given a number of abstractions bound by a scope, modify the state to track
 -- that scope.

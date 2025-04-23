@@ -98,6 +98,8 @@ data AbstractTy = BoundAt DeBruijn (Index "tyvar")
     ( -- | @since 1.0.0
       Eq,
       -- | @since 1.0.0
+      Ord,
+      -- | @since 1.0.0
       Show
     )
 
@@ -115,11 +117,12 @@ data Renamed
     -- bindings.
     Unifiable (Index "tyvar")
   | -- | /Must/ unify with everything, except with other distinct wildcards in the
-    -- same scope. First field is a unique /scope/ identifier, second is the
-    -- positional index within that scope. We must have unique identifiers for
-    -- wildcard scopes, as wildcards unify with everything /except/ other
-    -- wildcards in the same scope.
-    Wildcard Word64 (Index "tyvar")
+    -- same scope. First field is a unique /scope/ identifier; second is its
+    -- \'true level\' simialr to @'Rigid'@; third is the positional index within
+    -- its scope. We must have unique identifiers for wildcard scopes, as
+    -- wildcards unify with everything /except/ other wildcards in the /same/
+    -- scope, and child scopes aren't unique.
+    Wildcard Word64 Int (Index "tyvar")
   deriving stock
     ( -- | @since 1.0.0
       Eq,
@@ -137,6 +140,8 @@ newtype CompTBody (a :: Type) = CompTBody (NonEmptyVector (ValT a))
   deriving stock
     ( -- | @since 1.0.0
       Eq,
+      -- | @since 1.0.0
+      Ord,
       -- | @since 1.0.0
       Show
     )
@@ -161,6 +166,8 @@ data CompT (a :: Type) = CompT (Count "tyvar") (CompTBody a)
   deriving stock
     ( -- | @since 1.0.0
       Eq,
+      -- | @since 1.0.0
+      Ord,
       -- | @since 1.0.0
       Show
     )
@@ -198,6 +205,8 @@ data ValT (a :: Type)
   deriving stock
     ( -- | @since 1.0.0
       Eq,
+      -- | @since 1.0.0
+      Ord,
       -- | @since 1.0.0
       Show
     )
@@ -248,6 +257,8 @@ data BuiltinFlatT
   deriving stock
     ( -- | @since 1.0.0
       Eq,
+      -- | @since 1.0.0
+      Ord,
       -- | @since 1.0.0
       Show
     )
@@ -416,7 +427,7 @@ prettyRenamedWithContext :: forall (ann :: Type). Renamed -> PrettyM ann (Doc an
 prettyRenamedWithContext = \case
   Rigid offset index -> lookupAbstraction offset index
   Unifiable i -> lookupAbstraction 0 i
-  Wildcard w64 i -> pure $ "_" <> viaShow w64 <> "#" <> pretty (review intIndex i)
+  Wildcard w64 offset i -> pure $ pretty offset <> "_" <> viaShow w64 <> "#" <> pretty (review intIndex i)
 
 lookupAbstraction :: forall (ann :: Type). Int -> Index "tyvar" -> PrettyM ann (Doc ann)
 lookupAbstraction offset argIndex = do

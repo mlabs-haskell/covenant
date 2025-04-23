@@ -38,11 +38,11 @@ data TypeAppError
   = -- | The final type after all arguments are applied is @forall a . a@.
     LeakingUnifiable (Index "tyvar")
   | -- | A wildcard (thus, a skolem) escaped its scope.
-    LeakingWildcard Word64 (Index "tyvar")
+    LeakingWildcard Word64 Int (Index "tyvar")
   | -- | We were given too many arguments.
-    ExcessArgs (Vector (ValT Renamed))
+    ExcessArgs (CompT Renamed) (Vector (Maybe (ValT Renamed)))
   | -- | We weren't given enough arguments.
-    InsufficientArgs
+    InsufficientArgs (CompT Renamed)
   | -- | The expected type (first field) and actual type (second field) do not
     -- unify.
     DoesNotUnify (ValT Renamed) (ValT Renamed)
@@ -54,53 +54,51 @@ data TypeAppError
     )
 
 -- | @since 1.0.0
-checkApp :: CompT Renamed -> [ValT Renamed] -> Either TypeAppError (ValT Renamed)
-checkApp (CompT _ (CompTBody xs)) =
+checkApp :: CompT Renamed -> [Maybe (ValT Renamed)] -> Either TypeAppError (ValT Renamed)
+checkApp f@(CompT _ (CompTBody xs)) =
   let (curr, rest) = NonEmpty.uncons xs
    in go curr (Vector.toList rest)
   where
     go ::
       ValT Renamed ->
       [ValT Renamed] ->
-      [ValT Renamed] ->
+      [Maybe (ValT Renamed)] ->
       Either TypeAppError (ValT Renamed)
     go currParam restParams args = case restParams of
       [] -> case args of
-        [] -> case currParam of
-          Abstraction (Unifiable index) -> throwError . LeakingUnifiable $ index
-          Abstraction (Wildcard scopeId index) -> throwError . LeakingWildcard scopeId $ index
-          ThunkT (CompT _ (CompTBody xs')) -> do
-            let remainingUnifiables = NonEmpty.foldl' (\acc t -> acc <> collectUnifiables t) Set.empty xs'
-            let requiredIntroductions = Set.size remainingUnifiables
-            -- We know that the size of a set cannot be negative, but GHC
-            -- doesn't.
-            let asCount = fromJust . preview intCount $ requiredIntroductions
-            let indexesToUse = mapMaybe (preview intIndex) [0, 1 .. requiredIntroductions - 1]
-            let renames = zipWith (\i replacement -> (i, Abstraction . Unifiable $ replacement)) (Set.toList remainingUnifiables) indexesToUse
-            let fixed = fmap (\t -> foldl' (\acc (i, r) -> substitute i r acc) t renames) xs'
-            pure . ThunkT . CompT asCount . CompTBody $ fixed
-          _ -> pure currParam
-        _ -> throwError . ExcessArgs . Vector.fromList $ args
+        -- If we got here, currParam is the resulting type after all
+        -- substitutions have been applied.
+        [] -> fixUp currParam
+        _ -> throwError . ExcessArgs f . Vector.fromList $ args
       _ -> case args of
-        [] -> throwError InsufficientArgs
+        [] -> throwError . InsufficientArgs $ f
         (currArg : restArgs) -> do
-          subs <- catchError (unify currParam currArg) (promoteUnificationError currParam currArg)
-          case Map.foldlWithKey' (\acc index sub -> fmap (substitute index sub) acc) restParams subs of
-            [] -> throwError InsufficientArgs
+          newRestParams <- case currArg of
+            -- An error argument unifies with anything, as it's effectively
+            -- `forall a . a`. Furthermore, it requires no substitutional
+            -- changes. Thus, we can just skip it.
+            Nothing -> pure restParams
+            Just currArg' -> do
+              subs <- catchError (unify currParam currArg') (promoteUnificationError currParam currArg')
+              pure . Map.foldlWithKey' applySub restParams $ subs
+          case newRestParams of
+            [] -> throwError . InsufficientArgs $ f
             (currParam' : restParams') -> go currParam' restParams' restArgs
 
 -- Helpers
 
-collectUnifiables :: ValT Renamed -> Set (Index "tyvar")
-collectUnifiables = \case
-  Abstraction t -> case t of
-    Unifiable index -> Set.singleton index
-    _ -> Set.empty
-  BuiltinFlat _ -> Set.empty
-  ThunkT (CompT _ (CompTBody xs)) -> NonEmpty.foldl' (\acc t -> acc <> collectUnifiables t) Set.empty xs
-  Datatype {} -> error "Don't unify datatypes until BBF implemented" -- Vector.foldl' (\acc t -> acc <> collectUnifiables t) Set.empty xs
+applySub ::
+  [ValT Renamed] ->
+  Index "tyvar" ->
+  ValT Renamed ->
+  [ValT Renamed]
+applySub acc index sub = fmap (substitute index sub) acc
 
-substitute :: Index "tyvar" -> ValT Renamed -> ValT Renamed -> ValT Renamed
+substitute ::
+  Index "tyvar" ->
+  ValT Renamed ->
+  ValT Renamed ->
+  ValT Renamed
 substitute index toSub = \case
   Abstraction t -> case t of
     Unifiable ourIndex ->
@@ -113,6 +111,60 @@ substitute index toSub = \case
   BuiltinFlat t -> BuiltinFlat t
   Datatype {} -> error "Don't unify datatypes until BBF implemented" -- Datatype tn abstractions $ substitute index toSub <$> xs
 
+-- Because unification is inherently recursive, if we find an error deep within
+-- a type, the message will signify only the _part_ that fails to unify, not the
+-- entire type. While potentially useful, this can be quite confusing,
+-- especially with generated types. Thus, we use `catchError` with this
+-- function, which effectively allows us to rename the types reported in
+-- unification errors to whatever types 'wrap' them.
+promoteUnificationError ::
+  forall (a :: Type).
+  ValT Renamed ->
+  ValT Renamed ->
+  TypeAppError ->
+  Either TypeAppError a
+promoteUnificationError topLevelExpected topLevelActual =
+  Left . \case
+    DoesNotUnify _ _ -> DoesNotUnify topLevelExpected topLevelActual
+    err -> err
+
+fixUp :: ValT Renamed -> Either TypeAppError (ValT Renamed)
+fixUp = \case
+  -- We have a result that's effectively `forall a . a` but not an error
+  Abstraction (Unifiable index) -> throwError . LeakingUnifiable $ index
+  -- We're doing the equivalent of failing the `ST` trick
+  Abstraction (Wildcard scopeId trueLevel index) -> throwError . LeakingWildcard scopeId trueLevel $ index
+  -- We may have a result with fewer unifiables than we started with
+  -- This can be a problem, as we might be referring to unifiables that don't
+  -- exist anymore
+  ThunkT (CompT _ (CompTBody xs)) -> do
+    -- Figure out how many variables the thunk has to introduce now
+    let remainingUnifiables = NonEmpty.foldl' (\acc t -> acc <> collectUnifiables t) Set.empty xs
+    let requiredIntroductions = Set.size remainingUnifiables
+    -- We know that the size of a set can't be negative, but GHC doesn't.
+    let asCount = fromJust . preview intCount $ requiredIntroductions
+    -- Make enough indexes for us to use in one go
+    let indexesToUse = mapMaybe (preview intIndex) [0, 1 .. requiredIntroductions - 1]
+    -- Construct a mapping between old, possibly non-contiguous, unifiables and
+    -- our new ones
+    let renames =
+          zipWith
+            (\i replacement -> (i, Abstraction . Unifiable $ replacement))
+            (Set.toList remainingUnifiables)
+            indexesToUse
+    let fixed = fmap (\t -> foldl' (\acc (i, r) -> substitute i r acc) t renames) xs
+    pure . ThunkT . CompT asCount . CompTBody $ fixed
+  t -> pure t
+
+collectUnifiables :: ValT Renamed -> Set (Index "tyvar")
+collectUnifiables = \case
+  Abstraction t -> case t of
+    Unifiable index -> Set.singleton index
+    _ -> Set.empty
+  BuiltinFlat _ -> Set.empty
+  ThunkT (CompT _ (CompTBody xs)) -> NonEmpty.foldl' (\acc t -> acc <> collectUnifiables t) Set.empty xs
+  Datatype{} -> error "Implement unification machinery for datatypes"
+
 unify ::
   ValT Renamed ->
   ValT Renamed ->
@@ -124,7 +176,7 @@ unify expected actual =
           -- Unifiables unify with everything, and require a substitutional rewrite.
           Unifiable index1 -> pure . Map.singleton index1 $ actual
           Rigid level1 index1 -> expectRigid level1 index1
-          Wildcard scopeId1 index1 -> expectWildcard scopeId1 index1
+          Wildcard scopeId1 _ index1 -> expectWildcard scopeId1 index1
         ThunkT t1 -> expectThunk t1
         BuiltinFlat t1 -> expectFlatBuiltin t1
         Datatype {} -> error "Don't try to unify datatypes yet" -- expectDatatype tn abses xs
@@ -153,7 +205,7 @@ unify expected actual =
     -- else. No substitutional rewrites are needed.
     expectWildcard scopeId1 index1 = case actual of
       Abstraction (Unifiable _) -> noSubUnify
-      Abstraction (Wildcard scopeId2 index2) ->
+      Abstraction (Wildcard scopeId2 _ index2) ->
         if scopeId1 /= scopeId2 || index1 == index2
           then noSubUnify
           else unificationError
@@ -200,20 +252,3 @@ unify expected actual =
         Merge.preserveMissing
         Merge.preserveMissing
         (Merge.zipWithAMatched $ \_ l r -> l <$ unless (l == r) unificationError)
-
--- Because unification is inherently recursive, if we find an error deep within
--- a type, the message will signify only the _part_ that fails to unify, not the
--- entire type. While potentially useful, this can be quite confusing,
--- especially with generated types. Thus, we use `catchError` with this
--- function, which effectively allows us to rename the types reported in
--- unification errors to whatever types 'wrap' them.
-promoteUnificationError ::
-  forall (a :: Type).
-  ValT Renamed ->
-  ValT Renamed ->
-  TypeAppError ->
-  Either TypeAppError a
-promoteUnificationError topLevelExpected topLevelActual =
-  Left . \case
-    DoesNotUnify _ _ -> DoesNotUnify topLevelExpected topLevelActual
-    err -> err
