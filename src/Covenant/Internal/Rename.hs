@@ -26,9 +26,10 @@ import Covenant.Internal.Type
   ( AbstractTy (BoundAt),
     CompT (CompT),
     CompTBody (CompTBody),
+    Constructor (Constructor),
+    DataDeclaration (DataDeclaration),
     Renamed (Rigid, Unifiable, Wildcard),
-    ValT (Abstraction, BuiltinFlat, ThunkT, Datatype), Constructor (Constructor),
-    DataDeclaration(DataDeclaration)
+    ValT (Abstraction, BuiltinFlat, Datatype, ThunkT),
   )
 import Data.Coerce (coerce)
 import Data.Kind (Type)
@@ -196,12 +197,13 @@ renameValT = \case
   Abstraction t -> Abstraction <$> renameAbstraction t
   ThunkT t -> ThunkT <$> renameCompT t
   BuiltinFlat t -> pure . BuiltinFlat $ t
-  -- Assumes kind-checking has occurred 
+  -- Assumes kind-checking has occurred
   Datatype tn xs -> RenameM $ do
     -- We don't step or un-step the scope here b/c a TyCon which appears as a ValT _cannot_ bind variables.
     -- This Vector here doesn't represent a function, but a product, so we there is no "return" type to treat specially (I think!)
     renamedXS <-
-      Vector.generateM (Vector.length xs)
+      Vector.generateM
+        (Vector.length xs)
         (\i -> coerce . renameValT $ xs Vector.! i)
     ourAbstractions <- gets (view (#tracker % to Vector.head % _1))
     unless (Vector.and ourAbstractions) (throwError $ UndeterminedAbstraction xs renamedXS)
@@ -214,14 +216,14 @@ renameDataDecl (DataDeclaration tn cnt ctors) = RenameM $ do
     Vector.generateM
       (Vector.length ctors)
       (\i -> coerce . renameCtor $ ctors Vector.! i)
-  -- REVIEW: @Koz is it ok to skip this here? It SEEMS ok 
+  -- REVIEW: @Koz is it ok to skip this here? It SEEMS ok
   -- ourAbstractions <- gets (view (#tracker % to Vector.head % _1))
   -- unless (Vector.and ourAbstractions) (throwError $ UndeterminedAbstraction)
   modify dropDownScope
-  pure $ DataDeclaration tn cnt renamedCtors 
- where
-   renameCtor :: Constructor AbstractTy -> RenameM (Constructor Renamed)
-   renameCtor (Constructor cn args) = Constructor cn <$> traverse renameValT args
+  pure $ DataDeclaration tn cnt renamedCtors
+  where
+    renameCtor :: Constructor AbstractTy -> RenameM (Constructor Renamed)
+    renameCtor (Constructor cn args) = Constructor cn <$> traverse renameValT args
 
 -- Helpers
 

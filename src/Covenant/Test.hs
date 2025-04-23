@@ -1,83 +1,94 @@
 {-# OPTIONS_GHC -Wno-unrecognised-pragmas #-}
+
 {-# HLINT ignore "Eta reduce" #-}
 module Covenant.Test
   ( Concrete (Concrete),
-    DataDeclSet(DataDeclSet),
-    DataDeclFlavor(ConcreteDecl,ConcreteNestedDecl,SimpleRecursive,Poly1),
+    DataDeclSet (DataDeclSet),
+    DataDeclFlavor (ConcreteDecl, ConcreteNestedDecl, SimpleRecursive, Poly1),
     testConcrete,
     testNested,
     testRecConcrete,
-    testPoly1
+    testPoly1,
   )
 where
 
 import Control.Applicative ((<|>))
-import Covenant.Index (count0, Count, intCount, count1, ix0)
-import Covenant.Type
-    ( BuiltinFlatT(BLS12_381_MlResultT, UnitT, BoolT, IntegerT,
-                   StringT, ByteStringT, BLS12_381_G1_ElementT,
-                   BLS12_381_G2_ElementT),
-      CompT(CompN, Comp0),
-      CompTBody(ArgsAndResult),
-      AbstractTy(BoundAt),
-      runRenameM,
-      RenameM )
-import Data.Coerce (coerce)
-import Data.Vector (Vector)
-import Data.Vector qualified as Vector
-import Data.Set (Set)
-import Data.Set qualified as Set
-import Test.QuickCheck
-    ( Arbitrary(arbitrary,shrink),
-      chooseInt,
-      elements,
-      frequency,
-      generate,
-      oneof,
-      sized,
-      suchThat,
-      vectorOf,
-      Arbitrary1(liftShrink, liftArbitrary),
-      Gen )
-import Test.QuickCheck.Instances.Vector ()
-import Covenant.Internal.Type
-    ( DataDeclaration(DataDeclaration),
-      Constructor(Constructor),
-      ConstructorName(ConstructorName),
-      ScopeBoundary,
-      ValT(Datatype, Abstraction, BuiltinFlat, ThunkT),
-      TyName(TyName),
-      runConstructorName,
-      constructorName,
-      datatypeName,
-      datatypeBinders,
-      datatypeConstructors )
-import Data.Text (Text)
-import Data.Text qualified as T
-import Covenant.Internal.Rename ( renameDataDecl )
-import Data.Kind (Type)
 import Control.Exception (throwIO)
-import Prettyprinter (pretty, hardline)
-import Prettyprinter.Render.Text (putDoc)
-import Test.QuickCheck.Instances.Containers ()
 import Control.Monad.Reader (MonadTrans (lift))
+import Control.Monad.State.Strict
+  ( MonadState (get, put),
+    State,
+    StateT,
+    evalState,
+    gets,
+    modify,
+  )
+import Covenant.DeBruijn (DeBruijn (Z))
+import Covenant.Index (Count, count0, count1, intCount, ix0)
+import Covenant.Internal.Rename (renameDataDecl)
+import Covenant.Internal.Type
+  ( Constructor (Constructor),
+    ConstructorName (ConstructorName),
+    DataDeclaration (DataDeclaration),
+    ScopeBoundary,
+    TyName (TyName),
+    ValT (Abstraction, BuiltinFlat, Datatype, ThunkT),
+    constructorName,
+    datatypeBinders,
+    datatypeConstructors,
+    datatypeName,
+    runConstructorName,
+  )
+import Covenant.Type
+  ( AbstractTy (BoundAt),
+    BuiltinFlatT
+      ( BLS12_381_G1_ElementT,
+        BLS12_381_G2_ElementT,
+        BLS12_381_MlResultT,
+        BoolT,
+        ByteStringT,
+        IntegerT,
+        StringT,
+        UnitT
+      ),
+    CompT (Comp0, CompN),
+    CompTBody (ArgsAndResult),
+    RenameM,
+    runRenameM,
+  )
+import Data.Coerce (coerce)
+import Data.Functor.Identity (Identity ())
+import Data.Kind (Type)
 import Data.Map.Strict (Map)
 import Data.Map.Strict qualified as M
-import Optics.Operators ((^.), (^..))
-import Optics.Core ((%), folded, Lens', lens, view, over, review)
-import Control.Monad.State.Strict
-    ( StateT,
-      gets,
-      modify,
-      MonadState(get, put),
-      evalState,
-      State )
+import Data.Set (Set)
+import Data.Set qualified as Set
+import Data.Text (Text)
+import Data.Text qualified as T
+import Data.Vector (Vector)
+import Data.Vector qualified as Vector
 import GHC.Word (Word32)
-import Test.QuickCheck.GenT (MonadGen, GenT)
+import Optics.Core (Lens', folded, lens, over, review, view, (%))
+import Optics.Operators ((^.), (^..))
+import Prettyprinter (hardline, pretty)
+import Prettyprinter.Render.Text (putDoc)
+import Test.QuickCheck
+  ( Arbitrary (arbitrary, shrink),
+    Arbitrary1 (liftArbitrary, liftShrink),
+    Gen,
+    chooseInt,
+    elements,
+    frequency,
+    generate,
+    oneof,
+    sized,
+    suchThat,
+    vectorOf,
+  )
+import Test.QuickCheck.GenT (GenT, MonadGen)
 import Test.QuickCheck.GenT qualified as GT
-import Data.Functor.Identity (Identity())
-import Covenant.DeBruijn (DeBruijn(Z))
-
+import Test.QuickCheck.Instances.Containers ()
+import Test.QuickCheck.Instances.Vector ()
 
 -- | Wrapper for 'Covenant.Internal.Type.ValT' to provide an 'Arbitrary' instance to generate only
 -- value types without any type variables.
@@ -124,8 +135,8 @@ instance Arbitrary Concrete where
                 pure . Covenant.Internal.Type.BuiltinFlat $ BLS12_381_G2_ElementT,
                 pure . Covenant.Internal.Type.BuiltinFlat $ BLS12_381_MlResultT,
                 Covenant.Internal.Type.ThunkT . Comp0 <$> (ArgsAndResult <$> liftArbitrary (go (size `quot` 4)) <*> go (size `quot` 4))
-               -- This is probably right but things will break if we generate datatypes at this stage
-               -- ,  Datatype <$> arbitrary <*> pure count0 <*> liftArbitrary (go (size `quot` 4))
+                -- This is probably right but things will break if we generate datatypes at this stage
+                -- ,  Datatype <$> arbitrary <*> pure count0 <*> liftArbitrary (go (size `quot` 4))
               ]
   {-# INLINEABLE shrink #-}
   shrink (Concrete v) =
@@ -142,24 +153,25 @@ instance Arbitrary Concrete where
       -- Can't shrink this
       Covenant.Internal.Type.BuiltinFlat _ -> []
       -- NOTE @Koz: I need this here to write some other instances even though `Concrete` can't generate this
-      Covenant.Internal.Type.Datatype tn args -> Covenant.Internal.Type.Datatype tn <$> do
-        let argsList = Vector.toList args
-        (fmap (Vector.fromList . coerce) . shrink . fmap Concrete) argsList
+      Covenant.Internal.Type.Datatype tn args ->
+        Covenant.Internal.Type.Datatype tn <$> do
+          let argsList = Vector.toList args
+          (fmap (Vector.fromList . coerce) . shrink . fmap Concrete) argsList
 
 {- The state used by our datatype generators.
 -}
-data DataGen = DataGen {
-        -- Keeps track of decls we've already generated. Used for "nested" generators and also essential for ValT generation (when we get around to implementing it)
-        _dgDecls :: Map Covenant.Internal.Type.TyName (Covenant.Internal.Type.DataDeclaration AbstractTy),
-        -- All used constructor names. Have to track separately, even though the information eventually ends up in the previous field, to avoid duplicate constructors in the same type.
-        _dgCtors :: Set Covenant.Internal.Type.ConstructorName,
-        -- Current scope. Needed for generating polymorphic `ValT`s for arguments to constructors . (That's not implemented yet but we 100% will need this )
-        _dgCurrentScope :: Covenant.Internal.Type.ScopeBoundary,
-        -- NOTE: Needs to maintain the invariant that the Word32 is always >0, since we will use this to select in scope variables for polymorphic args to ctors. (Again, not implemented yet)
-        _dgBoundVars :: Map Covenant.Internal.Type.ScopeBoundary Word32,
-        -- We need this for recursive types. We can't lookup the arity in dgDecls if we want to recurse b/c it won't be there until we've finished generating the whole decl
-        _dgArities :: Map Covenant.Internal.Type.TyName (Count "tyvar")
-        }
+data DataGen = DataGen
+  { -- Keeps track of decls we've already generated. Used for "nested" generators and also essential for ValT generation (when we get around to implementing it)
+    _dgDecls :: Map Covenant.Internal.Type.TyName (Covenant.Internal.Type.DataDeclaration AbstractTy),
+    -- All used constructor names. Have to track separately, even though the information eventually ends up in the previous field, to avoid duplicate constructors in the same type.
+    _dgCtors :: Set Covenant.Internal.Type.ConstructorName,
+    -- Current scope. Needed for generating polymorphic `ValT`s for arguments to constructors . (That's not implemented yet but we 100% will need this )
+    _dgCurrentScope :: Covenant.Internal.Type.ScopeBoundary,
+    -- NOTE: Needs to maintain the invariant that the Word32 is always >0, since we will use this to select in scope variables for polymorphic args to ctors. (Again, not implemented yet)
+    _dgBoundVars :: Map Covenant.Internal.Type.ScopeBoundary Word32,
+    -- We need this for recursive types. We can't lookup the arity in dgDecls if we want to recurse b/c it won't be there until we've finished generating the whole decl
+    _dgArities :: Map Covenant.Internal.Type.TyName (Count "tyvar")
+  }
 
 -- TODO: Rewrite as field label instances
 dgDecls :: Lens' DataGen (Map Covenant.Internal.Type.TyName (Covenant.Internal.Type.DataDeclaration AbstractTy))
@@ -185,8 +197,8 @@ dgArities = lens (\(DataGen _ _ _ _ e) -> e) (\(DataGen a b c d _) e -> DataGen 
     While we don't have any generators for polymorphic `ValT`s yet, the scope stuff will be necessary there.
 -}
 newtype DataGenM a = DataGenM (GenT (State DataGen) a)
- deriving newtype (Functor, Applicative, Monad)
- deriving (MonadGen) via GenT (StateT DataGen Data.Functor.Identity.Identity)
+  deriving newtype (Functor, Applicative, Monad)
+  deriving (MonadGen) via GenT (StateT DataGen Data.Functor.Identity.Identity)
 
 instance MonadState DataGen DataGenM where
   get = DataGenM $ lift get
@@ -201,12 +213,12 @@ _bindVars count'
       crossBoundary
       here <- gets (view _dgCurrentScope)
       modify $ over _dgBoundVars (M.insert here $ fromIntegral count)
- where
-   count :: Int
-   count = review intCount count'
+  where
+    count :: Int
+    count = review intCount count'
 
-   crossBoundary :: DataGenM ()
-   crossBoundary = modify $ over _dgCurrentScope (+ 1)
+    crossBoundary :: DataGenM ()
+    crossBoundary = modify $ over _dgCurrentScope (+ 1)
 
 runDataGenM :: forall (a :: Type). DataGenM a -> Gen a
 runDataGenM (DataGenM ma) = (\x -> evalState x (DataGen M.empty Set.empty 0 M.empty M.empty)) <$> GT.runGenT ma
@@ -227,25 +239,26 @@ logArity :: Covenant.Internal.Type.TyName -> Count "tyvar" -> DataGenM ()
 logArity tn cnt = modify $ over dgArities (M.insert tn cnt)
 
 newtype ConcreteDataDecl = ConcreteDataDecl (Covenant.Internal.Type.DataDeclaration AbstractTy)
-  deriving Eq via (Covenant.Internal.Type.DataDeclaration AbstractTy)
-  deriving stock Show
+  deriving (Eq) via (Covenant.Internal.Type.DataDeclaration AbstractTy)
+  deriving stock (Show)
 
 {- These should never be used in a DataGenM context, we should always use the fresh generators below-}
 anyCtorName :: Gen Covenant.Internal.Type.ConstructorName
 anyCtorName = Covenant.Internal.Type.ConstructorName <$> genValidCtorName
-    where
-      genValidCtorName :: Gen Text
-      genValidCtorName = do
-        let caps = ['A'..'Z']
-            lower = ['a'..'z']
-        nmLen <- chooseInt (1,6) -- should be more than enough to ensure `suchThat` doesn't run into clashes all the time
-        x <- elements caps
-        xs <- vectorOf nmLen  $ elements (caps <> lower)
-        pure . T.pack $ (x:xs)
+  where
+    genValidCtorName :: Gen Text
+    genValidCtorName = do
+      let caps = ['A' .. 'Z']
+          lower = ['a' .. 'z']
+      nmLen <- chooseInt (1, 6) -- should be more than enough to ensure `suchThat` doesn't run into clashes all the time
+      x <- elements caps
+      xs <- vectorOf nmLen $ elements (caps <> lower)
+      pure . T.pack $ (x : xs)
 
 anyTyName :: Gen Covenant.Internal.Type.TyName
-anyTyName =  Covenant.Internal.Type.TyName . Covenant.Internal.Type.runConstructorName <$> anyCtorName
-  -- Default shrink should be fine? The name of constructors doesn't affect much
+anyTyName = Covenant.Internal.Type.TyName . Covenant.Internal.Type.runConstructorName <$> anyCtorName
+
+-- Default shrink should be fine? The name of constructors doesn't affect much
 
 {- These ensure that we don't ever duplicate type names or constructor names. We need the DataGenM state
    to ensure that, so these should *always* be used when writing generators, and the arbitrary instances should be avoided.
@@ -258,7 +271,6 @@ freshConstructorName = do
   modify $ over dgConstructors (Set.insert thisName)
   pure thisName
 
-
 freshTyName :: DataGenM Covenant.Internal.Type.TyName
 freshTyName = do
   datatypes <- gets (M.elems . view dgDecls)
@@ -266,8 +278,8 @@ freshTyName = do
   GT.liftGen $ anyTyName `suchThat` (`Set.notMember` allDataTypeNames)
 
 newtype ConcreteConstructor = ConcreteConstructor (Covenant.Internal.Type.Constructor AbstractTy)
-  deriving Eq via (Covenant.Internal.Type.Constructor AbstractTy)
-  deriving stock Show
+  deriving (Eq) via (Covenant.Internal.Type.Constructor AbstractTy)
+  deriving stock (Show)
 
 genConcreteConstructor :: DataGenM ConcreteConstructor
 genConcreteConstructor = ConcreteConstructor <$> go
@@ -275,17 +287,18 @@ genConcreteConstructor = ConcreteConstructor <$> go
     go :: DataGenM (Covenant.Internal.Type.Constructor AbstractTy)
     go = do
       ctorNm <- freshConstructorName
-      numArgs <- GT.liftGen $ chooseInt (0,5)
+      numArgs <- GT.liftGen $ chooseInt (0, 5)
       args <- GT.liftGen $ Vector.replicateM numArgs (arbitrary @Concrete)
       pure $ Covenant.Internal.Type.Constructor ctorNm (coerce <$> args)
 
 genConcreteDataDecl :: DataGenM ConcreteDataDecl
-genConcreteDataDecl = ConcreteDataDecl <$> do
-  tyNm <- freshTyName
-  numArgs <- GT.liftGen $ chooseInt (0,5)
-  ctors <- coerce <$> Vector.replicateM numArgs genConcreteConstructor
-  let decl = Covenant.Internal.Type.DataDeclaration tyNm count0 ctors
-  returnDecl decl
+genConcreteDataDecl =
+  ConcreteDataDecl <$> do
+    tyNm <- freshTyName
+    numArgs <- GT.liftGen $ chooseInt (0, 5)
+    ctors <- coerce <$> Vector.replicateM numArgs genConcreteConstructor
+    let decl = Covenant.Internal.Type.DataDeclaration tyNm count0 ctors
+    returnDecl decl
 
 {- Concrete datatypes which may contain other concrete datatypes as constructor args. (Still no TyVars)
 
@@ -303,34 +316,35 @@ genConcreteDataDecl = ConcreteDataDecl <$> do
    since generating them one at a time will always give you the same thing as a ConcreteDataDecl.
 -}
 newtype NestedConcreteDataDecl = NestedConcreteDataDecl (Covenant.Internal.Type.DataDeclaration AbstractTy)
-  deriving Eq via (Covenant.Internal.Type.DataDeclaration AbstractTy)
-  deriving stock Show
+  deriving (Eq) via (Covenant.Internal.Type.DataDeclaration AbstractTy)
+  deriving stock (Show)
 
 newtype NestedConcreteCtor = NestedConcreteCtor (Covenant.Internal.Type.Constructor AbstractTy)
 
 genNestedConcrete :: DataGenM NestedConcreteDataDecl
-genNestedConcrete = NestedConcreteDataDecl <$> do
-  tyNm <-  freshTyName
-  let nullary :: DataGenM (Covenant.Internal.Type.DataDeclaration AbstractTy)
-      nullary = do
-        ctorNm <- freshConstructorName
-        pure $ Covenant.Internal.Type.DataDeclaration tyNm count0 (Vector.singleton (Covenant.Internal.Type.Constructor ctorNm Vector.empty))
+genNestedConcrete =
+  NestedConcreteDataDecl <$> do
+    tyNm <- freshTyName
+    let nullary :: DataGenM (Covenant.Internal.Type.DataDeclaration AbstractTy)
+        nullary = do
+          ctorNm <- freshConstructorName
+          pure $ Covenant.Internal.Type.DataDeclaration tyNm count0 (Vector.singleton (Covenant.Internal.Type.Constructor ctorNm Vector.empty))
 
-      nonNestedConcrete :: DataGenM (Covenant.Internal.Type.DataDeclaration AbstractTy)
-      nonNestedConcrete =  do
-        numCtors <- GT.liftGen $ chooseInt (0,5)
-        ctors <- fmap coerce <$> Vector.replicateM numCtors genConcreteConstructor
-        pure $ Covenant.Internal.Type.DataDeclaration tyNm count0 ctors
+        nonNestedConcrete :: DataGenM (Covenant.Internal.Type.DataDeclaration AbstractTy)
+        nonNestedConcrete = do
+          numCtors <- GT.liftGen $ chooseInt (0, 5)
+          ctors <- fmap coerce <$> Vector.replicateM numCtors genConcreteConstructor
+          pure $ Covenant.Internal.Type.DataDeclaration tyNm count0 ctors
 
-      nested :: DataGenM (Covenant.Internal.Type.DataDeclaration AbstractTy)
-      nested = do
-        numCtors <- GT.liftGen $ chooseInt (0,5)
-        ctors <- Vector.replicateM numCtors nestedCtor
-        pure $ Covenant.Internal.Type.DataDeclaration tyNm count0 (coerce <$> ctors)
+        nested :: DataGenM (Covenant.Internal.Type.DataDeclaration AbstractTy)
+        nested = do
+          numCtors <- GT.liftGen $ chooseInt (0, 5)
+          ctors <- Vector.replicateM numCtors nestedCtor
+          pure $ Covenant.Internal.Type.DataDeclaration tyNm count0 (coerce <$> ctors)
 
-  options <- sequence [nullary,nonNestedConcrete,nested]
-  res <- GT.liftGen $ oneof (pure <$> options)
-  returnDecl res
+    options <- sequence [nullary, nonNestedConcrete, nested]
+    res <- GT.liftGen $ oneof (pure <$> options)
+    returnDecl res
 
 {- It's useful to have access to these outside of the above function because sometimes we want to mix and match
    "simpler" constructors like this with the more complex sorts we generate below.
@@ -338,23 +352,23 @@ genNestedConcrete = NestedConcreteDataDecl <$> do
 nestedCtor :: DataGenM NestedConcreteCtor
 nestedCtor = do
   -- We want this: Not very much hinges on the # of args to each constructor and having finite bounds like this makes the output easier to read
-  numArgs <- GT.liftGen $ chooseInt (0,5)
+  numArgs <- GT.liftGen $ chooseInt (0, 5)
   args <- Vector.replicateM numArgs nestedCtorArg
-  ctorNm <-  freshConstructorName
+  ctorNm <- freshConstructorName
   pure . coerce $ Covenant.Internal.Type.Constructor ctorNm args
 
 nestedCtorArg :: DataGenM (Covenant.Internal.Type.ValT AbstractTy)
 nestedCtorArg = do
-     userTyNames <- gets (M.keys . view dgDecls)
-     if null userTyNames
-       then coerce <$> GT.liftGen (arbitrary @Concrete)
-       else do
-         let userTypes = (`Covenant.Internal.Type.Datatype` Vector.empty) <$> userTyNames
-         GT.liftGen $ frequency [(8,elements userTypes), (2, coerce <$> arbitrary @Concrete)]
+  userTyNames <- gets (M.keys . view dgDecls)
+  if null userTyNames
+    then coerce <$> GT.liftGen (arbitrary @Concrete)
+    else do
+      let userTypes = (`Covenant.Internal.Type.Datatype` Vector.empty) <$> userTyNames
+      GT.liftGen $ frequency [(8, elements userTypes), (2, coerce <$> arbitrary @Concrete)]
 
 newtype RecursiveConcreteDataDecl = RecursiveConcreteDataDecl (Covenant.Internal.Type.DataDeclaration AbstractTy)
-  deriving Eq via (Covenant.Internal.Type.DataDeclaration AbstractTy)
-  deriving stock Show
+  deriving (Eq) via (Covenant.Internal.Type.DataDeclaration AbstractTy)
+  deriving stock (Show)
 
 {- Non-polymorphic recursive types, i.e. things like:
 
@@ -365,21 +379,21 @@ newtype RecursiveConcreteDataDecl = RecursiveConcreteDataDecl (Covenant.Internal
    but this will be enough to handle initial testing w/ the base functor / BBF stuff (and we have to ensure we have things like this to test that)
 -}
 genArbitraryRecursive :: DataGenM RecursiveConcreteDataDecl
-genArbitraryRecursive = RecursiveConcreteDataDecl <$> do
-  tyNm <- freshTyName
-  baseCtor <- coerce <$> genConcreteConstructor -- any concrete ctor - or any ctor that doesn't contain the parent type - will suffice as a base case
-  numRecCtors <- GT.liftGen $ chooseInt (1,5)
-  recCtor  <- GT.vectorOf numRecCtors $ genRecCtor tyNm
-  returnDecl $  Covenant.Internal.Type.DataDeclaration tyNm count0 (Vector.fromList (baseCtor:recCtor))
- where
-   genRecCtor :: Covenant.Internal.Type.TyName -> DataGenM (Covenant.Internal.Type.Constructor AbstractTy)
-   genRecCtor tyNm = do
-     ctorNm <- freshConstructorName
-     let thisType = Covenant.Internal.Type.Datatype tyNm Vector.empty
-     numNonRecArgs <- GT.liftGen $ chooseInt (1,5) -- need at least one to avoid "bad" types
-     args <- coerce $ GT.vectorOf numNonRecArgs nestedCtorArg
-     pure $ Covenant.Internal.Type.Constructor ctorNm (Vector.fromList (thisType:args))
-
+genArbitraryRecursive =
+  RecursiveConcreteDataDecl <$> do
+    tyNm <- freshTyName
+    baseCtor <- coerce <$> genConcreteConstructor -- any concrete ctor - or any ctor that doesn't contain the parent type - will suffice as a base case
+    numRecCtors <- GT.liftGen $ chooseInt (1, 5)
+    recCtor <- GT.vectorOf numRecCtors $ genRecCtor tyNm
+    returnDecl $ Covenant.Internal.Type.DataDeclaration tyNm count0 (Vector.fromList (baseCtor : recCtor))
+  where
+    genRecCtor :: Covenant.Internal.Type.TyName -> DataGenM (Covenant.Internal.Type.Constructor AbstractTy)
+    genRecCtor tyNm = do
+      ctorNm <- freshConstructorName
+      let thisType = Covenant.Internal.Type.Datatype tyNm Vector.empty
+      numNonRecArgs <- GT.liftGen $ chooseInt (1, 5) -- need at least one to avoid "bad" types
+      args <- coerce $ GT.vectorOf numNonRecArgs nestedCtorArg
+      pure $ Covenant.Internal.Type.Constructor ctorNm (Vector.fromList (thisType : args))
 
 {- Single variable polymorphic datatypes. That is, things like:
 
@@ -388,8 +402,8 @@ genArbitraryRecursive = RecursiveConcreteDataDecl <$> do
    data Snowk a = Start | More (Snowk a) a
 -}
 newtype Polymorphic1 = Polymorphic1 (Covenant.Internal.Type.DataDeclaration AbstractTy)
-  deriving Eq via (Covenant.Internal.Type.DataDeclaration AbstractTy)
-  deriving stock Show
+  deriving (Eq) via (Covenant.Internal.Type.DataDeclaration AbstractTy)
+  deriving stock (Show)
 
 {- Generator for single variable polymorphic datatypes, no polymorphic *functions* as arguments to the datatypes yet (that requires something different).
 
@@ -399,40 +413,43 @@ newtype Polymorphic1 = Polymorphic1 (Covenant.Internal.Type.DataDeclaration Abst
    TODO: Rework this to generate declarations with an arbitrary number of tyvar arguments. Doing so would be fairly simple (but isn't needed ATM)
 -}
 genPolymorphic1Decl :: DataGenM Polymorphic1
-genPolymorphic1Decl = Polymorphic1 <$> do
-  tyNm <- freshTyName
-  logArity tyNm count1
-  numCtors <- GT.liftGen $ chooseInt (1,5)
-  polyCtors <- concat <$> GT.vectorOf numCtors (genPolyCtor tyNm)
-  let result = Covenant.Internal.Type.DataDeclaration tyNm count1 (Vector.fromList polyCtors)
-  returnDecl result
- where
-   -- We return a single constructor UNLESS we're generating a recursive type, in which case we have to return 2 to ensure a base case
-   genPolyCtor :: Covenant.Internal.Type.TyName -> DataGenM [Covenant.Internal.Type.Constructor AbstractTy]
-   genPolyCtor thisTy = do
-     ctorNm <- freshConstructorName
-     numArgs <- GT.liftGen $ chooseInt (1,5)
-     argsRaw <- GT.vectorOf numArgs polyArg
-     let recCase = Covenant.Internal.Type.Datatype thisTy (Vector.singleton (Covenant.Internal.Type.Abstraction (BoundAt Z ix0)))
-     if recCase `elem` argsRaw
-       then do
-         baseCtorNm <- freshConstructorName
-         let baseCtor = Covenant.Internal.Type.Constructor baseCtorNm mempty
-             recCtor = Covenant.Internal.Type.Constructor ctorNm (Vector.fromList argsRaw)
-         pure [baseCtor,recCtor]
-       else pure [Covenant.Internal.Type.Constructor ctorNm (Vector.fromList argsRaw)]
-    where
-     arityOne :: Count "tyvar" -> Bool
-     arityOne c = c == count1
+genPolymorphic1Decl =
+  Polymorphic1 <$> do
+    tyNm <- freshTyName
+    logArity tyNm count1
+    numCtors <- GT.liftGen $ chooseInt (1, 5)
+    polyCtors <- concat <$> GT.vectorOf numCtors (genPolyCtor tyNm)
+    let result = Covenant.Internal.Type.DataDeclaration tyNm count1 (Vector.fromList polyCtors)
+    returnDecl result
+  where
+    -- We return a single constructor UNLESS we're generating a recursive type, in which case we have to return 2 to ensure a base case
+    genPolyCtor :: Covenant.Internal.Type.TyName -> DataGenM [Covenant.Internal.Type.Constructor AbstractTy]
+    genPolyCtor thisTy = do
+      ctorNm <- freshConstructorName
+      numArgs <- GT.liftGen $ chooseInt (1, 5)
+      argsRaw <- GT.vectorOf numArgs polyArg
+      let recCase = Covenant.Internal.Type.Datatype thisTy (Vector.singleton (Covenant.Internal.Type.Abstraction (BoundAt Z ix0)))
+      if recCase `elem` argsRaw
+        then do
+          baseCtorNm <- freshConstructorName
+          let baseCtor = Covenant.Internal.Type.Constructor baseCtorNm mempty
+              recCtor = Covenant.Internal.Type.Constructor ctorNm (Vector.fromList argsRaw)
+          pure [baseCtor, recCtor]
+        else pure [Covenant.Internal.Type.Constructor ctorNm (Vector.fromList argsRaw)]
+      where
+        arityOne :: Count "tyvar" -> Bool
+        arityOne c = c == count1
 
-     polyArg :: DataGenM (Covenant.Internal.Type.ValT AbstractTy)
-     polyArg = do
-       -- first we choose a type with an arity >=1. We have to have at least one of those because we've added the parent type to the arity map
-       availableArity1 <- gets (fmap fst . (filter (arityOne . snd) . M.toList) . view dgArities)
-       someTyCon1 <- GT.elements availableArity1
-       GT.oneof [pure $ Covenant.Internal.Type.Abstraction (BoundAt Z ix0),
-                 pure $ Covenant.Internal.Type.Datatype someTyCon1 (Vector.singleton (Covenant.Internal.Type.Abstraction (BoundAt Z ix0))),
-                 GT.liftGen (coerce <$> arbitrary @Concrete)]
+        polyArg :: DataGenM (Covenant.Internal.Type.ValT AbstractTy)
+        polyArg = do
+          -- first we choose a type with an arity >=1. We have to have at least one of those because we've added the parent type to the arity map
+          availableArity1 <- gets (fmap fst . (filter (arityOne . snd) . M.toList) . view dgArities)
+          someTyCon1 <- GT.elements availableArity1
+          GT.oneof
+            [ pure $ Covenant.Internal.Type.Abstraction (BoundAt Z ix0),
+              pure $ Covenant.Internal.Type.Datatype someTyCon1 (Vector.singleton (Covenant.Internal.Type.Abstraction (BoundAt Z ix0))),
+              GT.liftGen (coerce <$> arbitrary @Concrete)
+            ]
 
 {-
    Misc Helpers and the Arbitrary instances
@@ -458,31 +475,30 @@ newtype DataDeclSet (flavor :: DataDeclFlavor) = DataDeclSet [Covenant.Internal.
               writing a generic Arbitrary instance for Constructor or DataDeclaration, this seems like the
               simplest solution.
 -}
-shrinkDataDecl ::  Covenant.Internal.Type.DataDeclaration AbstractTy -> [Covenant.Internal.Type.DataDeclaration AbstractTy]
+shrinkDataDecl :: Covenant.Internal.Type.DataDeclaration AbstractTy -> [Covenant.Internal.Type.DataDeclaration AbstractTy]
 shrinkDataDecl (Covenant.Internal.Type.DataDeclaration nm cnt ctors)
   | Vector.null ctors = []
   | otherwise =
-    let concreteShrink :: Vector (Covenant.Internal.Type.ValT AbstractTy) -> [Vector (Covenant.Internal.Type.ValT AbstractTy)]
-        concreteShrink = coerce . shrink . fmap Concrete
+      let concreteShrink :: Vector (Covenant.Internal.Type.ValT AbstractTy) -> [Vector (Covenant.Internal.Type.ValT AbstractTy)]
+          concreteShrink = coerce . shrink . fmap Concrete
 
-        concreteShrink' :: Vector (Covenant.Internal.Type.ValT AbstractTy) -> [Vector (Covenant.Internal.Type.ValT AbstractTy)]
-        concreteShrink' xs = coerce $ fmap (Vector.fromList . shrink . Concrete) (Vector.toList xs)
+          concreteShrink' :: Vector (Covenant.Internal.Type.ValT AbstractTy) -> [Vector (Covenant.Internal.Type.ValT AbstractTy)]
+          concreteShrink' xs = coerce $ fmap (Vector.fromList . shrink . Concrete) (Vector.toList xs)
 
-        ctorShrink :: Covenant.Internal.Type.Constructor AbstractTy -> [Covenant.Internal.Type.Constructor AbstractTy]
-        ctorShrink (Covenant.Internal.Type.Constructor ctorNm args) = Covenant.Internal.Type.Constructor ctorNm <$> concreteShrink args
+          ctorShrink :: Covenant.Internal.Type.Constructor AbstractTy -> [Covenant.Internal.Type.Constructor AbstractTy]
+          ctorShrink (Covenant.Internal.Type.Constructor ctorNm args) = Covenant.Internal.Type.Constructor ctorNm <$> concreteShrink args
 
-        ctorArgShrink :: Covenant.Internal.Type.Constructor AbstractTy -> [Covenant.Internal.Type.Constructor AbstractTy]
-        ctorArgShrink (Covenant.Internal.Type.Constructor ctorNm args) = Covenant.Internal.Type.Constructor ctorNm <$> concreteShrink' args
+          ctorArgShrink :: Covenant.Internal.Type.Constructor AbstractTy -> [Covenant.Internal.Type.Constructor AbstractTy]
+          ctorArgShrink (Covenant.Internal.Type.Constructor ctorNm args) = Covenant.Internal.Type.Constructor ctorNm <$> concreteShrink' args
 
-        withShrunkenCtors = ((Covenant.Internal.Type.DataDeclaration nm cnt . Vector.fromList) . ctorShrink <$> Vector.toList ctors)
+          withShrunkenCtors = ((Covenant.Internal.Type.DataDeclaration nm cnt . Vector.fromList) . ctorShrink <$> Vector.toList ctors)
 
-        withShrunkenCtorArgs = Covenant.Internal.Type.DataDeclaration nm cnt . Vector.fromList . ctorArgShrink <$> Vector.toList ctors
-    in withShrunkenCtors <|> withShrunkenCtorArgs
-
+          withShrunkenCtorArgs = Covenant.Internal.Type.DataDeclaration nm cnt . Vector.fromList . ctorArgShrink <$> Vector.toList ctors
+       in withShrunkenCtors <|> withShrunkenCtorArgs
 
 -- REVIEW: I dunno how liftShrink works under the hood so this might be redundant?
 shrinkDataDecls :: [Covenant.Internal.Type.DataDeclaration AbstractTy] -> [[Covenant.Internal.Type.DataDeclaration AbstractTy]]
-shrinkDataDecls decls = liftShrink shrinkDataDecl decls  <|> (shrinkDataDecl <$> decls)
+shrinkDataDecls decls = liftShrink shrinkDataDecl decls <|> (shrinkDataDecl <$> decls)
 
 genDataN :: forall (a :: Type). Int -> DataGenM a -> Gen [a]
 genDataN n act = runDataGenM (GT.vectorOf n act)
@@ -515,12 +531,12 @@ instance Arbitrary (DataDeclSet 'Poly1) where
 -}
 
 -- Prettifies and prints n generated datatypes using the supplied generator.
-genPrettyDataN ::  Int -> DataGenM (Covenant.Internal.Type.DataDeclaration AbstractTy) -> IO ()
+genPrettyDataN :: Int -> DataGenM (Covenant.Internal.Type.DataDeclaration AbstractTy) -> IO ()
 genPrettyDataN n dg = goPrint =<< generate (genDataN n dg)
   where
     goPrint :: [Covenant.Internal.Type.DataDeclaration AbstractTy] -> IO ()
     goPrint [] = pure ()
-    goPrint (x:xs) = do
+    goPrint (x : xs) = do
       x' <- unsafeRename (renameDataDecl x)
       putDoc $ pretty x' <> hardline <> hardline
       goPrint xs
