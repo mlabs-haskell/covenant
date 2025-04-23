@@ -4,6 +4,7 @@ module Covenant.Internal.Rename
     runRenameM,
     renameValT,
     renameCompT,
+    undoRename,
   )
 where
 
@@ -13,13 +14,19 @@ import Control.Monad.Except
     runExceptT,
     throwError,
   )
+import Control.Monad.Reader
+  ( Reader,
+    asks,
+    local,
+    runReader,
+  )
 import Control.Monad.State.Strict
   ( State,
     evalState,
     gets,
     modify,
   )
-import Covenant.DeBruijn (DeBruijn, asInt)
+import Covenant.DeBruijn (DeBruijn (S, Z), asInt)
 import Covenant.Index (Count, Index, intCount, intIndex)
 import Covenant.Internal.Type
   ( AbstractTy (BoundAt),
@@ -195,7 +202,30 @@ renameValT = \case
   ThunkT t -> ThunkT <$> renameCompT t
   BuiltinFlat t -> pure . BuiltinFlat $ t
 
+-- | @since 1.0.0
+undoRename :: ValT Renamed -> ValT AbstractTy
+undoRename t = runReader (go t) 1
+  where
+    go :: ValT Renamed -> Reader Int (ValT AbstractTy)
+    go = \case
+      Abstraction t' ->
+        Abstraction <$> case t' of
+          Unifiable index -> BoundAt <$> trueLevelToDB 1 <*> pure index
+          Rigid trueLevel index -> BoundAt <$> trueLevelToDB trueLevel <*> pure index
+          Wildcard _ trueLevel index -> BoundAt <$> trueLevelToDB trueLevel <*> pure index
+      ThunkT (CompT abses (CompTBody xs)) ->
+        ThunkT . CompT abses . CompTBody <$> local (+ 1) (traverse go xs)
+      BuiltinFlat t' -> pure . BuiltinFlat $ t'
+
 -- Helpers
+
+trueLevelToDB :: Int -> Reader Int DeBruijn
+trueLevelToDB trueLevel = asks (go . subtract trueLevel)
+  where
+    go :: Int -> DeBruijn
+    go = \case
+      0 -> Z
+      n -> S . go $ n - 1
 
 renameAbstraction :: AbstractTy -> RenameM Renamed
 renameAbstraction (BoundAt scope index) = RenameM $ do

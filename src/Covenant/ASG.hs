@@ -22,7 +22,8 @@ module Covenant.ASG
         LambdaResultsInNonReturn,
         ReturnWrapsError,
         ReturnWrapsCompType,
-        WrongReturnType
+        WrongReturnType,
+        UnificationError
       ),
     RenameError
       ( InvalidAbstractionReference,
@@ -39,6 +40,7 @@ module Covenant.ASG
     err,
     lit,
     thunk,
+    app,
   )
 where
 
@@ -54,6 +56,10 @@ import Covenant.Internal.Rename
         IrrelevantAbstraction,
         UndeterminedAbstraction
       ),
+    renameCompT,
+    renameValT,
+    runRenameM,
+    undoRename,
   )
 import Covenant.Internal.Term
   ( ASGNode (ACompNode, AValNode, AnError),
@@ -85,11 +91,12 @@ import Covenant.Internal.Term
         ReturnWrapsError,
         ThunkError,
         ThunkValType,
+        UnificationError,
         WrongReturnType
       ),
     Id,
     Ref,
-    ValNodeInfo (LitInternal, ThunkInternal),
+    ValNodeInfo (AppInternal, LitInternal, ThunkInternal),
     typeId,
     typeRef,
   )
@@ -97,8 +104,10 @@ import Covenant.Internal.Type
   ( AbstractTy,
     CompT (CompT),
     CompTBody (CompTBody),
+    Renamed,
     ValT (ThunkT),
   )
+import Covenant.Internal.Unification (checkApp)
 import Covenant.Prim
   ( OneArgFunc,
     ThreeArgFunc,
@@ -253,6 +262,28 @@ err ::
 err = refTo AnError
 
 -- | @since 1.0.0
+app ::
+  forall (m :: Type -> Type).
+  (MonadHashCons Id ASGNode m, MonadError CovenantTypeError m) =>
+  Id ->
+  Vector Ref ->
+  m Id
+app fId argRefs = do
+  lookedUp <- typeId fId
+  case lookedUp of
+    CompNodeType fT -> case runRenameM . renameCompT $ fT of
+      Left err' -> throwError . RenameFunctionFailed fT $ err'
+      Right renamedFT -> do
+        renamedArgs <- traverse renameArg argRefs
+        case checkApp renamedFT . Vector.toList $ renamedArgs of
+          Left err' -> throwError . UnificationError $ err'
+          Right result -> do
+            let restored = undoRename result
+            refTo . AValNode restored . AppInternal fId $ argRefs
+    ValNodeType t -> throwError . ApplyToValType $ t
+    ErrorNodeType -> throwError ApplyToError
+
+-- | @since 1.0.0
 lit ::
   forall (m :: Type -> Type).
   (MonadHashCons Id ASGNode m) =>
@@ -272,3 +303,17 @@ thunk i = do
     CompNodeType t -> refTo . AValNode (ThunkT t) . ThunkInternal $ i
     ValNodeType t -> throwError . ThunkValType $ t
     ErrorNodeType -> throwError ThunkError
+
+-- Helpers
+
+renameArg ::
+  forall (m :: Type -> Type).
+  (MonadHashCons Id ASGNode m, MonadError CovenantTypeError m) =>
+  Ref -> m (Maybe (ValT Renamed))
+renameArg r =
+  typeRef r >>= \case
+    CompNodeType t -> throwError . ApplyCompType $ t
+    ValNodeType t -> case runRenameM . renameValT $ t of
+      Left err' -> throwError . RenameArgumentFailed t $ err'
+      Right renamed -> pure . Just $ renamed
+    ErrorNodeType -> pure Nothing
