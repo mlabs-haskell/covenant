@@ -12,13 +12,13 @@ import Data.Ord (comparing)
 import Data.Foldable (foldl')
 #endif
 import Control.Monad.Except (catchError, throwError)
-import Covenant.Index (Index, intCount, intIndex, Count)
+import Covenant.Index (Index, intCount, intIndex)
 import Covenant.Internal.Type
   ( BuiltinFlatT,
     CompT (CompT),
     CompTBody (CompTBody),
     Renamed (Rigid, Unifiable, Wildcard),
-    ValT (Abstraction, BuiltinFlat, ThunkT, Datatype), TyName,
+    ValT (Abstraction, BuiltinFlat, ThunkT, Datatype),
   )
 import Data.Kind (Type)
 import Data.Map (Map)

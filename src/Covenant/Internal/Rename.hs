@@ -49,8 +49,6 @@ import Optics.Core
     view,
     (%),
   )
-import Data.Maybe (fromJust)
-import Optics.Extra (preview)
 
 -- Used during renaming. Contains a source of fresh indices for wildcards, as
 -- well as tracking:
@@ -123,7 +121,7 @@ data RenameError
     -- has @b@ undetermined.
     --
     -- @since 1.0.0
-    UndeterminedAbstraction
+    UndeterminedAbstraction (Vector (ValT AbstractTy)) (Vector (ValT Renamed))
   deriving stock (Eq, Show)
 
 -- | A \'renaming monad\' which allows us to convert type representations from
@@ -182,7 +180,7 @@ renameCompT (CompT abses (CompTBody xs)) = RenameM $ do
       (\i -> coerce . renameValT $ xs NonEmpty.! i)
   -- Check that we don't overdetermine anything
   ourAbstractions <- gets (view (#tracker % to Vector.head % _1))
-  unless (Vector.and ourAbstractions) (throwError UndeterminedAbstraction)
+  unless (Vector.and ourAbstractions) (throwError $ UndeterminedAbstraction (NonEmpty.toVector xs) renamedArgs)
   -- Check result type
   renamedResult <- coerce . renameValT . NonEmpty.last $ xs
   -- Roll back state
@@ -200,17 +198,13 @@ renameValT = \case
   BuiltinFlat t -> pure . BuiltinFlat $ t
   -- Assumes kind-checking has occurred 
   Datatype tn xs -> RenameM $ do
-    let abses = fromJust $ preview intCount (Vector.length xs)
-    -- Assume this is the right thing to do here?
-    modify (stepUpScope abses)
+    -- We don't step or un-step the scope here b/c a TyCon which appears as a ValT _cannot_ bind variables.
     -- This Vector here doesn't represent a function, but a product, so we there is no "return" type to treat specially (I think!)
     renamedXS <-
-      Vector.generateM
-        (Vector.length xs)
+      Vector.generateM (Vector.length xs)
         (\i -> coerce . renameValT $ xs Vector.! i)
     ourAbstractions <- gets (view (#tracker % to Vector.head % _1))
-    unless (Vector.and ourAbstractions) (throwError UndeterminedAbstraction)
-    modify dropDownScope
+    unless (Vector.and ourAbstractions) (throwError $ UndeterminedAbstraction xs renamedXS)
     pure $ Datatype tn renamedXS
 
 renameDataDecl :: DataDeclaration AbstractTy -> RenameM (DataDeclaration Renamed)
@@ -220,8 +214,9 @@ renameDataDecl (DataDeclaration tn cnt ctors) = RenameM $ do
     Vector.generateM
       (Vector.length ctors)
       (\i -> coerce . renameCtor $ ctors Vector.! i)
-  ourAbstractions <- gets (view (#tracker % to Vector.head % _1))
-  unless (Vector.and ourAbstractions) (throwError UndeterminedAbstraction)
+  -- REVIEW: @Koz is it ok to skip this here? It SEEMS ok 
+  -- ourAbstractions <- gets (view (#tracker % to Vector.head % _1))
+  -- unless (Vector.and ourAbstractions) (throwError $ UndeterminedAbstraction)
   modify dropDownScope
   pure $ DataDeclaration tn cnt renamedCtors 
  where

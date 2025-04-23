@@ -10,19 +10,25 @@
      The checks to detect these errors are entirely independent from the checks performed during typechecking or renaming, so we do them in a separate pass.
 -}
 
-module Covenant.Internal.KindCheck where
+module Covenant.Internal.KindCheck (checkKinds, KindCheckError(..)) where
 
 import Covenant.Internal.Type
-import Data.Functor.Identity 
-import Covenant.Index
-import Control.Monad 
-import Control.Monad.Reader
-import Control.Monad.Except
+    ( AbstractTy,
+      ValT(Abstraction,ThunkT,BuiltinFlat,Datatype),
+      CompT(CompT),
+      CompTBody(CompTBody),
+      TyName,
+      DataDeclaration(DataDeclaration))
+import Data.Functor.Identity ( Identity, runIdentity )
+import Covenant.Index ( Count, intCount )
+import Control.Monad ( unless )
+import Control.Monad.Reader ( ReaderT(ReaderT), MonadReader, asks, runReaderT )
+import Control.Monad.Except ( ExceptT, MonadError(throwError), runExceptT )
 import Data.Map.Strict (Map)
 import Data.Map.Strict qualified as M
 import Data.Vector (Vector)
 import Data.Vector qualified as V
-import Optics.Core
+import Optics.Core ( A_Lens, lens, view, review, LabelOptic(labelOptic) )
 import Data.Kind (Type)
 import Data.Foldable (traverse_)
 
@@ -45,6 +51,9 @@ newtype KindCheckM t a = KindCheckM (ReaderT (KindCheckContext t) (ExceptT KindC
   deriving (Functor, Applicative, Monad, MonadReader (KindCheckContext t), MonadError KindCheckError)
     via (ReaderT (KindCheckContext t) (ExceptT KindCheckError Identity))
 
+runKindCheckM :: forall (t :: Type) (a :: Type). KindCheckM t a -> Either KindCheckError a
+runKindCheckM (KindCheckM act) = runIdentity . runExceptT $ runReaderT act (KindCheckContext M.empty)
+
 lookupDeclaration :: forall (t :: Type). TyName -> KindCheckM t (DataDeclaration t)
 lookupDeclaration tn = do
   types <- asks (view #kindCheckContext)
@@ -55,17 +64,17 @@ lookupDeclaration tn = do
 -- TODO: I think we need a `CompT` version as well?
 -- REVIEW: This happens *before* renaming, right?
 -- This isn't really a "kind checker" in the normal sense and just checks that none of the three failure conditions above obtain
-checkKinds :: ValT AbstractTy -> KindCheckM AbstractTy ()
-checkKinds = \case
+checkKinds' :: ValT AbstractTy -> KindCheckM AbstractTy ()
+checkKinds' = \case
   Abstraction _ -> pure ()
-  ThunkT (CompT _ (CompTBody nev)) -> traverse_ checkKinds nev
+  ThunkT (CompT _ (CompTBody nev)) -> traverse_ checkKinds' nev
   BuiltinFlat{} -> pure ()
   Datatype tn args -> do
     DataDeclaration _ numVars _  <- lookupDeclaration tn
     let numArgsActual = V.length args
         numArgsExpected = review intCount numVars
     unless (numArgsActual == numArgsExpected) $ throwError (IncorrectNumArgs tn numVars args)
-    traverse_ checkKinds args
- where
-   checkCtor :: Constructor AbstractTy -> KindCheckM AbstractTy ()
-   checkCtor (Constructor _ args) = traverse_ checkKinds args 
+    traverse_ checkKinds' args
+
+checkKinds :: ValT AbstractTy -> Maybe KindCheckError
+checkKinds = either Just (const Nothing) . runKindCheckM . checkKinds' 

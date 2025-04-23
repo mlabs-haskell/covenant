@@ -14,7 +14,13 @@ module Covenant.Internal.Type
     runConstructorName,
     datatypeName,
     datatypeConstructors,
-    constructorName
+    datatypeBinders,
+    constructorName,
+    abstraction,
+    thunkT,
+    builtinFlat,
+    datatype,
+    constructorArgs
   )
 where
 
@@ -52,7 +58,7 @@ import Optics.Core
     review,
     set,
     view,
-    (%), Lens', Prism', prism, (^.),
+    (%), Lens', Prism', prism,
   )
 import Prettyprinter
   ( Doc,
@@ -65,8 +71,7 @@ import Prettyprinter
 import Data.Text (Text)
 import Data.String (IsString)
 import Test.QuickCheck.Instances.Text () -- need the arbitary instance for TyName
-import Test.QuickCheck.Arbitrary (Arbitrary) -- largely for TyName 
-import Data.Maybe (fromJust)
+ -- largely for TyName 
 
 -- | A type abstraction, using a combination of a DeBruijn index (to indicate
 -- which scope it refers to) and a positional index (to indicate which bound
@@ -373,16 +378,12 @@ prettyValTWithContext = \case
   Abstraction abstr -> prettyRenamedWithContext abstr
   ThunkT compT -> prettyCompTWithContext compT
   BuiltinFlat biFlat -> pure $ viaShow biFlat
-  Datatype tn args -> bindVars (inferCount args) $ \_ -> do
+  Datatype tn args ->  do
     args' <-  traverse prettyValTWithContext args
     let tn' = pretty $ runTyName tn
     case Vector.toList args' of
       [] -> pure tn'
       argsList -> pure . parens $ tn' <+> hsep argsList
- where
-   -- fromJust is safe here, length of a vector can't be negative
-   inferCount :: Vector (ValT Renamed) -> Count "tyvar"
-   inferCount args = fromJust $ preview intCount (Vector.length args)
 
 prettyCtorWithContext :: forall (ann :: Type). Constructor Renamed -> PrettyM ann (Doc ann)
 prettyCtorWithContext (Constructor ctorNm ctorArgs)
@@ -435,10 +436,10 @@ prettyDataDeclWithContext (DataDeclaration tn numVars ctors) = bindVars numVars 
     then pure $ "data" <+> tn' <+> hsep (Vector.toList boundVars)
     else pure $ "data" <+> tn' <+> hsep (Vector.toList boundVars) <+> "=" <+> prettyCtors
  where
-   -- I don't think there's a library fn that does this?
+   -- I don't think there's a library fn that does this? This is for the `|` in a sum type.
    prefix :: Doc ann -> [Doc ann] -> [Doc ann]
-   prefix sep [] = []
-   prefix sep [x] = [x]
+   prefix _ [] = []
+   prefix _ [x] = [x]
    prefix sep (x : xs) = x : goPrefix xs
     where
       goPrefix [] = []
