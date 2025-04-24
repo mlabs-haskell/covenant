@@ -18,7 +18,7 @@ import Covenant.Internal.Type
     CompT (CompT),
     CompTBody (CompTBody),
     Renamed (Rigid, Unifiable, Wildcard),
-    ValT (Abstraction, BuiltinFlat, ThunkT),
+    ValT (Abstraction, BuiltinFlat, Datatype, ThunkT),
   )
 import Data.Kind (Type)
 import Data.Map (Map)
@@ -109,6 +109,7 @@ substitute index toSub = \case
   ThunkT (CompT abstractions (CompTBody xs)) ->
     ThunkT . CompT abstractions . CompTBody . fmap (substitute index toSub) $ xs
   BuiltinFlat t -> BuiltinFlat t
+  Datatype {} -> error "Don't unify datatypes until BBF implemented" -- Datatype tn abstractions $ substitute index toSub <$> xs
 
 -- Because unification is inherently recursive, if we find an error deep within
 -- a type, the message will signify only the _part_ that fails to unify, not the
@@ -162,6 +163,7 @@ collectUnifiables = \case
     _ -> Set.empty
   BuiltinFlat _ -> Set.empty
   ThunkT (CompT _ (CompTBody xs)) -> NonEmpty.foldl' (\acc t -> acc <> collectUnifiables t) Set.empty xs
+  Datatype {} -> error "Implement unification machinery for datatypes"
 
 unify ::
   ValT Renamed ->
@@ -177,6 +179,7 @@ unify expected actual =
           Wildcard scopeId1 _ index1 -> expectWildcard scopeId1 index1
         ThunkT t1 -> expectThunk t1
         BuiltinFlat t1 -> expectFlatBuiltin t1
+        Datatype {} -> error "Don't try to unify datatypes yet" -- expectDatatype tn abses xs
     )
     (promoteUnificationError expected actual)
   where

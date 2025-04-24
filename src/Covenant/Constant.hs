@@ -52,7 +52,8 @@ data AConstant
 -- | @since 1.0.0
 typeConstant ::
   forall (a :: Type).
-  AConstant -> ValT a
+  AConstant ->
+  ValT a
 typeConstant =
   BuiltinFlat . \case
     AUnit -> UnitT
