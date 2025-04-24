@@ -1,6 +1,3 @@
-{-# OPTIONS_GHC -Wno-unrecognised-pragmas #-}
-
-{-# HLINT ignore "Eta reduce" #-}
 module Covenant.Test
   ( Concrete (Concrete),
     DataDeclSet (DataDeclSet),
@@ -18,7 +15,6 @@ import Control.Monad.Reader (MonadTrans (lift))
 import Control.Monad.State.Strict
   ( MonadState (get, put),
     State,
-    StateT,
     evalState,
     gets,
     modify,
@@ -57,7 +53,6 @@ import Covenant.Type
     runRenameM,
   )
 import Data.Coerce (coerce)
-import Data.Functor.Identity (Identity ())
 import Data.Kind (Type)
 import Data.Map.Strict (Map)
 import Data.Map.Strict qualified as M
@@ -69,8 +64,7 @@ import Data.Vector (Vector)
 import Data.Vector qualified as Vector
 import GHC.Exts (fromListN)
 import GHC.Word (Word32)
-import Optics.Core (Lens', folded, lens, over, review, view, (%))
-import Optics.Operators ((^.), (^..))
+import Optics.Core (A_Lens, LabelOptic (labelOptic), folded, lens, over, review, toListOf, view, (%))
 import Prettyprinter (hardline, pretty)
 import Prettyprinter.Render.Text (putDoc)
 import Test.QuickCheck
@@ -174,21 +168,40 @@ data DataGen = DataGen
     _dgArities :: Map TyName (Count "tyvar")
   }
 
--- TODO: Rewrite as field label instances
-dgDecls :: Lens' DataGen (Map TyName (DataDeclaration AbstractTy))
-dgDecls = lens (\(DataGen a _ _ _ _) -> a) (\(DataGen _ b c d e) a -> DataGen a b c d e)
+instance
+  (k ~ A_Lens, a ~ Map TyName (DataDeclaration AbstractTy), b ~ Map TyName (DataDeclaration AbstractTy)) =>
+  LabelOptic "decls" k DataGen DataGen a b
+  where
+  {-# INLINEABLE labelOptic #-}
+  labelOptic = lens (\(DataGen a _ _ _ _) -> a) (\(DataGen _ b c d e) a -> DataGen a b c d e)
 
-dgConstructors :: Lens' DataGen (Set ConstructorName)
-dgConstructors = lens (\(DataGen _ b _ _ _) -> b) (\(DataGen a _ c d e) b -> DataGen a b c d e)
+instance
+  (k ~ A_Lens, a ~ Set ConstructorName, b ~ Set ConstructorName) =>
+  LabelOptic "constructors" k DataGen DataGen a b
+  where
+  {-# INLINEABLE labelOptic #-}
+  labelOptic = lens (\(DataGen _ b _ _ _) -> b) (\(DataGen a _ c d e) b -> DataGen a b c d e)
 
-_dgCurrentScope :: Lens' DataGen ScopeBoundary
-_dgCurrentScope = lens (\(DataGen _ _ c _ _) -> c) (\(DataGen a b _ d e) c -> DataGen a b c d e)
+instance
+  (k ~ A_Lens, a ~ ScopeBoundary, b ~ ScopeBoundary) =>
+  LabelOptic "currentScope" k DataGen DataGen a b
+  where
+  {-# INLINEABLE labelOptic #-}
+  labelOptic = lens (\(DataGen _ _ c _ _) -> c) (\(DataGen a b _ d e) c -> DataGen a b c d e)
 
-_dgBoundVars :: Lens' DataGen (Map ScopeBoundary Word32)
-_dgBoundVars = lens (\(DataGen _ _ _ d _) -> d) (\(DataGen a b c _ e) d -> DataGen a b c d e)
+instance
+  (k ~ A_Lens, a ~ Map ScopeBoundary Word32, b ~ Map ScopeBoundary Word32) =>
+  LabelOptic "boundVars" k DataGen DataGen a b
+  where
+  {-# INLINEABLE labelOptic #-}
+  labelOptic = lens (\(DataGen _ _ _ d _) -> d) (\(DataGen a b c _ e) d -> DataGen a b c d e)
 
-dgArities :: Lens' DataGen (Map TyName (Count "tyvar"))
-dgArities = lens (\(DataGen _ _ _ _ e) -> e) (\(DataGen a b c d _) e -> DataGen a b c d e)
+instance
+  (k ~ A_Lens, a ~ Map TyName (Count "tyvar"), b ~ Map TyName (Count "tyvar")) =>
+  LabelOptic "arities" k DataGen DataGen a b
+  where
+  {-# INLINEABLE labelOptic #-}
+  labelOptic = lens (\(DataGen _ _ _ _ e) -> e) (\(DataGen a b c d _) e -> DataGen a b c d e)
 
 {-  Monadic stack for generating monomorphic datatype declarations. Not every generator uses every part of the state, but
     it ought to suffice for generating *any* datatype declaration we choose.
@@ -199,7 +212,7 @@ dgArities = lens (\(DataGen _ _ _ _ e) -> e) (\(DataGen a b c d _) e -> DataGen 
 -}
 newtype DataGenM a = DataGenM (GenT (State DataGen) a)
   deriving newtype (Functor, Applicative, Monad)
-  deriving (MonadGen) via GenT (StateT DataGen Data.Functor.Identity.Identity)
+  deriving (MonadGen) via GenT (State DataGen)
 
 instance MonadState DataGen DataGenM where
   get = DataGenM $ lift get
@@ -212,24 +225,27 @@ _bindVars count'
   | count == 0 = crossBoundary
   | otherwise = do
       crossBoundary
-      here <- gets (view _dgCurrentScope)
-      modify $ over _dgBoundVars (M.insert here $ fromIntegral count)
+      here <- gets (view #currentScope)
+      modify $ over #boundVars (M.insert here $ fromIntegral count)
   where
     count :: Int
     count = review intCount count'
 
     crossBoundary :: DataGenM ()
-    crossBoundary = modify $ over _dgCurrentScope (+ 1)
+    crossBoundary = modify $ over #currentScope (+ 1)
 
 runDataGenM :: forall (a :: Type). DataGenM a -> Gen a
 runDataGenM (DataGenM ma) = (\x -> evalState x (DataGen M.empty Set.empty 0 M.empty M.empty)) <$> GT.runGenT ma
 
+chooseIntT :: forall (m :: Type -> Type). (MonadGen m) => (Int, Int) -> m Int
+chooseIntT bounds = GT.liftGen $ chooseInt bounds
+
 -- Stupid helper, saves us from forgetting to update part of the state
 returnDecl :: DataDeclaration AbstractTy -> DataGenM (DataDeclaration AbstractTy)
 returnDecl decl = do
-  let tyNm = decl ^. datatypeName
-  modify $ over dgDecls (M.insert tyNm decl)
-  let arity = decl ^. datatypeBinders
+  let tyNm = view datatypeName decl
+  modify $ over #decls (M.insert tyNm decl)
+  let arity = view datatypeBinders decl
   logArity tyNm arity
   pure decl
 
@@ -237,7 +253,7 @@ returnDecl decl = do
    a constructor is the parent type applied to the type variables bound at the start of the declaration.
 -}
 logArity :: TyName -> Count "tyvar" -> DataGenM ()
-logArity tn cnt = modify $ over dgArities (M.insert tn cnt)
+logArity tn cnt = modify $ over #arities (M.insert tn cnt)
 
 newtype ConcreteDataDecl = ConcreteDataDecl (DataDeclaration AbstractTy)
   deriving (Eq) via (DataDeclaration AbstractTy)
@@ -251,7 +267,7 @@ anyCtorName = ConstructorName <$> genValidCtorName
     genValidCtorName = do
       let caps = ['A' .. 'Z']
           lower = ['a' .. 'z']
-      nmLen <- chooseInt (1, 6) -- should be more than enough to ensure `suchThat` doesn't run into clashes all the time
+      nmLen <- chooseIntT (1, 6) -- should be more than enough to ensure `suchThat` doesn't run into clashes all the time
       x <- elements caps
       xs <- vectorOf nmLen $ elements (caps <> lower)
       pure . T.pack $ (x : xs)
@@ -259,23 +275,21 @@ anyCtorName = ConstructorName <$> genValidCtorName
 anyTyName :: Gen TyName
 anyTyName = TyName . runConstructorName <$> anyCtorName
 
--- Default shrink should be fine? The name of constructors doesn't affect much
-
 {- These ensure that we don't ever duplicate type names or constructor names. We need the DataGenM state
    to ensure that, so these should *always* be used when writing generators, and the arbitrary instances should be avoided.
 -}
 freshConstructorName :: DataGenM ConstructorName
 freshConstructorName = do
-  datatypes <- gets (M.elems . view dgDecls)
-  let allCtorNames = Set.fromList $ datatypes ^.. (folded % datatypeConstructors % folded % constructorName)
+  datatypes <- gets (M.elems . view #decls)
+  let allCtorNames = Set.fromList $ toListOf (folded % datatypeConstructors % folded % constructorName) datatypes
   thisName <- GT.liftGen $ anyCtorName `suchThat` (`Set.notMember` allCtorNames)
-  modify $ over dgConstructors (Set.insert thisName)
+  modify $ over #constructors (Set.insert thisName)
   pure thisName
 
 freshTyName :: DataGenM TyName
 freshTyName = do
-  datatypes <- gets (M.elems . view dgDecls)
-  let allDataTypeNames = Set.fromList $ datatypes ^.. (folded % datatypeName)
+  datatypes <- gets (M.elems . view #decls)
+  let allDataTypeNames = Set.fromList $ toListOf (folded % datatypeName) datatypes
   GT.liftGen $ anyTyName `suchThat` (`Set.notMember` allDataTypeNames)
 
 newtype ConcreteConstructor = ConcreteConstructor (Constructor AbstractTy)
@@ -288,7 +302,7 @@ genConcreteConstructor = ConcreteConstructor <$> go
     go :: DataGenM (Constructor AbstractTy)
     go = do
       ctorNm <- freshConstructorName
-      numArgs <- GT.liftGen $ chooseInt (0, 5)
+      numArgs <- chooseIntT (0, 5)
       args <- GT.liftGen $ Vector.replicateM numArgs (arbitrary @Concrete)
       pure $ Constructor ctorNm (coerce <$> args)
 
@@ -296,7 +310,7 @@ genConcreteDataDecl :: DataGenM ConcreteDataDecl
 genConcreteDataDecl =
   ConcreteDataDecl <$> do
     tyNm <- freshTyName
-    numArgs <- GT.liftGen $ chooseInt (0, 5)
+    numArgs <- chooseIntT (0, 5)
     ctors <- coerce <$> Vector.replicateM numArgs genConcreteConstructor
     let decl = DataDeclaration tyNm count0 ctors
     returnDecl decl
@@ -326,26 +340,25 @@ genNestedConcrete :: DataGenM NestedConcreteDataDecl
 genNestedConcrete =
   NestedConcreteDataDecl <$> do
     tyNm <- freshTyName
-    let nullary :: DataGenM (DataDeclaration AbstractTy)
-        nullary = do
-          ctorNm <- freshConstructorName
-          pure $ DataDeclaration tyNm count0 (Vector.singleton (Constructor ctorNm Vector.empty))
-
-        nonNestedConcrete :: DataGenM (DataDeclaration AbstractTy)
-        nonNestedConcrete = do
-          numCtors <- GT.liftGen $ chooseInt (0, 5)
-          ctors <- fmap coerce <$> Vector.replicateM numCtors genConcreteConstructor
-          pure $ DataDeclaration tyNm count0 ctors
-
-        nested :: DataGenM (DataDeclaration AbstractTy)
-        nested = do
-          numCtors <- GT.liftGen $ chooseInt (0, 5)
-          ctors <- Vector.replicateM numCtors nestedCtor
-          pure $ DataDeclaration tyNm count0 (coerce <$> ctors)
-
-    options <- sequence [nullary, nonNestedConcrete, nested]
-    res <- GT.liftGen $ oneof (pure <$> options)
+    res <- GT.oneof [nullary tyNm, nonNestedConcrete tyNm, nested tyNm]
     returnDecl res
+  where
+    nullary :: TyName -> DataGenM (DataDeclaration AbstractTy)
+    nullary tyNm = do
+      ctorNm <- freshConstructorName
+      pure $ DataDeclaration tyNm count0 (Vector.singleton (Constructor ctorNm Vector.empty))
+
+    nonNestedConcrete :: TyName -> DataGenM (DataDeclaration AbstractTy)
+    nonNestedConcrete tyNm = do
+      numCtors <- chooseIntT (0, 5)
+      ctors <- fmap coerce <$> Vector.replicateM numCtors genConcreteConstructor
+      pure $ DataDeclaration tyNm count0 ctors
+
+    nested :: TyName -> DataGenM (DataDeclaration AbstractTy)
+    nested tyNm = do
+      numCtors <- chooseIntT (0, 5)
+      ctors <- Vector.replicateM numCtors nestedCtor
+      pure $ DataDeclaration tyNm count0 (coerce <$> ctors)
 
 {- It's useful to have access to these outside of the above function because sometimes we want to mix and match
    "simpler" constructors like this with the more complex sorts we generate below.
@@ -353,14 +366,14 @@ genNestedConcrete =
 nestedCtor :: DataGenM NestedConcreteCtor
 nestedCtor = do
   -- We want this: Not very much hinges on the # of args to each constructor and having finite bounds like this makes the output easier to read
-  numArgs <- GT.liftGen $ chooseInt (0, 5)
+  numArgs <- chooseIntT (0, 5)
   args <- Vector.replicateM numArgs nestedCtorArg
   ctorNm <- freshConstructorName
   pure . coerce $ Constructor ctorNm args
 
 nestedCtorArg :: DataGenM (ValT AbstractTy)
 nestedCtorArg = do
-  userTyNames <- gets (M.keys . view dgDecls)
+  userTyNames <- gets (M.keys . view #decls)
   if null userTyNames
     then coerce <$> GT.liftGen (arbitrary @Concrete)
     else do
@@ -384,7 +397,7 @@ genArbitraryRecursive =
   RecursiveConcreteDataDecl <$> do
     tyNm <- freshTyName
     baseCtor <- coerce <$> genConcreteConstructor -- any concrete ctor - or any ctor that doesn't contain the parent type - will suffice as a base case
-    numRecCtors <- GT.liftGen $ chooseInt (1, 5)
+    numRecCtors <- chooseIntT (1, 5)
     recCtor <- GT.vectorOf numRecCtors $ genRecCtor tyNm
     returnDecl $ DataDeclaration tyNm count0 (Vector.fromList (baseCtor : recCtor))
   where
@@ -392,7 +405,7 @@ genArbitraryRecursive =
     genRecCtor tyNm = do
       ctorNm <- freshConstructorName
       let thisType = Datatype tyNm Vector.empty
-      numNonRecArgs <- GT.liftGen $ chooseInt (1, 5) -- need at least one to avoid "bad" types
+      numNonRecArgs <- chooseIntT (1, 5) -- need at least one to avoid "bad" types
       args <- coerce $ GT.vectorOf numNonRecArgs nestedCtorArg
       pure $ Constructor ctorNm (Vector.fromList (thisType : args))
 
@@ -418,7 +431,7 @@ genPolymorphic1Decl =
   Polymorphic1 <$> do
     tyNm <- freshTyName
     logArity tyNm count1
-    numCtors <- GT.liftGen $ chooseInt (1, 5)
+    numCtors <- chooseIntT (1, 5)
     polyCtors <- concat <$> GT.vectorOf numCtors (genPolyCtor tyNm)
     let result = DataDeclaration tyNm count1 (Vector.fromList polyCtors)
     returnDecl result
@@ -427,7 +440,7 @@ genPolymorphic1Decl =
     genPolyCtor :: TyName -> DataGenM [Constructor AbstractTy]
     genPolyCtor thisTy = do
       ctorNm <- freshConstructorName
-      numArgs <- GT.liftGen $ chooseInt (1, 5)
+      numArgs <- chooseIntT (1, 5)
       argsRaw <- GT.vectorOf numArgs polyArg
       let recCase = Datatype thisTy (Vector.singleton (Abstraction (BoundAt Z ix0)))
       if recCase `elem` argsRaw
@@ -444,7 +457,7 @@ genPolymorphic1Decl =
         polyArg :: DataGenM (ValT AbstractTy)
         polyArg = do
           -- first we choose a type with an arity >=1. We have to have at least one of those because we've added the parent type to the arity map
-          availableArity1 <- gets (M.keys . M.filter arityOne . view dgArities)
+          availableArity1 <- gets (M.keys . M.filter arityOne . view #arities)
           someTyCon1 <- GT.elements availableArity1
           GT.oneof
             [ pure $ Abstraction (BoundAt Z ix0),
