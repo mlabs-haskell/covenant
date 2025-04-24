@@ -4,6 +4,9 @@ module Covenant.ASG
     Ref,
     Arg,
     ASGNode,
+    ASG,
+    rootNode,
+    nodeAt,
     CovenantTypeError
       ( BrokenIdReference,
         ForceCompType,
@@ -96,7 +99,10 @@ import Covenant.Prim
     typeTwoArgFunc,
   )
 import Data.Coerce (coerce)
+import Data.EnumMap (EnumMap)
+import Data.EnumMap qualified as EnumMap
 import Data.Kind (Type)
+import Data.Maybe (fromJust)
 import Data.Vector (Vector)
 import Data.Vector.NonEmpty qualified as NonEmpty
 import Optics.Core
@@ -108,6 +114,33 @@ import Optics.Core
     review,
     (%),
   )
+
+-- | @since 1.0.0
+newtype ASG = ASG (Id, EnumMap Id ASGNode)
+  deriving stock
+    ( -- | @since 1.0.0
+      Eq,
+      -- | @since 1.0.0
+      Show
+    )
+
+-- Note (Koz, 24/04/25): The `rootNode` and `nodeAt` functions use `fromJust`,
+-- because we can guarantee it's impossible to miss. For an end user, the only
+-- way to get hold of an `Id` is by inspecting a node, and since we control how
+-- these are built and assigned, and users can't change them, it's safe.
+--
+-- It is technically possible to escape this safety regime by having two
+-- different `ASG`s and mixing up their `Id`s. However, this is both vanishingly
+-- unlikely and probably not worth trying to protect against, given the nuisance
+-- of having to work in `Maybe` all the time.
+
+-- | @since 1.0.0
+rootNode :: ASG -> ASGNode
+rootNode asg@(ASG (rootId, _)) = nodeAt rootId asg
+
+-- | @since 1.0.0
+nodeAt :: Id -> ASG -> ASGNode
+nodeAt i (ASG (_, mappings)) = fromJust . EnumMap.lookup i $ mappings
 
 -- | @since 1.0.0
 newtype ScopeInfo = ScopeInfo (Vector (Vector (ValT AbstractTy)))
