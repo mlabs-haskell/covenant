@@ -4,6 +4,12 @@ module Covenant.ASG
     Ref,
     Arg,
     ASGNode,
+    ASG,
+    CovenantError (..),
+    ASGBuilder,
+    runASGBuilder,
+    rootNode,
+    nodeAt,
     CovenantTypeError
       ( BrokenIdReference,
         ForceCompType,
@@ -36,9 +42,22 @@ module Covenant.ASG
   )
 where
 
-import Control.Monad.Except (MonadError (throwError))
-import Control.Monad.HashCons (MonadHashCons (refTo))
-import Control.Monad.Reader (MonadReader, asks)
+import Control.Monad.Except
+  ( ExceptT,
+    MonadError (throwError),
+    runExceptT,
+  )
+import Control.Monad.HashCons
+  ( HashConsT,
+    MonadHashCons (refTo),
+    runHashConsT,
+  )
+import Control.Monad.Reader
+  ( MonadReader,
+    ReaderT,
+    asks,
+    runReaderT,
+  )
 import Covenant.Constant (AConstant, typeConstant)
 import Covenant.DeBruijn (DeBruijn, asInt)
 import Covenant.Index (Index, count0, intIndex)
@@ -95,9 +114,16 @@ import Covenant.Prim
     typeThreeArgFunc,
     typeTwoArgFunc,
   )
+import Data.Bimap (Bimap)
+import Data.Bimap qualified as Bimap
 import Data.Coerce (coerce)
+import Data.Functor.Identity (Identity, runIdentity)
 import Data.Kind (Type)
+import Data.Map.Strict (Map)
+import Data.Map.Strict qualified as Map
+import Data.Maybe (fromJust)
 import Data.Vector (Vector)
+import Data.Vector qualified as Vector
 import Data.Vector.NonEmpty qualified as NonEmpty
 import Optics.Core
   ( A_Lens,
@@ -108,6 +134,33 @@ import Optics.Core
     review,
     (%),
   )
+
+-- | @since 1.0.0
+newtype ASG = ASG (Id, Map Id ASGNode)
+  deriving stock
+    ( -- | @since 1.0.0
+      Eq,
+      -- | @since 1.0.0
+      Show
+    )
+
+-- Note (Koz, 24/04/25): The `rootNode` and `nodeAt` functions use `fromJust`,
+-- because we can guarantee it's impossible to miss. For an end user, the only
+-- way to get hold of an `Id` is by inspecting a node, and since we control how
+-- these are built and assigned, and users can't change them, it's safe.
+--
+-- It is technically possible to escape this safety regime by having two
+-- different `ASG`s and mixing up their `Id`s. However, this is both vanishingly
+-- unlikely and probably not worth trying to protect against, given the nuisance
+-- of having to work in `Maybe` all the time.
+
+-- | @since 1.0.0
+rootNode :: ASG -> ASGNode
+rootNode asg@(ASG (rootId, _)) = nodeAt rootId asg
+
+-- | @since 1.0.0
+nodeAt :: Id -> ASG -> ASGNode
+nodeAt i (ASG (_, mappings)) = fromJust . Map.lookup i $ mappings
 
 -- | @since 1.0.0
 newtype ScopeInfo = ScopeInfo (Vector (Vector (ValT AbstractTy)))
@@ -125,6 +178,50 @@ instance
   where
   {-# INLINEABLE labelOptic #-}
   labelOptic = lens coerce (\_ v -> ScopeInfo v)
+
+-- | @since 1.0.0
+data CovenantError
+  = TypeError (Bimap Id ASGNode) CovenantTypeError
+  | EmptyASG
+  | TopLevelError
+  | TopLevelValue (Bimap Id ASGNode) (ValT AbstractTy) ValNodeInfo
+
+-- | @since 1.0.0
+newtype ASGBuilder (a :: Type)
+  = ASGBuilder (ReaderT ScopeInfo (ExceptT CovenantTypeError (HashConsT Id ASGNode Identity)) a)
+  deriving
+    ( -- | @since 1.0.0
+      Functor,
+      -- | @since 1.0.0
+      Applicative,
+      -- | @since 1.0.0
+      Monad,
+      -- | @since 1.0.0
+      MonadReader ScopeInfo,
+      -- | @since 1.0.0
+      MonadError CovenantTypeError,
+      -- | @since 1.0.0
+      MonadHashCons Id ASGNode
+    )
+    via ReaderT ScopeInfo (ExceptT CovenantTypeError (HashConsT Id ASGNode Identity))
+
+-- | @since 1.0.0
+runASGBuilder ::
+  forall (a :: Type).
+  ASGBuilder a ->
+  Either CovenantError ASG
+runASGBuilder (ASGBuilder comp) =
+  case runIdentity . runHashConsT . runExceptT . runReaderT comp . ScopeInfo $ Vector.empty of
+    (result, bm) -> case result of
+      Left err' -> Left . TypeError bm $ err'
+      Right _ -> case Bimap.size bm of
+        0 -> Left EmptyASG
+        _ -> do
+          let (i, rootNode') = Bimap.findMax bm
+          case rootNode' of
+            AnError -> Left TopLevelError
+            ACompNode _ _ -> pure . ASG $ (i, Bimap.toMap bm)
+            AValNode t info -> Left . TopLevelValue bm t $ info
 
 -- | @since 1.0.0
 arg ::
