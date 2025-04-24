@@ -1,0 +1,6 @@
+#!/bin/bash
+
+# Bash please don't do stupid things
+set -euxo pipefail
+
+cp hooks/pre-commit .git/hooks/pre-commit
