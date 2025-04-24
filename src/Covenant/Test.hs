@@ -67,6 +67,7 @@ import Data.Text (Text)
 import Data.Text qualified as T
 import Data.Vector (Vector)
 import Data.Vector qualified as Vector
+import GHC.Exts (fromListN)
 import GHC.Word (Word32)
 import Optics.Core (Lens', folded, lens, over, review, view, (%))
 import Optics.Operators ((^.), (^..))
@@ -433,9 +434,9 @@ genPolymorphic1Decl =
         then do
           baseCtorNm <- freshConstructorName
           let baseCtor = Covenant.Internal.Type.Constructor baseCtorNm mempty
-              recCtor = Covenant.Internal.Type.Constructor ctorNm (Vector.fromList argsRaw)
+              recCtor = Covenant.Internal.Type.Constructor ctorNm (fromListN numArgs argsRaw)
           pure [baseCtor, recCtor]
-        else pure [Covenant.Internal.Type.Constructor ctorNm (Vector.fromList argsRaw)]
+        else pure [Covenant.Internal.Type.Constructor ctorNm (fromListN numArgs argsRaw)]
       where
         arityOne :: Count "tyvar" -> Bool
         arityOne c = c == count1
@@ -443,7 +444,7 @@ genPolymorphic1Decl =
         polyArg :: DataGenM (Covenant.Internal.Type.ValT AbstractTy)
         polyArg = do
           -- first we choose a type with an arity >=1. We have to have at least one of those because we've added the parent type to the arity map
-          availableArity1 <- gets (fmap fst . (filter (arityOne . snd) . M.toList) . view dgArities)
+          availableArity1 <- gets (M.keys . M.filter arityOne . view dgArities)
           someTyCon1 <- GT.elements availableArity1
           GT.oneof
             [ pure $ Covenant.Internal.Type.Abstraction (BoundAt Z ix0),

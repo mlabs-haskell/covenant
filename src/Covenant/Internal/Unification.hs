@@ -163,7 +163,7 @@ collectUnifiables = \case
     _ -> Set.empty
   BuiltinFlat _ -> Set.empty
   ThunkT (CompT _ (CompTBody xs)) -> NonEmpty.foldl' (\acc t -> acc <> collectUnifiables t) Set.empty xs
-  Datatype{} -> error "Implement unification machinery for datatypes"
+  Datatype {} -> error "Implement unification machinery for datatypes"
 
 unify ::
   ValT Renamed ->

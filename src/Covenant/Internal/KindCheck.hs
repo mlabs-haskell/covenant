@@ -63,8 +63,6 @@ lookupDeclaration tn = do
     Nothing -> throwError $ UnknownType tn
     Just decl -> pure decl
 
--- TODO: I think we need a `CompT` version as well?
--- REVIEW: This happens *before* renaming, right?
 -- This isn't really a "kind checker" in the normal sense and just checks that none of the three failure conditions above obtain
 checkKinds' :: ValT AbstractTy -> KindCheckM AbstractTy ()
 checkKinds' = \case

@@ -74,7 +74,8 @@ newtype Id = Id Word64
 typeId ::
   forall (m :: Type -> Type).
   (MonadHashCons Id ASGNode m, MonadError CovenantTypeError m) =>
-  Id -> m ASGNodeType
+  Id ->
+  m ASGNodeType
 typeId i = do
   lookedUp <- lookupRef i
   case lookedUp of
@@ -118,7 +119,8 @@ data Ref = AnArg Arg | AnId Id
 typeRef ::
   forall (m :: Type -> Type).
   (MonadHashCons Id ASGNode m, MonadError CovenantTypeError m) =>
-  Ref -> m ASGNodeType
+  Ref ->
+  m ASGNodeType
 typeRef = \case
   AnArg arg -> pure . ValNodeType . typeArg $ arg
   AnId i -> typeId i

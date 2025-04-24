@@ -102,6 +102,7 @@ library
 
   other-modules:
     Covenant.Internal.Rename
+    Covenant.Internal.KindCheck
     Covenant.Internal.Term
     Covenant.Internal.Type
     Covenant.Internal.Unification

@@ -10,7 +10,6 @@ module Covenant.Internal.Type
     BuiltinFlatT (..),
     TyName (..),
     ScopeBoundary (..), -- used in the generators
-    runTyName,
     runConstructorName,
     datatypeName,
     datatypeConstructors,
@@ -180,9 +179,6 @@ instance Eq1 CompT where
 
 newtype TyName = TyName Text
   deriving (Show, Eq, Ord, IsString) via Text
-
-runTyName :: TyName -> Text
-runTyName (TyName nm) = nm
 
 -- | @since 1.0.0
 instance Pretty (CompT Renamed) where
@@ -397,9 +393,9 @@ prettyValTWithContext = \case
   Abstraction abstr -> prettyRenamedWithContext abstr
   ThunkT compT -> prettyCompTWithContext compT
   BuiltinFlat biFlat -> pure $ viaShow biFlat
-  Datatype tn args -> do
+  Datatype (TyName tn) args -> do
     args' <- traverse prettyValTWithContext args
-    let tn' = pretty $ runTyName tn
+    let tn' = pretty tn
     case Vector.toList args' of
       [] -> pure tn'
       argsList -> pure . parens $ tn' <+> hsep argsList
@@ -447,8 +443,8 @@ lookupAbstraction offset argIndex = do
     Just res' -> pure res'
 
 prettyDataDeclWithContext :: forall (ann :: Type). DataDeclaration Renamed -> PrettyM ann (Doc ann)
-prettyDataDeclWithContext (DataDeclaration tn numVars ctors) = bindVars numVars $ \boundVars -> do
-  let tn' = pretty (runTyName tn)
+prettyDataDeclWithContext (DataDeclaration (TyName tn) numVars ctors) = bindVars numVars $ \boundVars -> do
+  let tn' = pretty tn
   ctors' <- traverse prettyCtorWithContext ctors
   let prettyCtors = indent 2 . vcat . prefix "| " . Vector.toList $ ctors'
   if Vector.null ctors
