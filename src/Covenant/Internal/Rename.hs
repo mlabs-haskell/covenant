@@ -209,6 +209,7 @@ renameValT = \case
     unless (Vector.and ourAbstractions) (throwError $ UndeterminedAbstraction xs renamedXS)
     pure $ Datatype tn renamedXS
 
+-- @since 1.1.0
 renameDataDecl :: DataDeclaration AbstractTy -> RenameM (DataDeclaration Renamed)
 renameDataDecl (DataDeclaration tn cnt ctors) = RenameM $ do
   modify (stepUpScope cnt)
