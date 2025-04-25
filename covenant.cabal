@@ -20,7 +20,7 @@ extra-source-files:
 -- Common sections
 common lang
   ghc-options:
-    -Wall
+    -- -Wall
     -Wcompat
     -Wredundant-bang-patterns
     -Wredundant-strictness-flags
