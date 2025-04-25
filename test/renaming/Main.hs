@@ -144,7 +144,7 @@ testDodgyIdT = do
   let idT = Comp2 $ tyvar Z ix0 :--:> ReturnT (tyvar Z ix0)
   let result = runRenameM . renameCompT $ idT
   case result of
-    Left UndeterminedAbstraction -> assertBool "" True
+    Left UndeterminedAbstraction {} -> assertBool "" True
     Left _ -> assertBool "wrong renaming error" False
     _ -> assertBool "renaming succeeded when it should have failed" False
 
@@ -157,7 +157,7 @@ testDodgyConstT = do
             :--:> ReturnT (ThunkT . Comp0 $ tyvar (S Z) ix1 :--:> ReturnT (tyvar (S Z) ix0))
   let result = runRenameM . renameCompT $ constT
   case result of
-    Left UndeterminedAbstraction -> assertBool "" True
+    Left UndeterminedAbstraction {} -> assertBool "" True
     Left _ -> assertBool "wrong renaming error" False
     _ -> assertBool "renaming succeeded when it should have failed" False
 

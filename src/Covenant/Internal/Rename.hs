@@ -3,6 +3,7 @@ module Covenant.Internal.Rename
     RenameError (..),
     runRenameM,
     renameValT,
+    renameDataDecl,
     renameCompT,
     undoRename,
   )
@@ -32,8 +33,10 @@ import Covenant.Internal.Type
   ( AbstractTy (BoundAt),
     CompT (CompT),
     CompTBody (CompTBody),
+    Constructor (Constructor),
+    DataDeclaration (DataDeclaration),
     Renamed (Rigid, Unifiable, Wildcard),
-    ValT (Abstraction, BuiltinFlat, ThunkT),
+    ValT (Abstraction, BuiltinFlat, Datatype, ThunkT),
   )
 import Data.Coerce (coerce)
 import Data.Kind (Type)
@@ -126,7 +129,7 @@ data RenameError
     -- has @b@ undetermined.
     --
     -- @since 1.0.0
-    UndeterminedAbstraction
+    UndeterminedAbstraction (Vector (ValT AbstractTy)) (Vector (ValT Renamed))
   deriving stock (Eq, Show)
 
 -- | A \'renaming monad\' which allows us to convert type representations from
@@ -185,7 +188,7 @@ renameCompT (CompT abses (CompTBody xs)) = RenameM $ do
       (\i -> coerce . renameValT $ xs NonEmpty.! i)
   -- Check that we don't overdetermine anything
   ourAbstractions <- gets (view (#tracker % to Vector.head % _1))
-  unless (Vector.and ourAbstractions) (throwError UndeterminedAbstraction)
+  unless (Vector.and ourAbstractions) (throwError $ UndeterminedAbstraction (NonEmpty.toVector xs) renamedArgs)
   -- Check result type
   renamedResult <- coerce . renameValT . NonEmpty.last $ xs
   -- Roll back state
@@ -201,6 +204,34 @@ renameValT = \case
   Abstraction t -> Abstraction <$> renameAbstraction t
   ThunkT t -> ThunkT <$> renameCompT t
   BuiltinFlat t -> pure . BuiltinFlat $ t
+  -- Assumes kind-checking has occurred
+  Datatype tn xs -> RenameM $ do
+    -- We don't step or un-step the scope here b/c a TyCon which appears as a ValT _cannot_ bind variables.
+    -- This Vector here doesn't represent a function, but a product, so we there is no "return" type to treat specially (I think!)
+    renamedXS <-
+      Vector.generateM
+        (Vector.length xs)
+        (\i -> coerce . renameValT $ xs Vector.! i)
+    ourAbstractions <- gets (view (#tracker % to Vector.head % _1))
+    unless (Vector.and ourAbstractions) (throwError $ UndeterminedAbstraction xs renamedXS)
+    pure $ Datatype tn renamedXS
+
+-- @since 1.1.0
+renameDataDecl :: DataDeclaration AbstractTy -> RenameM (DataDeclaration Renamed)
+renameDataDecl (DataDeclaration tn cnt ctors) = RenameM $ do
+  modify (stepUpScope cnt)
+  renamedCtors <-
+    Vector.generateM
+      (Vector.length ctors)
+      (\i -> coerce . renameCtor $ ctors Vector.! i)
+  -- REVIEW: @Koz is it ok to skip this here? It SEEMS ok
+  -- ourAbstractions <- gets (view (#tracker % to Vector.head % _1))
+  -- unless (Vector.and ourAbstractions) (throwError $ UndeterminedAbstraction)
+  modify dropDownScope
+  pure $ DataDeclaration tn cnt renamedCtors
+  where
+    renameCtor :: Constructor AbstractTy -> RenameM (Constructor Renamed)
+    renameCtor (Constructor cn args) = Constructor cn <$> traverse renameValT args
 
 -- | @since 1.0.0
 undoRename :: ValT Renamed -> ValT AbstractTy
