@@ -23,7 +23,13 @@ module Covenant.ASG
         RenameFunctionFailed,
         RenameArgumentFailed,
         NoSuchArgument,
-        ReturnCompType
+        ReturnCompType,
+        LambdaResultsInValType,
+        LambdaResultsInNonReturn,
+        ReturnWrapsError,
+        ReturnWrapsCompType,
+        WrongReturnType,
+        UnificationError
       ),
     RenameError
       ( InvalidAbstractionReference,
@@ -36,9 +42,11 @@ module Covenant.ASG
     builtin3,
     force,
     ret,
+    lam,
     err,
     lit,
     thunk,
+    app,
   )
 where
 
@@ -49,11 +57,11 @@ import Control.Monad.Except
   )
 import Control.Monad.HashCons
   ( HashConsT,
-    MonadHashCons (refTo),
+    MonadHashCons (lookupRef, refTo),
     runHashConsT,
   )
 import Control.Monad.Reader
-  ( MonadReader,
+  ( MonadReader (local),
     ReaderT,
     asks,
     runReaderT,
@@ -67,6 +75,10 @@ import Covenant.Internal.Rename
         IrrelevantAbstraction,
         UndeterminedAbstraction
       ),
+    renameCompT,
+    renameValT,
+    runRenameM,
+    undoRename,
   )
 import Covenant.Internal.Term
   ( ASGNode (ACompNode, AValNode, AnError),
@@ -77,6 +89,7 @@ import Covenant.Internal.Term
         Builtin2Internal,
         Builtin3Internal,
         ForceInternal,
+        LamInternal,
         ReturnInternal
       ),
     CovenantTypeError
@@ -87,16 +100,22 @@ import Covenant.Internal.Term
         ForceCompType,
         ForceError,
         ForceNonThunk,
+        LambdaResultsInNonReturn,
+        LambdaResultsInValType,
         NoSuchArgument,
         RenameArgumentFailed,
         RenameFunctionFailed,
         ReturnCompType,
+        ReturnWrapsCompType,
+        ReturnWrapsError,
         ThunkError,
-        ThunkValType
+        ThunkValType,
+        UnificationError,
+        WrongReturnType
       ),
     Id,
     Ref,
-    ValNodeInfo (LitInternal, ThunkInternal),
+    ValNodeInfo (AppInternal, LitInternal, ThunkInternal),
     typeId,
     typeRef,
   )
@@ -104,8 +123,10 @@ import Covenant.Internal.Type
   ( AbstractTy,
     CompT (CompT),
     CompTBody (CompTBody),
+    Renamed,
     ValT (ThunkT),
   )
+import Covenant.Internal.Unification (checkApp)
 import Covenant.Prim
   ( OneArgFunc,
     ThreeArgFunc,
@@ -130,6 +151,7 @@ import Optics.Core
     LabelOptic (labelOptic),
     ix,
     lens,
+    over,
     preview,
     review,
     (%),
@@ -299,11 +321,63 @@ ret r = do
     ErrorNodeType -> err
 
 -- | @since 1.0.0
+lam ::
+  forall (m :: Type -> Type).
+  (MonadHashCons Id ASGNode m, MonadError CovenantTypeError m, MonadReader ScopeInfo m) =>
+  CompT AbstractTy ->
+  m Id ->
+  m Id
+lam expectedT@(CompT _ (CompTBody xs)) bodyComp = do
+  let (args, resultT) = NonEmpty.unsnoc xs
+  bodyId <- local (over #argumentInfo (Vector.cons args)) bodyComp
+  bodyNode <- lookupRef bodyId
+  case bodyNode of
+    Nothing -> throwError . BrokenIdReference $ bodyId
+    -- This unifies with anything, so we're fine
+    Just AnError -> refTo . ACompNode expectedT . LamInternal $ bodyId
+    Just (ACompNode t specs) -> case specs of
+      ReturnInternal r -> do
+        rT <- typeRef r
+        case rT of
+          -- Note (Koz, 17/04/2025): I am not 100% sure about this, but I can't
+          -- see how anything else would make sense.
+          ValNodeType actualT ->
+            if resultT == actualT
+              then refTo . ACompNode expectedT . LamInternal $ bodyId
+              else throwError . WrongReturnType resultT $ actualT
+          ErrorNodeType -> throwError ReturnWrapsError
+          CompNodeType t' -> throwError . ReturnWrapsCompType $ t'
+      _ -> throwError . LambdaResultsInNonReturn $ t
+    Just (AValNode t _) -> throwError . LambdaResultsInValType $ t
+
+-- | @since 1.0.0
 err ::
   forall (m :: Type -> Type).
   (MonadHashCons Id ASGNode m) =>
   m Id
 err = refTo AnError
+
+-- | @since 1.0.0
+app ::
+  forall (m :: Type -> Type).
+  (MonadHashCons Id ASGNode m, MonadError CovenantTypeError m) =>
+  Id ->
+  Vector Ref ->
+  m Id
+app fId argRefs = do
+  lookedUp <- typeId fId
+  case lookedUp of
+    CompNodeType fT -> case runRenameM . renameCompT $ fT of
+      Left err' -> throwError . RenameFunctionFailed fT $ err'
+      Right renamedFT -> do
+        renamedArgs <- traverse renameArg argRefs
+        case checkApp renamedFT . Vector.toList $ renamedArgs of
+          Left err' -> throwError . UnificationError $ err'
+          Right result -> do
+            let restored = undoRename result
+            refTo . AValNode restored . AppInternal fId $ argRefs
+    ValNodeType t -> throwError . ApplyToValType $ t
+    ErrorNodeType -> throwError ApplyToError
 
 -- | @since 1.0.0
 lit ::
@@ -325,3 +399,17 @@ thunk i = do
     CompNodeType t -> refTo . AValNode (ThunkT t) . ThunkInternal $ i
     ValNodeType t -> throwError . ThunkValType $ t
     ErrorNodeType -> throwError ThunkError
+
+-- Helpers
+
+renameArg ::
+  forall (m :: Type -> Type).
+  (MonadHashCons Id ASGNode m, MonadError CovenantTypeError m) =>
+  Ref -> m (Maybe (ValT Renamed))
+renameArg r =
+  typeRef r >>= \case
+    CompNodeType t -> throwError . ApplyCompType $ t
+    ValNodeType t -> case runRenameM . renameValT $ t of
+      Left err' -> throwError . RenameArgumentFailed t $ err'
+      Right renamed -> pure . Just $ renamed
+    ErrorNodeType -> pure Nothing

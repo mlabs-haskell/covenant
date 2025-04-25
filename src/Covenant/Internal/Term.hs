@@ -21,6 +21,7 @@ import Covenant.DeBruijn (DeBruijn)
 import Covenant.Index (Index)
 import Covenant.Internal.Rename (RenameError)
 import Covenant.Internal.Type (AbstractTy, CompT, ValT)
+import Covenant.Internal.Unification (TypeAppError)
 import Covenant.Prim (OneArgFunc, ThreeArgFunc, TwoArgFunc)
 import Data.Kind (Type)
 import Data.Vector (Vector)
@@ -39,8 +40,14 @@ data CovenantTypeError
   | ApplyCompType (CompT AbstractTy)
   | RenameFunctionFailed (CompT AbstractTy) RenameError
   | RenameArgumentFailed (ValT AbstractTy) RenameError
+  | UnificationError TypeAppError
   | NoSuchArgument DeBruijn (Index "arg")
   | ReturnCompType (CompT AbstractTy)
+  | LambdaResultsInValType (ValT AbstractTy)
+  | LambdaResultsInNonReturn (CompT AbstractTy)
+  | ReturnWrapsError
+  | ReturnWrapsCompType (CompT AbstractTy)
+  | WrongReturnType (ValT AbstractTy) (ValT AbstractTy)
   deriving stock
     ( -- | @since 1.0.0
       Eq,
