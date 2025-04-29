@@ -1,3 +1,12 @@
+-- |
+-- Module: Covenant.Test
+-- Copyright: (C) MLabs 2025
+-- License: Apache 2.0
+-- Maintainer: koz@mlabs.city, sean@mlabs.city
+--
+-- Utilities designed to help test Covenant itself.
+--
+-- @since 1.0.0
 module Covenant.Test
   ( Concrete (Concrete),
   )

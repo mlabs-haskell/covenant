@@ -155,9 +155,7 @@ typeId i = do
     Nothing -> throwError . BrokenIdReference $ i
     Just node -> pure . typeASGNode $ node
 
--- | An argument passed to a function in a Covenant program. We represent this
--- as a combination of scope (as a De Bruijn index) and an index (representing
--- the position of the argument), together with its type.
+-- | An argument passed to a function in a Covenant program.
 --
 -- @since 1.0.0
 data Arg = Arg DeBruijn (Index "arg") (ValT AbstractTy)
@@ -174,13 +172,18 @@ data Arg = Arg DeBruijn (Index "arg") (ValT AbstractTy)
 typeArg :: Arg -> ValT AbstractTy
 typeArg (Arg _ _ t) = t
 
--- | A general reference in a Covenant program. This is one of the following:
---
--- * An ASG node, represented by its unique 'Id';
--- * A function argument, represented by an 'Arg'.
+-- | A general reference in a Covenant program.
 --
 -- @since 1.0.0
-data Ref = AnArg Arg | AnId Id
+data Ref
+  = -- | A function argument.
+    --
+    -- @since 1.0.0
+    AnArg Arg
+  | -- | A link to an ASG node.
+    --
+    -- @since 1.0.0
+    AnId Id
   deriving stock
     ( -- | @since 1.0.0
       Eq,
@@ -203,30 +206,12 @@ typeRef = \case
 --
 -- @since 1.0.0
 data CompNodeInfo
-  = -- | This node is a Plutus primop taking one argument.
-    --
-    -- @since 1.0.0
-    Builtin1Internal OneArgFunc
-  | -- | This node is a Plutus primop taking two arguments.
-    --
-    -- @since 1.0.0
-    Builtin2Internal TwoArgFunc
-  | -- | This node is a Plutus primop taking three arguments.
-    --
-    -- @since 1.0.0
-    Builtin3Internal ThreeArgFunc
-  | -- | This node is a lambda, with a link to its body.
-    --
-    -- @since 1.0.0
-    LamInternal Id
-  | -- | This node is forcing a thunk, as indicated by the 'Ref'.
-    --
-    -- @since 1.0.0
-    ForceInternal Ref
-  | -- | This node is returning a value-typed term, as indicated by the 'Ref'.
-    --
-    -- @since 1.0.0
-    ReturnInternal Ref
+  = Builtin1Internal OneArgFunc
+  | Builtin2Internal TwoArgFunc
+  | Builtin3Internal ThreeArgFunc
+  | LamInternal Id
+  | ForceInternal Ref
+  | ReturnInternal Ref
   deriving stock
     ( -- | @since 1.0.0
       Eq,
@@ -240,20 +225,9 @@ data CompNodeInfo
 --
 -- @since 1.0.0
 data ValNodeInfo
-  = -- | This node is a compile-time literal of a flat builtin type.
-    --
-    -- @since 1.0.0
-    LitInternal AConstant
-  | -- | This node is an application, with the computation indicated by
-    -- the 'Id' field, and the arguments being applied in order by the 'Vector'
-    -- field.
-    --
-    -- @since 1.0.0
-    AppInternal Id (Vector Ref)
-  | -- | This node is a thunk of a computation indicated by the 'Id'.
-    --
-    -- @since 1.0.0
-    ThunkInternal Id
+  = LitInternal AConstant
+  | AppInternal Id (Vector Ref)
+  | ThunkInternal Id
   deriving stock
     ( -- | @since 1.0.0
       Eq,
@@ -263,15 +237,23 @@ data ValNodeInfo
       Show
     )
 
--- | A single node in a Covenant ASG. These are either value-typed,
--- computation-typed or error nodes; the first two of these also carry their
+-- | A single node in a Covenant ASG. Where appropriate, these carry their
 -- types.
 --
 -- @since 1.0.0
 data ASGNode
-  = ACompNode (CompT AbstractTy) CompNodeInfo
-  | AValNode (ValT AbstractTy) ValNodeInfo
-  | AnError
+  = -- | A computation-typed node.
+    --
+    -- @since 1.0.0
+    ACompNode (CompT AbstractTy) CompNodeInfo
+  | -- | A value-typed node
+    --
+    -- @since 1.0.0
+    AValNode (ValT AbstractTy) ValNodeInfo
+  | -- | An error node.
+    --
+    -- @since 1.0.0
+    AnError
   deriving stock
     ( -- | @since 1.0.0
       Eq,

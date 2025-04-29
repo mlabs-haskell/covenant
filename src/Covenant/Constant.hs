@@ -2,7 +2,7 @@
 -- Module: Covenant.Constant
 -- Copyright: (C) MLabs 2025
 -- License: Apache 2.0
--- Maintainer: koz@mlabs.city, farseen@mlabs.city, sean@mlabs.city
+-- Maintainer: koz@mlabs.city, sean@mlabs.city
 --
 -- Representation of Plutus constants in Covenant.
 --
@@ -50,18 +50,6 @@ data AConstant
     )
 
 -- | @since 1.0.0
-typeConstant ::
-  forall (a :: Type).
-  AConstant -> ValT a
-typeConstant =
-  BuiltinFlat . \case
-    AUnit -> UnitT
-    ABoolean _ -> BoolT
-    AnInteger _ -> IntegerT
-    AByteString _ -> ByteStringT
-    AString _ -> StringT
-
--- | @since 1.0.0
 instance Arbitrary AConstant where
   {-# INLINEABLE arbitrary #-}
   arbitrary =
@@ -79,3 +67,17 @@ instance Arbitrary AConstant where
     AnInteger i -> AnInteger <$> shrink i
     AByteString bs -> AByteString <$> shrink bs
     AString t -> AString <$> shrink t
+
+-- | Produce the type of a given constant.
+--
+-- @since 1.0.0
+typeConstant ::
+  forall (a :: Type).
+  AConstant -> ValT a
+typeConstant =
+  BuiltinFlat . \case
+    AUnit -> UnitT
+    ABoolean _ -> BoolT
+    AnInteger _ -> IntegerT
+    AByteString _ -> ByteStringT
+    AString _ -> StringT
