@@ -16,7 +16,19 @@
 --
 -- @since 1.0.0
 module Covenant.ASG
-  ( Id,
+  ( -- * The ASG itself
+
+    -- ** Types
+    ASG,
+
+    -- ** Functions
+    topLevelNode,
+    nodeAt,
+
+    -- * ASG components
+
+    -- ** Types
+    Id,
     Ref (..),
     Arg,
     CompNodeInfo
@@ -29,13 +41,16 @@ module Covenant.ASG
       ),
     ValNodeInfo (Lit, App, Thunk),
     ASGNode (..),
-    ASG,
+
+    -- ** Functions
+    typeASGNode,
+
+    -- * ASG builder
+
+    -- ** Types
     CovenantError (..),
     ScopeInfo,
     ASGBuilder,
-    runASGBuilder,
-    topLevelNode,
-    nodeAt,
     CovenantTypeError
       ( BrokenIdReference,
         ForceCompType,
@@ -62,7 +77,8 @@ module Covenant.ASG
         IrrelevantAbstraction,
         UndeterminedAbstraction
       ),
-    typeASGNode,
+
+    -- ** Introducers
     arg,
     builtin1,
     builtin2,
@@ -74,6 +90,9 @@ module Covenant.ASG
     lit,
     thunk,
     app,
+
+    -- ** Elimination
+    runASGBuilder,
   )
 where
 
