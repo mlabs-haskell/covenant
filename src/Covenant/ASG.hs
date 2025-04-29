@@ -36,6 +36,7 @@ module Covenant.ASG
         IrrelevantAbstraction,
         UndeterminedAbstraction
       ),
+    typeASGNode,
     arg,
     builtin1,
     builtin2,
