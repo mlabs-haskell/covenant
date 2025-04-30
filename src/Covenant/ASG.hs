@@ -207,6 +207,12 @@ data CovenantError
   | EmptyASG
   | TopLevelError
   | TopLevelValue (Bimap Id ASGNode) (ValT AbstractTy) ValNodeInfo
+  deriving stock
+    ( -- | @since 1.0.0
+      Eq,
+      -- | @since 1.0.0
+      Show
+    )
 
 -- | @since 1.0.0
 newtype ASGBuilder (a :: Type)
