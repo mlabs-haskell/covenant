@@ -1,17 +1,29 @@
 module Main (main) where
 
 import Covenant.ASG
-  ( CovenantError (EmptyASG, TopLevelError, TopLevelValue),
+  ( ASGNode (ACompNode, AValNode),
+    CompNodeInfo
+      ( Builtin1,
+        Builtin2,
+        Builtin3,
+        Return
+      ),
+    CovenantError (EmptyASG, TopLevelError, TopLevelValue),
+    Ref (AnArg, AnId),
+    ValNodeInfo (Lit),
     builtin1,
     builtin2,
     builtin3,
     err,
     lit,
+    nodeAt,
     ret,
-    rootNode,
     runASGBuilder,
+    topLevelNode,
   )
 import Covenant.Constant (typeConstant)
+import Covenant.Prim (typeOneArgFunc, typeThreeArgFunc, typeTwoArgFunc)
+import Covenant.Type (CompT (Comp0), CompTBody (ReturnT))
 import Test.QuickCheck
   ( Property,
     arbitrary,
@@ -19,6 +31,7 @@ import Test.QuickCheck
     forAllShrinkShow,
     property,
     shrink,
+    (.&&.),
     (===),
   )
 import Test.Tasty (adjustOption, defaultMain, testGroup)
@@ -82,7 +95,17 @@ propTopLevelBuiltin1 = forAllShrinkShow arbitrary shrink show $ \bi1 ->
           counterexample ("Unexpected failure: " <> show err')
             . property
             $ False
-        Right asg -> _
+        Right asg -> case topLevelNode asg of
+          ACompNode t info -> case info of
+            Builtin1 bi -> t === typeOneArgFunc bi1 .&&. bi === bi1
+            _ ->
+              counterexample ("Unexpected CompNodeInfo: " <> show info)
+                . property
+                $ False
+          node ->
+            counterexample ("Unexpected toplevel node: " <> show node)
+              . property
+              $ False
 
 propTopLevelBuiltin2 :: Property
 propTopLevelBuiltin2 = forAllShrinkShow arbitrary shrink show $ \bi2 ->
@@ -93,7 +116,17 @@ propTopLevelBuiltin2 = forAllShrinkShow arbitrary shrink show $ \bi2 ->
           counterexample ("Unexpected failure: " <> show err')
             . property
             $ False
-        Right asg -> _
+        Right asg -> case topLevelNode asg of
+          ACompNode t info -> case info of
+            Builtin2 bi -> t === typeTwoArgFunc bi2 .&&. bi === bi2
+            _ ->
+              counterexample ("Unexpected CompNodeInfo: " <> show info)
+                . property
+                $ False
+          node ->
+            counterexample ("Unexpected toplevel node: " <> show node)
+              . property
+              $ False
 
 propTopLevelBuiltin3 :: Property
 propTopLevelBuiltin3 = forAllShrinkShow arbitrary shrink show $ \bi3 ->
@@ -104,19 +137,52 @@ propTopLevelBuiltin3 = forAllShrinkShow arbitrary shrink show $ \bi3 ->
           counterexample ("Unexpected failure: " <> show err')
             . property
             $ False
-        Right asg -> _
+        Right asg -> case topLevelNode asg of
+          ACompNode t info -> case info of
+            Builtin3 bi -> t === typeThreeArgFunc bi3 .&&. bi === bi3
+            _ ->
+              counterexample ("Unexpected CompNodeInfo: " <> show info)
+                . property
+                $ False
+          node ->
+            counterexample ("Unexpected toplevel node: " <> show node)
+              . property
+              $ False
 
 propTopLevelReturn :: Property
-propTopLevelReturn = forAllShrinkShow arbitrary shrink show $ \case
-  Left bi1 ->
-    let builtUp = builtin1 bi1 >>= \i -> ret (_ i)
-        actual = runASGBuilder builtUp
-     in _
-  Right (Left bi2) ->
-    let builtUp = builtin2 bi2 >>= \i -> ret (_ i)
-        actual = runASGBuilder builtUp
-     in _
-  Right (Right bi3) ->
-    let builtUp = builtin3 bi3 >>= \i -> ret (_ i)
-        actual = runASGBuilder builtUp
-     in _
+propTopLevelReturn = forAllShrinkShow arbitrary shrink show $ \c ->
+  let builtUp = lit c >>= \i -> ret (AnId i)
+      actual = runASGBuilder builtUp
+   in case actual of
+        Left err' ->
+          counterexample ("Unexpected failure: " <> show err')
+            . property
+            $ False
+        Right asg -> case topLevelNode asg of
+          ACompNode t info -> case info of
+            Return r -> case r of
+              AnId i -> case nodeAt i asg of
+                AValNode t' info' -> case info' of
+                  Lit c' ->
+                    let cT = typeConstant c
+                     in c' === c .&&. cT === t' .&&. t === Comp0 (ReturnT cT)
+                  _ ->
+                    counterexample ("Unexpected ValNodeInfo: " <> show info')
+                      . property
+                      $ False
+                node' ->
+                  counterexample ("Unexpected node: " <> show node')
+                    . property
+                    $ False
+              AnArg arg ->
+                counterexample ("Unexpected argument: " <> show arg)
+                  . property
+                  $ False
+            _ ->
+              counterexample ("Unexpected CompNodeInfo: " <> show info)
+                . property
+                $ False
+          node ->
+            counterexample ("Unexpected toplevel node: " <> show node)
+              . property
+              $ False
