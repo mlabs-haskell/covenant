@@ -213,7 +213,7 @@ renameValT = \case
         (Vector.length xs)
         (\i -> coerce . renameValT $ xs Vector.! i)
     ourAbstractions <- gets (view (#tracker % to Vector.head % _1))
-    unless (Vector.and ourAbstractions) (throwError $ UndeterminedAbstraction xs renamedXS)
+    -- unless (Vector.and ourAbstractions) (throwError $ UndeterminedAbstraction xs renamedXS)
     pure $ Datatype tn renamedXS
 
 -- @since 1.1.0

@@ -262,7 +262,7 @@ data BuiltinFlatT
 -- Helpers
 
 newtype ScopeBoundary = ScopeBoundary Int
-  deriving (Show, Eq, Ord, Num) via Int
+  deriving (Show, Eq, Ord, Num, Real, Enum, Integral) via Int
 
 -- Keeping the field names for clarity even if we don't use them
 data PrettyContext (ann :: Type)

@@ -106,6 +106,7 @@ library
     Covenant.Internal.Term
     Covenant.Internal.Type
     Covenant.Internal.Unification
+    Covenant.Internal.Data
 
   build-depends:
     QuickCheck ==2.15.0.1,
