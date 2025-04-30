@@ -94,7 +94,6 @@ library
     Covenant.Constant
     Covenant.DeBruijn
     Covenant.Index
-    Covenant.Ledger
     Covenant.Prim
     Covenant.Test
     Covenant.Type

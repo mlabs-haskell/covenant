@@ -1,15 +1,56 @@
+{-# LANGUAGE PatternSynonyms #-}
+
+-- |
+-- Module: Covenant.ASG
+-- Copyright: (C) MLabs 2025
+-- License: Apache 2.0
+-- Maintainer: koz@mlabs.city, sean@mlabs.city
+--
+-- The Covenant ASG, and ways to programmatically build it.
+--
+-- = Note
+--
+-- We use the term \'ASG\' to refer to \'abstract syntax graph\'. This is
+-- because Covenant uses hash consing to ensure duplicate nodes do not exist,
+-- thus producing a DAG structure, rather than a tree.
+--
+-- @since 1.0.0
 module Covenant.ASG
-  ( ScopeInfo,
-    Id,
-    Ref,
-    Arg,
-    ASGNode,
+  ( -- * The ASG itself
+
+    -- ** Types
     ASG,
-    CovenantError (..),
-    ASGBuilder,
-    runASGBuilder,
-    rootNode,
+
+    -- ** Functions
+    topLevelNode,
     nodeAt,
+
+    -- * ASG components
+
+    -- ** Types
+    Id,
+    Ref (..),
+    Arg,
+    CompNodeInfo
+      ( Builtin1,
+        Builtin2,
+        Builtin3,
+        Lam,
+        Force,
+        Return
+      ),
+    ValNodeInfo (Lit, App, Thunk),
+    ASGNode (..),
+
+    -- ** Functions
+    typeASGNode,
+
+    -- * ASG builder
+
+    -- ** Types
+    CovenantError (..),
+    ScopeInfo,
+    ASGBuilder,
     CovenantTypeError
       ( BrokenIdReference,
         ForceCompType,
@@ -36,6 +77,8 @@ module Covenant.ASG
         IrrelevantAbstraction,
         UndeterminedAbstraction
       ),
+
+    -- ** Introducers
     arg,
     builtin1,
     builtin2,
@@ -47,6 +90,9 @@ module Covenant.ASG
     lit,
     thunk,
     app,
+
+    -- ** Elimination
+    runASGBuilder,
   )
 where
 
@@ -114,8 +160,9 @@ import Covenant.Internal.Term
         WrongReturnType
       ),
     Id,
-    Ref,
+    Ref (AnArg, AnId),
     ValNodeInfo (AppInternal, LitInternal, ThunkInternal),
+    typeASGNode,
     typeId,
     typeRef,
   )
@@ -157,7 +204,9 @@ import Optics.Core
     (%),
   )
 
--- | @since 1.0.0
+-- | A fully-assembled Covenant ASG.
+--
+-- @since 1.0.0
 newtype ASG = ASG (Id, Map Id ASGNode)
   deriving stock
     ( -- | @since 1.0.0
@@ -176,15 +225,36 @@ newtype ASG = ASG (Id, Map Id ASGNode)
 -- unlikely and probably not worth trying to protect against, given the nuisance
 -- of having to work in `Maybe` all the time.
 
--- | @since 1.0.0
-rootNode :: ASG -> ASGNode
-rootNode asg@(ASG (rootId, _)) = nodeAt rootId asg
+-- | Retrieves the top-level node of an ASG.
+--
+-- @since 1.0.0
+topLevelNode :: ASG -> ASGNode
+topLevelNode asg@(ASG (rootId, _)) = nodeAt rootId asg
 
--- | @since 1.0.0
+-- | Given an 'Id' and an ASG, produces the node corresponding to that 'Id'.
+--
+-- = Important note
+--
+-- This is only safe to use if the 'Id' comes from a node in the argument 'ASG'.
+-- 'Id's valid in one ASG are not likely to be valid in another. \'Mixing
+-- and matching\' 'Id's from different ASGs will at best produce unexpected
+-- results, and at worst will crash. You have been warned.
+--
+-- @since 1.0.0
 nodeAt :: Id -> ASG -> ASGNode
 nodeAt i (ASG (_, mappings)) = fromJust . Map.lookup i $ mappings
 
--- | @since 1.0.0
+-- | A tracker for scope-related information while building an ASG
+-- programmatically. Currently only tracks available arguments.
+--
+-- = Important note
+--
+-- This is a fairly low-level type, designed specifically for ASG construction.
+-- While you can do arbitrary things with it, changing things in it outside of
+-- the functionality provided by this module is not recommended, unless you know
+-- /exactly/ what you're doing.
+--
+-- @since 1.0.0
 newtype ScopeInfo = ScopeInfo (Vector (Vector (ValT AbstractTy)))
   deriving stock
     ( -- | @since 1.0.0
@@ -193,7 +263,13 @@ newtype ScopeInfo = ScopeInfo (Vector (Vector (ValT AbstractTy)))
       Show
     )
 
--- | @since 1.0.0
+-- | Gives access to the argument information for the current, and all
+-- enclosing, scopes. The \'outer\' 'Vector' is a stack of scopes, with lower
+-- indexes corresponding to closer scopes: index 0 is our scope, 1 is our
+-- enclosing scope, 2 is the enclosing scope of our enclosing scope, etc. The
+-- \'inner\' 'Vector's are positional lists of argument types.
+--
+-- @since 1.0.0
 instance
   (k ~ A_Lens, a ~ Vector (Vector (ValT AbstractTy)), b ~ Vector (Vector (ValT AbstractTy))) =>
   LabelOptic "argumentInfo" k ScopeInfo ScopeInfo a b
@@ -201,20 +277,91 @@ instance
   {-# INLINEABLE labelOptic #-}
   labelOptic = lens coerce (\_ v -> ScopeInfo v)
 
--- | @since 1.0.0
-data CovenantError
-  = TypeError (Bimap Id ASGNode) CovenantTypeError
-  | EmptyASG
-  | TopLevelError
-  | TopLevelValue (Bimap Id ASGNode) (ValT AbstractTy) ValNodeInfo
-  deriving stock
-    ( -- | @since 1.0.0
-      Eq,
-      -- | @since 1.0.0
-      Show
-    )
+-- | A Plutus primop with one argument.
+--
+-- @since 1.0.0
+pattern Builtin1 :: OneArgFunc -> CompNodeInfo
+pattern Builtin1 f <- Builtin1Internal f
 
--- | @since 1.0.0
+-- | A Plutus primop with two arguments.
+--
+-- @since 1.0.0
+pattern Builtin2 :: TwoArgFunc -> CompNodeInfo
+pattern Builtin2 f <- Builtin2Internal f
+
+-- | A Plutus primop with three arguments.
+--
+-- @since 1.0.0
+pattern Builtin3 :: ThreeArgFunc -> CompNodeInfo
+pattern Builtin3 f <- Builtin3Internal f
+
+-- | Force a thunk back into the computation it wraps.
+--
+-- @since 1.0.0
+pattern Force :: Ref -> CompNodeInfo
+pattern Force r <- ForceInternal r
+
+-- | Produce the result of a computation.
+--
+-- @since 1.0.0
+pattern Return :: Ref -> CompNodeInfo
+pattern Return r <- ReturnInternal r
+
+-- | A lambda.
+--
+-- @since 1.0.0
+pattern Lam :: Id -> CompNodeInfo
+pattern Lam i <- LamInternal i
+
+{-# COMPLETE Builtin1, Builtin2, Builtin3, Force, Return, Lam #-}
+
+-- | A compile-time literal of a flat builtin type.
+--
+-- @since 1.0.0
+pattern Lit :: AConstant -> ValNodeInfo
+pattern Lit c <- LitInternal c
+
+-- | An application of a computation (the 'Id' field) to some arguments (the
+-- 'Vector' field).
+--
+-- @since 1.0.0
+pattern App :: Id -> Vector Ref -> ValNodeInfo
+pattern App f args <- AppInternal f args
+
+-- | Wrap a computation into a value (essentially delaying it).
+--
+-- @since 1.0.0
+pattern Thunk :: Id -> ValNodeInfo
+pattern Thunk i <- ThunkInternal i
+
+{-# COMPLETE Lit, App, Thunk #-}
+
+-- | Any problem that might arise when building an ASG programmatically.
+--
+-- @since 1.0.0
+data CovenantError
+  = -- | There was a type error when assembling the ASG. This provides the
+    -- hash-consed state up to the point of the error.
+    --
+    -- @since 1.0.0
+    TypeError (Bimap Id ASGNode) CovenantTypeError
+  | -- | We tried to generate an ASG with no nodes in it.
+    --
+    -- @since 1.0.0
+    EmptyASG
+  | -- | We tried to generate as ASG whose top-level node is an error.
+    --
+    -- @since 1.0.0
+    TopLevelError
+  | -- | We tried to generate an ASG whose top-level node is a value.
+    --
+    -- @since 1.0.0
+    TopLevelValue (Bimap Id ASGNode) (ValT AbstractTy) ValNodeInfo
+
+-- | A concrete monadic stack, providing the minimum amount of functionality
+-- needed to build an ASG using the combinators given in this module.
+--
+-- @since 1.0.0
 newtype ASGBuilder (a :: Type)
   = ASGBuilder (ReaderT ScopeInfo (ExceptT CovenantTypeError (HashConsT Id ASGNode Identity)) a)
   deriving
@@ -233,7 +380,9 @@ newtype ASGBuilder (a :: Type)
     )
     via ReaderT ScopeInfo (ExceptT CovenantTypeError (HashConsT Id ASGNode Identity))
 
--- | @since 1.0.0
+-- | Executes an 'ASGBuilder' to make a \'finished\' ASG.
+--
+-- @since 1.0.0
 runASGBuilder ::
   forall (a :: Type).
   ASGBuilder a ->
@@ -251,7 +400,11 @@ runASGBuilder (ASGBuilder comp) =
             ACompNode _ _ -> pure . ASG $ (i, Bimap.toMap bm)
             AValNode t info -> Left . TopLevelValue bm t $ info
 
--- | @since 1.0.0
+-- | Given a scope and a positional argument index, construct that argument.
+-- Will fail if that argument doesn't exist in the specified scope, or if the
+-- specified scope doesn't exist.
+--
+-- @since 1.0.0
 arg ::
   forall (m :: Type -> Type).
   (MonadError CovenantTypeError m, MonadReader ScopeInfo m) =>
@@ -266,7 +419,9 @@ arg scope index = do
     Nothing -> throwError . NoSuchArgument scope $ index
     Just t -> pure . Arg scope index $ t
 
--- | @since 1.0.0
+-- | Construct a node corresponding to the given Plutus primop.
+--
+-- @since 1.0.0
 builtin1 ::
   forall (m :: Type -> Type).
   (MonadHashCons Id ASGNode m) =>
@@ -276,7 +431,9 @@ builtin1 bi = do
   let node = ACompNode (typeOneArgFunc bi) . Builtin1Internal $ bi
   refTo node
 
--- | @since 1.0.0
+-- | As 'builtin1', but for two-argument primops.
+--
+-- @since 1.0.0
 builtin2 ::
   forall (m :: Type -> Type).
   (MonadHashCons Id ASGNode m) =>
@@ -286,7 +443,9 @@ builtin2 bi = do
   let node = ACompNode (typeTwoArgFunc bi) . Builtin2Internal $ bi
   refTo node
 
--- | @since 1.0.0
+-- | As 'builtin1', but for three-argument primops.
+--
+-- @since 1.0.0
 builtin3 ::
   forall (m :: Type -> Type).
   (MonadHashCons Id ASGNode m) =>
@@ -296,7 +455,10 @@ builtin3 bi = do
   let node = ACompNode (typeThreeArgFunc bi) . Builtin3Internal $ bi
   refTo node
 
--- | @since 1.0.0
+-- | Given a reference to a thunk, turn it back into a computation. Will fail if
+-- the reference isn't a thunk.
+--
+-- @since 1.0.0
 force ::
   forall (m :: Type -> Type).
   (MonadHashCons Id ASGNode m, MonadError CovenantTypeError m) =>
@@ -311,7 +473,10 @@ force r = do
     CompNodeType t -> throwError . ForceCompType $ t
     ErrorNodeType -> throwError ForceError
 
--- | @since 1.0.0
+-- | Given the result of a function body (either a value or an error), construct
+-- the return for it. Will fail if that reference aims at a computation node.
+--
+-- @since 1.0.0
 ret ::
   forall (m :: Type -> Type).
   (MonadHashCons Id ASGNode m, MonadError CovenantTypeError m) =>
@@ -326,7 +491,20 @@ ret r = do
     CompNodeType t -> throwError . ReturnCompType $ t
     ErrorNodeType -> err
 
--- | @since 1.0.0
+-- | Given a desired type, and a computation which will construct a lambda body
+-- when executed (with the scope extended with the arguments the functions can
+-- expect), construct a lambda.
+--
+-- = Important note
+--
+-- This combinator works slightly differently to the others in this module. This
+-- is required because, due to hash consing, an ASG is typically built
+-- \'bottom-up\', whereas function arguments (and their scopes) are necessarily
+-- top-down. Thus, we need to \'delay\' the construction of a lambda's body to
+-- ensure that proper scoped argument information can be given to it, hence why
+-- the argument being passed is an @m Id@.
+--
+-- @since 1.0.0
 lam ::
   forall (m :: Type -> Type).
   (MonadHashCons Id ASGNode m, MonadError CovenantTypeError m, MonadReader ScopeInfo m) =>
@@ -356,14 +534,25 @@ lam expectedT@(CompT _ (CompTBody xs)) bodyComp = do
       _ -> throwError . LambdaResultsInNonReturn $ t
     Just (AValNode t _) -> throwError . LambdaResultsInValType $ t
 
--- | @since 1.0.0
+-- | Construct the error node.
+--
+-- @since 1.0.0
 err ::
   forall (m :: Type -> Type).
   (MonadHashCons Id ASGNode m) =>
   m Id
 err = refTo AnError
 
--- | @since 1.0.0
+-- | Given an 'Id' referring to a computation, and a 'Vector' of 'Ref's to the
+-- desired arguments, construct the application of the arguments to that
+-- computation. This can fail for a range of reasons:
+--
+-- * Type mismatch between what the computation expects and what it's given
+-- * Too many or too few arguments
+-- * Not a computation type for 'Id' argument
+-- * Not value types for 'Ref's
+--
+-- @since 1.0.0
 app ::
   forall (m :: Type -> Type).
   (MonadHashCons Id ASGNode m, MonadError CovenantTypeError m) =>
@@ -385,7 +574,9 @@ app fId argRefs = do
     ValNodeType t -> throwError . ApplyToValType $ t
     ErrorNodeType -> throwError ApplyToError
 
--- | @since 1.0.0
+-- | Construct a node corresponding to the given constant.
+--
+-- @since 1.0.0
 lit ::
   forall (m :: Type -> Type).
   (MonadHashCons Id ASGNode m) =>
@@ -393,7 +584,10 @@ lit ::
   m Id
 lit c = refTo . AValNode (typeConstant c) . LitInternal $ c
 
--- | @since 1.0.0
+-- | Given an 'Id' referring to a computation, build a thunk wrapping it. Will
+-- fail if the 'Id' does not refer to a computation node.
+--
+-- @since 1.0.0
 thunk ::
   forall (m :: Type -> Type).
   (MonadHashCons Id ASGNode m, MonadError CovenantTypeError m) =>

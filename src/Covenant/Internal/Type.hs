@@ -129,11 +129,6 @@ instance Eq1 CompTBody where
 -- pretty much any case imaginable, this would be either 'AbstractTy' (in the
 -- ASG), or 'Renamed' (after renaming).
 --
--- = Important note
---
--- This type has a \'type abstraction boundary\' just before it: the first field
--- indicates how many type variables it binds.
---
 -- @since 1.0.0
 data CompT (a :: Type) = CompT (Count "tyvar") (CompTBody a)
   deriving stock
@@ -159,7 +154,7 @@ instance Pretty (CompT Renamed) where
 -- much any case imaginable, this would be either 'AbstractTy' (in the ASG) or
 -- 'Renamed' (after renaming).
 --
--- @ since 1.0.0
+-- @since 1.0.0
 data ValT (a :: Type)
   = -- | An abstract type.
     Abstraction a

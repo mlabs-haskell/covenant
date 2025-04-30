@@ -2,10 +2,16 @@
 -- Module: Covenant.Prim
 -- Copyright: (C) MLabs 2025
 -- License: Apache 2.0
--- Maintainer: koz@mlabs.city, farseen@mlabs.city, sean@mlabs.city
+-- Maintainer: koz@mlabs.city, sean@mlabs.city
 --
 -- Contains definitions relating to Plutus primitive functions in Covenant
 -- programs.
+--
+-- = Note
+--
+-- In the 1.0.0 release, we didn't include non-flat builtin types, specifically
+-- pairs, lists and @Data@. Thus, the primops that operate on, or produce, these
+-- are not currently included.
 --
 -- @since 1.0.0
 module Covenant.Prim

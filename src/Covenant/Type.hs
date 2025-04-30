@@ -1,21 +1,28 @@
 {-# LANGUAGE PatternSynonyms #-}
 {-# LANGUAGE ViewPatterns #-}
 
+-- |
+-- Module: Covenant.Type
+-- Copyright: (C) MLabs 2025
+-- License: Apache 2.0
+-- Maintainer: koz@mlabs.city, sean@mlabs.city
+--
+-- Covenant's type system and various ways to construct types.
+--
+-- @since 1.0.0
 module Covenant.Type
-  ( AbstractTy (..),
+  ( -- * Type abstractions
+    AbstractTy (..),
     Renamed (..),
+
+    -- * Computation types
     CompT (Comp0, Comp1, Comp2, Comp3, CompN),
     CompTBody (ReturnT, (:--:>), ArgsAndResult),
+    arity,
+
+    -- * Value types
     ValT (..),
     BuiltinFlatT (..),
-    RenameError (..),
-    renameValT,
-    renameCompT,
-    RenameM,
-    runRenameM,
-    TypeAppError (..),
-    checkApp,
-    arity,
     byteStringT,
     integerT,
     stringT,
@@ -25,6 +32,23 @@ module Covenant.Type
     g2T,
     mlResultT,
     unitT,
+
+    -- * Renaming
+
+    -- ** Types
+    RenameError (..),
+    RenameM,
+
+    -- ** Introduction
+    renameValT,
+    renameCompT,
+
+    -- ** Elimination
+    runRenameM,
+
+    -- * Type application
+    TypeAppError (..),
+    checkApp,
   )
 where
 
@@ -110,7 +134,7 @@ pattern ReturnT x <- CompTBody (returnHelper -> Just x)
 --
 -- = Example
 --
--- * @'integerT :--:> ReturnT 'byteStringT'@ is @Integer -> !ByteString@
+-- * @'integerT' :--:> ReturnT 'byteStringT'@ is @Integer -> !ByteString@
 --
 -- @since 1.0.0
 pattern (:--:>) ::

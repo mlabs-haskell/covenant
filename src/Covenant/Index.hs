@@ -1,8 +1,14 @@
 {-# LANGUAGE RoleAnnotations #-}
 
--- | Module: Covenant.Index
+-- |
+-- Module: Covenant.Index
+-- Copyright: (C) MLabs 2025
+-- License: Apache 2.0
+-- Maintainer: koz@mlabs.city, sean@mlabs.city
 --
--- Positional indexes, starting from 0.
+-- Positional indexes, starting from 0, and cardinality indicators.
+--
+-- @since 1.0.0
 module Covenant.Index
   ( Index,
     Count,
