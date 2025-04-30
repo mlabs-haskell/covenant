@@ -202,7 +202,9 @@ renameValT = \case
   ThunkT t -> ThunkT <$> renameCompT t
   BuiltinFlat t -> pure . BuiltinFlat $ t
 
--- | @since 1.0.0
+-- A way of 'undoing' the renaming process. This is meant to be used only after
+-- applications, and assumes that what is being un-renamed is the result of a
+-- computation.
 undoRename :: ValT Renamed -> ValT AbstractTy
 undoRename t = runReader (go t) 1
   where
