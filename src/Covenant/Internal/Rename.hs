@@ -233,7 +233,9 @@ renameDataDecl (DataDeclaration tn cnt ctors) = RenameM $ do
     renameCtor :: Constructor AbstractTy -> RenameM (Constructor Renamed)
     renameCtor (Constructor cn args) = Constructor cn <$> traverse renameValT args
 
--- | @since 1.0.0
+-- A way of 'undoing' the renaming process. This is meant to be used only after
+-- applications, and assumes that what is being un-renamed is the result of a
+-- computation.
 undoRename :: ValT Renamed -> ValT AbstractTy
 undoRename t = runReader (go t) 1
   where
