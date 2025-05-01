@@ -76,10 +76,10 @@ common test-lang
   build-depends:
     QuickCheck ==2.15.0.1,
     covenant,
+    mtl >=2.3.1 && <3,
     tasty ==1.5.3,
     tasty-hunit ==0.10.2,
     tasty-quickcheck ==0.11.1,
-    mtl >=2.3.1 && <3,
 
 common bench-lang
   import: lang
@@ -89,19 +89,19 @@ common bench-lang
 library
   import: lang
   exposed-modules:
+    -- FIXME: Re-export the important bits from somewhere else or expose this module (ask Koz which is better)
     Control.Monad.Action
     Control.Monad.HashCons
     Covenant.ASG
     Covenant.Constant
     Covenant.DeBruijn
     Covenant.Index
+    Covenant.Internal.Data
     Covenant.Ledger
     Covenant.Prim
     Covenant.Test
     Covenant.Type
     Covenant.Util
-    -- FIXME: Re-export the important bits from somewhere else or expose this module (ask Koz which is better)
-    Covenant.Internal.Data
 
   other-modules:
     Covenant.Internal.KindCheck

@@ -405,7 +405,8 @@ thunk i = do
 renameArg ::
   forall (m :: Type -> Type).
   (MonadHashCons Id ASGNode m, MonadError CovenantTypeError m) =>
-  Ref -> m (Maybe (ValT Renamed))
+  Ref ->
+  m (Maybe (ValT Renamed))
 renameArg r =
   typeRef r >>= \case
     CompNodeType t -> throwError . ApplyCompType $ t

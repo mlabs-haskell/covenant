@@ -7,7 +7,7 @@
 module Covenant.DeBruijn
   ( DeBruijn (Z, S),
     asInt,
-    unsafeDeBruijn
+    unsafeDeBruijn,
   )
 where
 
@@ -84,4 +84,4 @@ reduce :: DeBruijn -> Maybe DeBruijn
 reduce (DeBruijn x) = DeBruijn (x - 1) <$ guard (x > 0)
 
 unsafeDeBruijn :: Int -> DeBruijn
-unsafeDeBruijn = DeBruijn . fromIntegral 
+unsafeDeBruijn = DeBruijn . fromIntegral
