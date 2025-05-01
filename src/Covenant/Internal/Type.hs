@@ -490,7 +490,7 @@ data DataDeclaration a
 instance Pretty (DataDeclaration Renamed) where
   pretty = runPrettyM . prettyDataDeclWithContext
 
--- we'll need them
+-- TODO: field label classes
 datatypeName :: forall (a :: Type). Lens' (DataDeclaration a) TyName
 datatypeName =
   lens

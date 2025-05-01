@@ -20,7 +20,7 @@ extra-source-files:
 -- Common sections
 common lang
   ghc-options:
-            -- -Wall
+    -Wall
     -Wcompat
     -Wredundant-bang-patterns
     -Wredundant-strictness-flags
@@ -28,8 +28,8 @@ common lang
     -Woperator-whitespace
     -Wambiguous-fields
     -Wmisplaced-pragmas
-   --  -Wmissing-export-lists
-   --  -Wmissing-import-lists
+    -Wmissing-export-lists
+    -Wmissing-import-lists
 
   default-extensions:
     BangPatterns
@@ -79,6 +79,7 @@ common test-lang
     tasty ==1.5.3,
     tasty-hunit ==0.10.2,
     tasty-quickcheck ==0.11.1,
+    mtl >=2.3.1 && <3,
 
 common bench-lang
   import: lang
@@ -99,6 +100,8 @@ library
     Covenant.Test
     Covenant.Type
     Covenant.Util
+    -- FIXME: Re-export the important bits from somewhere else or expose this module (ask Koz which is better)
+    Covenant.Internal.Data
 
   other-modules:
     Covenant.Internal.KindCheck
@@ -106,7 +109,6 @@ library
     Covenant.Internal.Term
     Covenant.Internal.Type
     Covenant.Internal.Unification
-    Covenant.Internal.Data
 
   build-depends:
     QuickCheck ==2.15.0.1,
@@ -135,6 +137,12 @@ test-suite renaming
   type: exitcode-stdio-1.0
   main-is: Main.hs
   hs-source-dirs: test/renaming
+
+test-suite base-functor
+  import: test-lang
+  type: exitcode-stdio-1.0
+  main-is: Main.hs
+  hs-source-dirs: test/base-functor
 
 test-suite type-applications
   import: test-lang

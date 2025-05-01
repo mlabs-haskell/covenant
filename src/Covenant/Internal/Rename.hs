@@ -212,8 +212,6 @@ renameValT = \case
       Vector.generateM
         (Vector.length xs)
         (\i -> coerce . renameValT $ xs Vector.! i)
-    ourAbstractions <- gets (view (#tracker % to Vector.head % _1))
-    -- unless (Vector.and ourAbstractions) (throwError $ UndeterminedAbstraction xs renamedXS)
     pure $ Datatype tn renamedXS
 
 -- @since 1.1.0
@@ -247,6 +245,7 @@ undoRename t = runReader (go t) 1
       ThunkT (CompT abses (CompTBody xs)) ->
         ThunkT . CompT abses . CompTBody <$> local (+ 1) (traverse go xs)
       BuiltinFlat t' -> pure . BuiltinFlat $ t'
+      Datatype tn args -> Datatype tn <$> traverse go args
 
 -- Helpers
 

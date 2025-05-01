@@ -34,6 +34,7 @@ import Optics.Core (A_Lens, LabelOptic (labelOptic), lens, review, view)
 data KindCheckError
   = UnknownType TyName
   | IncorrectNumArgs TyName (Count "tyvar") (Vector (ValT AbstractTy)) -- first is expected (from the decl), second is actual
+  | HigherOrderConstructorArg (CompT AbstractTy) -- no polymorphic function args to ctors
   deriving stock (Show, Eq)
 
 newtype KindCheckContext a = KindCheckContext (Map TyName (DataDeclaration a))
@@ -67,7 +68,9 @@ lookupDeclaration tn = do
 checkKinds' :: ValT AbstractTy -> KindCheckM AbstractTy ()
 checkKinds' = \case
   Abstraction _ -> pure ()
-  ThunkT (CompT _ (CompTBody nev)) -> traverse_ checkKinds' nev
+  ThunkT compT@(CompT cnt (CompTBody nev)) -> case review intCount cnt of
+    0 -> traverse_ checkKinds' nev
+    _ -> throwError $ HigherOrderConstructorArg compT -- no higher order arguments to ctors (makes life much easier, not that useful)
   BuiltinFlat {} -> pure ()
   Datatype tn args -> do
     DataDeclaration _ numVars _ <- lookupDeclaration tn
