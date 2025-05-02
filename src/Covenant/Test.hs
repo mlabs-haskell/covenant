@@ -1,7 +1,7 @@
 module Covenant.Test
   ( Concrete (Concrete),
     DataDeclSet (DataDeclSet),
-    DataDeclFlavor (ConcreteDecl, ConcreteNestedDecl, SimpleRecursive, Poly1),
+    DataDeclFlavor (ConcreteDecl, ConcreteNestedDecl, SimpleRecursive, Poly1, Poly1PolyThunks),
     testConcrete,
     testNested,
     testRecConcrete,

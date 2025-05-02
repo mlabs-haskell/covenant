@@ -25,6 +25,8 @@ module Covenant.Type
     g2T,
     mlResultT,
     unitT,
+    -- for tests
+    datatypeName
   )
 where
 
@@ -66,6 +68,8 @@ import Covenant.Internal.Type
     CompTBody (CompTBody),
     Renamed (Rigid, Unifiable, Wildcard),
     ValT (Abstraction, BuiltinFlat, ThunkT),
+    -- need for tests, should reorganize
+    datatypeName
   )
 import Covenant.Internal.Unification
   ( TypeAppError
