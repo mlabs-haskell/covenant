@@ -26,7 +26,7 @@ module Covenant.Type
     mlResultT,
     unitT,
     -- for tests
-    datatypeName
+    datatypeName,
   )
 where
 
@@ -69,7 +69,7 @@ import Covenant.Internal.Type
     Renamed (Rigid, Unifiable, Wildcard),
     ValT (Abstraction, BuiltinFlat, ThunkT),
     -- need for tests, should reorganize
-    datatypeName
+    datatypeName,
   )
 import Covenant.Internal.Unification
   ( TypeAppError
