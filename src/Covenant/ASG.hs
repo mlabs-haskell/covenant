@@ -535,7 +535,7 @@ lam expectedT@(CompT _ (CompTBody xs)) bodyComp = do
             if resultT == actualT
               then refTo . ACompNode expectedT . LamInternal $ bodyId
               else throwError . WrongReturnType resultT $ actualT
-          ErrorNodeType -> throwError ReturnWrapsError
+          ErrorNodeType -> throwError ReturnWrapsError -- Should be impossible
           CompNodeType t' -> throwError . ReturnWrapsCompType $ t'
       _ -> throwError . LambdaResultsInNonReturn $ t
     Just (AValNode t _) -> throwError . LambdaResultsInValType $ t
