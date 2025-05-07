@@ -208,7 +208,7 @@ renameValT = \case
   Datatype tn xs -> RenameM $ do
     -- We don't step or un-step the scope here b/c a TyCon which appears as a ValT _cannot_ bind variables.
     -- This Vector here doesn't represent a function, but a product, so we there is no "return" type to treat specially (I think!)
-    renamedXS <- Vector.mapM (coerce . renameValT)  xs
+    renamedXS <- Vector.mapM (coerce . renameValT) xs
     pure $ Datatype tn renamedXS
 
 -- @since 1.1.0
@@ -253,7 +253,7 @@ trueLevelToDB trueLevel = asks (go . subtract trueLevel)
 
 renameAbstraction :: AbstractTy -> RenameM Renamed
 renameAbstraction (BoundAt scope index) = RenameM $ do
-  trueLevel <- gets (\x -> view (#tracker % to Vector.length) x -  review asInt scope)
+  trueLevel <- gets (\x -> view (#tracker % to Vector.length) x - review asInt scope)
   scopeInfo <- gets (\x -> view #tracker x Vector.!? review asInt scope)
   let asIntIx = review intIndex index
   case scopeInfo of

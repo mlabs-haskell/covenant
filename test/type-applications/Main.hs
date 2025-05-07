@@ -37,6 +37,7 @@ import Data.Coerce (coerce)
 import Data.Functor.Identity (Identity (Identity))
 import Data.Kind (Type)
 import Data.Vector qualified as Vector
+import Optics.Core (review)
 import Test.QuickCheck
   ( Gen,
     Property,
@@ -56,7 +57,6 @@ import Test.QuickCheck
 import Test.Tasty (adjustOption, defaultMain, testGroup)
 import Test.Tasty.HUnit (assertEqual, assertFailure, testCase)
 import Test.Tasty.QuickCheck (QuickCheckTests, testProperty)
-import Optics.Core (review)
 
 main :: IO ()
 main =

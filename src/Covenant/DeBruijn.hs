@@ -15,8 +15,8 @@ import Data.Coerce (coerce)
 import Data.List.NonEmpty (NonEmpty)
 import Data.Semigroup (Semigroup (sconcat, stimes), Sum (Sum))
 import Data.Word (Word32)
-import Test.QuickCheck (Arbitrary)
 import Optics.Core (Prism', prism)
+import Test.QuickCheck (Arbitrary)
 
 -- | A DeBruijn index.
 --
@@ -76,7 +76,7 @@ pattern S x <- (reduce -> Just x)
 --
 -- @since 1.0.0
 asInt :: Prism' Int DeBruijn
-asInt = prism  (\(DeBruijn x) -> fromIntegral x) (\x -> if x >= 0 then Right . DeBruijn $ fromIntegral x else Left x)
+asInt = prism (\(DeBruijn x) -> fromIntegral x) (\x -> if x >= 0 then Right . DeBruijn $ fromIntegral x else Left x)
 
 -- Helpers
 reduce :: DeBruijn -> Maybe DeBruijn

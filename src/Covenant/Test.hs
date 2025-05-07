@@ -1,4 +1,5 @@
 {-# LANGUAGE PolyKinds #-}
+
 module Covenant.Test
   ( Concrete (Concrete),
     DataDeclSet (DataDeclSet),
@@ -11,7 +12,7 @@ module Covenant.Test
     testPoly1,
     testBaseF,
     testNonConcrete,
-    prettyDeclSet
+    prettyDeclSet,
   )
 where
 
@@ -25,6 +26,7 @@ import Control.Monad.State.Strict
     gets,
     modify,
   )
+import Covenant.Data (mkBaseFunctor)
 import Covenant.DeBruijn (DeBruijn (Z), asInt)
 import Covenant.Index
   ( Count,
@@ -34,7 +36,6 @@ import Covenant.Index
     intIndex,
     ix0,
   )
-import Covenant.Data (mkBaseFunctor)
 import Covenant.Internal.Rename (renameDataDecl)
 import Covenant.Internal.Type
   ( CompT (CompT),
@@ -80,7 +81,7 @@ import Data.Vector.NonEmpty qualified as NEV
 import GHC.Exts (fromListN)
 import GHC.Word (Word32)
 import Optics.Core (A_Lens, LabelOptic (labelOptic), folded, lens, over, preview, review, set, toListOf, view, (%))
-import Prettyprinter (hardline, Pretty, pretty, layoutPretty, defaultLayoutOptions)
+import Prettyprinter (Pretty, defaultLayoutOptions, hardline, layoutPretty, pretty)
 import Prettyprinter.Render.Text (putDoc, renderStrict)
 import Test.QuickCheck
   ( Arbitrary (arbitrary, shrink),
@@ -98,7 +99,6 @@ import Test.QuickCheck.GenT (GenT, MonadGen)
 import Test.QuickCheck.GenT qualified as GT
 import Test.QuickCheck.Instances.Containers ()
 import Test.QuickCheck.Instances.Vector ()
-
 
 -- | Wrapper for 'ValT' to provide an 'Arbitrary' instance to generate only
 -- value types without any type variables.
@@ -544,9 +544,9 @@ genNonConcrete = NonConcrete <$> GT.sized go
 
     resolveArgs :: ScopeBoundary -> (ScopeBoundary, Word32) -> [ValT AbstractTy]
     resolveArgs currentScope (varScope, numIndices) =
-      let resolvedScope :: DeBruijn 
+      let resolvedScope :: DeBruijn
           resolvedScope = fromJust . preview asInt . fromIntegral $ currentScope - varScope
-       in mapMaybe (fmap (Abstraction  . BoundAt resolvedScope) . preview intIndex)  [0 .. (fromIntegral numIndices - 1)]
+       in mapMaybe (fmap (Abstraction . BoundAt resolvedScope) . preview intIndex) [0 .. (fromIntegral numIndices - 1)]
 
     unsafeFromList :: forall (a :: Type). [a] -> NEV.NonEmptyVector a
     unsafeFromList = fromJust . NEV.fromList
@@ -666,12 +666,12 @@ instance Arbitrary (DataDeclSet 'Poly1PolyThunks) where
 
   shrink = coerce . shrinkDataDecls . coerce
 
-
 prettyDeclSet :: forall (a :: DataDeclFlavor). DataDeclSet a -> String
-prettyDeclSet (DataDeclSet decls) = concatMap (\x ->  (prettyStr . unsafeRename  . renameDataDecl $ x) <> "\n\n") decls
+prettyDeclSet (DataDeclSet decls) = concatMap (\x -> (prettyStr . unsafeRename . renameDataDecl $ x) <> "\n\n") decls
   where
-    prettyStr :: forall (b :: Type). Pretty b => b ->  String 
+    prettyStr :: forall (b :: Type). (Pretty b) => b -> String
     prettyStr = T.unpack . renderStrict . layoutPretty defaultLayoutOptions . pretty
+
 {- Misc Repl testing utilities. I'd like to leave these here because I can't exactly have a test suite
    to validate test generators, so inspection may be necessary if something goes wrong.
 -}
@@ -730,7 +730,7 @@ testBaseF :: IO ()
 testBaseF = do
   samples <- generate $ genDataN 10 (coerce <$> genPolymorphic1Decl)
   forM_ samples $ \decl -> do
-    let prettyIn = pretty $  unsafeRename (renameDataDecl decl)
+    let prettyIn = pretty $ unsafeRename (renameDataDecl decl)
     putDoc $ hardline <> "INPUT:" <> hardline <> hardline <> prettyIn <> hardline <> hardline
     let output = runReader (mkBaseFunctor decl) 0
     case output of

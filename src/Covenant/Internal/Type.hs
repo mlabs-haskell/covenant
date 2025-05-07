@@ -472,15 +472,13 @@ data Constructor (a :: Type)
 instance Eq1 Constructor where
   liftEq f (Constructor nm args) (Constructor nm' args') = nm == nm' && liftEq (liftEq f) args args'
 
-instance (k ~ A_Lens, a ~ ConstructorName, b ~ ConstructorName) => LabelOptic "constructorName" k (Constructor c) (Constructor c) a b
- where
- {-# INLINEABLE labelOptic #-}
- labelOptic = lens (\(Constructor n _) -> n) (\(Constructor _ args) n -> Constructor n args)
+instance (k ~ A_Lens, a ~ ConstructorName, b ~ ConstructorName) => LabelOptic "constructorName" k (Constructor c) (Constructor c) a b where
+  {-# INLINEABLE labelOptic #-}
+  labelOptic = lens (\(Constructor n _) -> n) (\(Constructor _ args) n -> Constructor n args)
 
-instance (k ~ A_Lens, a ~ Vector (ValT c), b ~ Vector (ValT c)) => LabelOptic "constructorArgs" k (Constructor c) (Constructor c) a b
- where
- {-# INLINEABLE labelOptic #-}
- labelOptic =  lens (\(Constructor _ args) -> args) (\(Constructor n _) args -> Constructor n args)
+instance (k ~ A_Lens, a ~ Vector (ValT c), b ~ Vector (ValT c)) => LabelOptic "constructorArgs" k (Constructor c) (Constructor c) a b where
+  {-# INLINEABLE labelOptic #-}
+  labelOptic = lens (\(Constructor _ args) -> args) (\(Constructor n _) args -> Constructor n args)
 
 data DataDeclaration a
   = DataDeclaration TyName (Count "tyvar") (Vector (Constructor a)) -- Allows for representations of "empty" types in case we want to represent Void like that
@@ -491,23 +489,23 @@ instance Pretty (DataDeclaration Renamed) where
 
 -- TODO: field label classes
 
-instance (k ~ A_Lens, a ~ TyName, b ~ TyName) => LabelOptic "datatypeName" k (DataDeclaration c) (DataDeclaration c) a b
- where
- {-# INLINEABLE labelOptic #-}
- labelOptic = lens
-    (\(DataDeclaration tn _ _) -> tn)
-    (\(DataDeclaration _ cnt ctors) tn -> DataDeclaration tn cnt ctors)
+instance (k ~ A_Lens, a ~ TyName, b ~ TyName) => LabelOptic "datatypeName" k (DataDeclaration c) (DataDeclaration c) a b where
+  {-# INLINEABLE labelOptic #-}
+  labelOptic =
+    lens
+      (\(DataDeclaration tn _ _) -> tn)
+      (\(DataDeclaration _ cnt ctors) tn -> DataDeclaration tn cnt ctors)
 
-instance (k ~ A_Lens, a ~ Count "tyvar", b ~ Count "tyvar") => LabelOptic "datatypeBinders" k (DataDeclaration c) (DataDeclaration c) a b
- where
- {-# INLINEABLE labelOptic #-}
- labelOptic = lens
-    (\(DataDeclaration _ cnt _) -> cnt)
-    (\(DataDeclaration tn _ ctors) cnt -> DataDeclaration tn cnt ctors)
+instance (k ~ A_Lens, a ~ Count "tyvar", b ~ Count "tyvar") => LabelOptic "datatypeBinders" k (DataDeclaration c) (DataDeclaration c) a b where
+  {-# INLINEABLE labelOptic #-}
+  labelOptic =
+    lens
+      (\(DataDeclaration _ cnt _) -> cnt)
+      (\(DataDeclaration tn _ ctors) cnt -> DataDeclaration tn cnt ctors)
 
-instance (k ~ A_Lens, a ~ Vector (Constructor c), b ~ Vector (Constructor c)) => LabelOptic "datatypeConstructors" k (DataDeclaration c) (DataDeclaration c) a b
- where
- {-# INLINEABLE labelOptic #-}
- labelOptic = lens
-    (\(DataDeclaration _ _ ctors) -> ctors)
-    (\(DataDeclaration tn cnt _) ctors -> DataDeclaration tn cnt ctors)
+instance (k ~ A_Lens, a ~ Vector (Constructor c), b ~ Vector (Constructor c)) => LabelOptic "datatypeConstructors" k (DataDeclaration c) (DataDeclaration c) a b where
+  {-# INLINEABLE labelOptic #-}
+  labelOptic =
+    lens
+      (\(DataDeclaration _ _ ctors) -> ctors)
+      (\(DataDeclaration tn cnt _) ctors -> DataDeclaration tn cnt ctors)

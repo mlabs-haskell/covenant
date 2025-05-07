@@ -9,7 +9,7 @@ import Covenant.Data
 import Covenant.Test
   ( DataDeclFlavor (Poly1PolyThunks),
     DataDeclSet (DataDeclSet),
-    prettyDeclSet
+    prettyDeclSet,
   )
 import Covenant.Type ()
 import Data.Map.Strict qualified as M
@@ -19,7 +19,7 @@ import Test.QuickCheck
     Property,
   )
 import Test.Tasty (defaultMain, testGroup)
-import Test.Tasty.QuickCheck (testProperty, forAllShrinkShow)
+import Test.Tasty.QuickCheck (forAllShrinkShow, testProperty)
 
 main :: IO ()
 main =
