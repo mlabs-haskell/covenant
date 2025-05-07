@@ -1,9 +1,9 @@
 {-# LANGUAGE ViewPatterns #-}
 
-module Covenant.Internal.Data (mkBaseFunctor, isRecursiveChildOf, allComponentTypes, hasRecursive) where
+module Covenant.Data (mkBaseFunctor, isRecursiveChildOf, allComponentTypes, hasRecursive) where
 
 import Control.Monad.Reader (MonadReader (ask, local), Reader)
-import Covenant.DeBruijn (asInt, unsafeDeBruijn)
+import Covenant.DeBruijn (asInt)
 import Covenant.Index (Count, Index, intCount, intIndex)
 import Covenant.Internal.Type
   ( AbstractTy (BoundAt),
@@ -15,8 +15,6 @@ import Covenant.Internal.Type
     ScopeBoundary (ScopeBoundary),
     TyName (TyName),
     ValT (Abstraction, BuiltinFlat, Datatype, ThunkT),
-    constructorArgs,
-    datatypeConstructors,
   )
 import Data.Kind (Type)
 import Data.Maybe (fromJust)
@@ -57,28 +55,24 @@ _mapValT f = \case
 isRecursiveChildOf :: TyName -> ValT AbstractTy -> Reader ScopeBoundary Bool
 isRecursiveChildOf tn = \case
   Datatype tn' args
-    | tn' == tn -> checkArgsIsRec 0 (V.toList args)
+    | tn' == tn -> V.ifoldM checkArgsIsRec' True args
     | otherwise -> pure False
   _ -> pure False
   where
-    -- Checks that the arguments to a datatype (which we expect will be checked to have the same tycon as the parent type)
-    -- have the correct DeBruijn index & the same order as in the initial binding context of the declaration.
-    -- Has to be monadic because need access to the current scope level.
-    checkArgsIsRec :: Int -> [ValT AbstractTy] -> Reader ScopeBoundary Bool
-    checkArgsIsRec _ [] = pure True
-    checkArgsIsRec n (x : xs) = case x of
+    checkArgsIsRec' :: Bool -> Int -> ValT AbstractTy -> Reader ScopeBoundary Bool
+    checkArgsIsRec' acc n = \case
       Abstraction (BoundAt db varIx) -> do
         ScopeBoundary here <- ask
-        let dbInt = asInt db
+        let dbInt = review asInt db
         -- Explanation: A component ValT is only a recursive instance of the parent type if
         --              the DeBruijn index of its type variables points to Z (and the other conditions obtain)
         if dbInt - here == 0 && review intIndex varIx == n
-          then checkArgsIsRec (n + 1) xs
+          then pure acc
           else pure False
       _ -> pure False
 
 allComponentTypes :: DataDeclaration AbstractTy -> [ValT AbstractTy]
-allComponentTypes = toListOf (datatypeConstructors % folded % constructorArgs % folded)
+allComponentTypes = toListOf (#datatypeConstructors % folded % #constructorArgs % folded)
 
 -- This tells us whether a ValT *contains* a direct recursive type. I.e it tells us whether we need to construct a base functor
 hasRecursive :: TyName -> ValT AbstractTy -> Reader ScopeBoundary Bool
@@ -124,7 +118,7 @@ mkBaseFunctor (DataDeclaration tn numVars ctors) = do
       isRecursive vt >>= \case
         True -> do
           ScopeBoundary here <- ask -- this should be the distance from the initial binding context (which is what we want)
-          let db = unsafeDeBruijn here
+          let db = fromJust $ preview asInt here
           pure $ Abstraction (BoundAt db rIndex)
         False -> pure vt
 
@@ -144,7 +138,7 @@ mkBaseFunctor (DataDeclaration tn numVars ctors) = do
         baseFCtorName (ConstructorName nm) = ConstructorName (nm <> "_F")
 
     allCtorArgs :: [ValT AbstractTy]
-    allCtorArgs = concatMap (V.toList . view constructorArgs) ctors
+    allCtorArgs = concatMap (V.toList . view #constructorArgs) ctors
 
     -- This tells us whether the ValT *is* a recursive child of the parent type
     isRecursive :: ValT AbstractTy -> Reader ScopeBoundary Bool

@@ -7,7 +7,6 @@
 module Covenant.DeBruijn
   ( DeBruijn (Z, S),
     asInt,
-    unsafeDeBruijn,
   )
 where
 
@@ -17,6 +16,7 @@ import Data.List.NonEmpty (NonEmpty)
 import Data.Semigroup (Semigroup (sconcat, stimes), Sum (Sum))
 import Data.Word (Word32)
 import Test.QuickCheck (Arbitrary)
+import Optics.Core (Prism', prism)
 
 -- | A DeBruijn index.
 --
@@ -75,13 +75,9 @@ pattern S x <- (reduce -> Just x)
 -- | Convert a DeBruijn index into a (non-negative) 'Int'.
 --
 -- @since 1.0.0
-asInt :: DeBruijn -> Int
-asInt (DeBruijn i) = fromIntegral i
+asInt :: Prism' Int DeBruijn
+asInt = prism  (\(DeBruijn x) -> fromIntegral x) (\x -> if x >= 0 then Right . DeBruijn $ fromIntegral x else Left x)
 
 -- Helpers
-
 reduce :: DeBruijn -> Maybe DeBruijn
 reduce (DeBruijn x) = DeBruijn (x - 1) <$ guard (x > 0)
-
-unsafeDeBruijn :: Int -> DeBruijn
-unsafeDeBruijn = DeBruijn . fromIntegral

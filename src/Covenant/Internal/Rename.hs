@@ -128,7 +128,7 @@ data RenameError
     -- by any argument. For example, the type @forall a b . a -> !(b -> !a)@
     -- has @b@ undetermined.
     --
-    -- @since 1.0.0
+    -- @since 1.1.1
     UndeterminedAbstraction (Vector (ValT AbstractTy)) (Vector (ValT Renamed))
   deriving stock (Eq, Show)
 
@@ -208,20 +208,14 @@ renameValT = \case
   Datatype tn xs -> RenameM $ do
     -- We don't step or un-step the scope here b/c a TyCon which appears as a ValT _cannot_ bind variables.
     -- This Vector here doesn't represent a function, but a product, so we there is no "return" type to treat specially (I think!)
-    renamedXS <-
-      Vector.generateM
-        (Vector.length xs)
-        (\i -> coerce . renameValT $ xs Vector.! i)
+    renamedXS <- Vector.mapM (coerce . renameValT)  xs
     pure $ Datatype tn renamedXS
 
 -- @since 1.1.0
 renameDataDecl :: DataDeclaration AbstractTy -> RenameM (DataDeclaration Renamed)
 renameDataDecl (DataDeclaration tn cnt ctors) = RenameM $ do
   modify (stepUpScope cnt)
-  renamedCtors <-
-    Vector.generateM
-      (Vector.length ctors)
-      (\i -> coerce . renameCtor $ ctors Vector.! i)
+  renamedCtors <- Vector.mapM (coerce . renameCtor) ctors
   -- REVIEW: @Koz is it ok to skip this here? It SEEMS ok
   -- ourAbstractions <- gets (view (#tracker % to Vector.head % _1))
   -- unless (Vector.and ourAbstractions) (throwError $ UndeterminedAbstraction)
@@ -259,8 +253,8 @@ trueLevelToDB trueLevel = asks (go . subtract trueLevel)
 
 renameAbstraction :: AbstractTy -> RenameM Renamed
 renameAbstraction (BoundAt scope index) = RenameM $ do
-  trueLevel <- gets (\x -> view (#tracker % to Vector.length) x - asInt scope)
-  scopeInfo <- gets (\x -> view #tracker x Vector.!? asInt scope)
+  trueLevel <- gets (\x -> view (#tracker % to Vector.length) x -  review asInt scope)
+  scopeInfo <- gets (\x -> view #tracker x Vector.!? review asInt scope)
   let asIntIx = review intIndex index
   case scopeInfo of
     -- This variable is bound in a scope that encloses the renaming scope. Thus,
@@ -302,4 +296,4 @@ dropDownScope = over #tracker Vector.tail
 -- we've seen this variable.
 noteUsed :: DeBruijn -> Index "tyvar" -> RenameState -> RenameState
 noteUsed scope index =
-  set (#tracker % ix (asInt scope) % _1 % ix (review intIndex index)) True
+  set (#tracker % ix (review asInt scope) % _1 % ix (review intIndex index)) True

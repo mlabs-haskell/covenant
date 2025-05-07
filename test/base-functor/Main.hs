@@ -1,7 +1,7 @@
 module Main (main) where
 
 import Control.Monad.Reader (runReader)
-import Covenant.Internal.Data
+import Covenant.Data
   ( allComponentTypes,
     hasRecursive,
     mkBaseFunctor,
@@ -9,16 +9,17 @@ import Covenant.Internal.Data
 import Covenant.Test
   ( DataDeclFlavor (Poly1PolyThunks),
     DataDeclSet (DataDeclSet),
+    prettyDeclSet
   )
-import Covenant.Type (datatypeName)
+import Covenant.Type ()
 import Data.Map.Strict qualified as M
 import Optics.Core (view)
 import Test.QuickCheck
-  ( Arbitrary (arbitrary),
+  ( Arbitrary (arbitrary, shrink),
     Property,
   )
 import Test.Tasty (defaultMain, testGroup)
-import Test.Tasty.QuickCheck (forAllBlind, testProperty)
+import Test.Tasty.QuickCheck (testProperty, forAllShrinkShow)
 
 main :: IO ()
 main =
@@ -26,8 +27,8 @@ main =
     [testProperty "All recursion is replaced in base functor transform" baseFunctorsContainNoRecursion]
 
 baseFunctorsContainNoRecursion :: Property
-baseFunctorsContainNoRecursion = forAllBlind (arbitrary @(DataDeclSet 'Poly1PolyThunks)) $ \(DataDeclSet decls) ->
-  let declMap = M.fromList $ (\x -> (view datatypeName x, x)) <$> decls
+baseFunctorsContainNoRecursion = forAllShrinkShow (arbitrary @(DataDeclSet 'Poly1PolyThunks)) shrink prettyDeclSet $ \(DataDeclSet decls) ->
+  let declMap = M.fromList $ (\x -> (view #datatypeName x, x)) <$> decls
       baseFunctorResults = flip runReader 0 . mkBaseFunctor <$> declMap
    in M.foldlWithKey'
         ( \acc tyNm origDecl ->
@@ -38,7 +39,7 @@ baseFunctorsContainNoRecursion = forAllBlind (arbitrary @(DataDeclSet 'Poly1Poly
                   Nothing -> not isTyRecursive && acc
                   Just baseFDecl ->
                     -- If we did make a base functor, it should contain no recursion
-                    let recursionInBaseF = any (\x -> runReader (hasRecursive (view datatypeName baseFDecl) x) 0) (allComponentTypes baseFDecl)
+                    let recursionInBaseF = any (\x -> runReader (hasRecursive (view #datatypeName baseFDecl) x) 0) (allComponentTypes baseFDecl)
                      in not recursionInBaseF && acc
         )
         True

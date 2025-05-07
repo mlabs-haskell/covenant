@@ -11,15 +11,10 @@ module Covenant.Internal.Type
     TyName (..),
     ScopeBoundary (..), -- used in the generators
     runConstructorName,
-    datatypeName,
-    datatypeConstructors,
-    datatypeBinders,
-    constructorName,
     abstraction,
     thunkT,
     builtinFlat,
     datatype,
-    constructorArgs,
   )
 where
 
@@ -52,7 +47,6 @@ import Optics.At ()
 import Optics.Core
   ( A_Lens,
     LabelOptic (labelOptic),
-    Lens',
     Prism',
     ix,
     lens,
@@ -177,6 +171,7 @@ instance Eq1 CompT where
   liftEq f (CompT abses1 xs) (CompT abses2 ys) =
     abses1 == abses2 && liftEq f xs ys
 
+-- | @since 1.1.1
 newtype TyName = TyName Text
   deriving (Show, Eq, Ord, IsString) via Text
 
@@ -196,7 +191,7 @@ data ValT (a :: Type)
     ThunkT (CompT a)
   | -- | A builtin type without any nesting.
     BuiltinFlat BuiltinFlatT
-  | -- A type constructor, with a list of arguments and an explicit scope boundary (REVIEW: Do we need the explicit scope boundary?)
+  | -- An applied type constructor, with a vector of arguments (which may be empty if the constructor is nullary)
     Datatype TyName (Vector (ValT a))
   deriving stock
     ( -- | @since 1.0.0
@@ -477,11 +472,15 @@ data Constructor (a :: Type)
 instance Eq1 Constructor where
   liftEq f (Constructor nm args) (Constructor nm' args') = nm == nm' && liftEq (liftEq f) args args'
 
-constructorName :: forall a. Lens' (Constructor a) ConstructorName
-constructorName = lens (\(Constructor n _) -> n) (\(Constructor _ args) n -> Constructor n args)
+instance (k ~ A_Lens, a ~ ConstructorName, b ~ ConstructorName) => LabelOptic "constructorName" k (Constructor c) (Constructor c) a b
+ where
+ {-# INLINEABLE labelOptic #-}
+ labelOptic = lens (\(Constructor n _) -> n) (\(Constructor _ args) n -> Constructor n args)
 
-constructorArgs :: forall a. Lens' (Constructor a) (Vector (ValT a))
-constructorArgs = lens (\(Constructor _ args) -> args) (\(Constructor n _) args -> Constructor n args)
+instance (k ~ A_Lens, a ~ Vector (ValT c), b ~ Vector (ValT c)) => LabelOptic "constructorArgs" k (Constructor c) (Constructor c) a b
+ where
+ {-# INLINEABLE labelOptic #-}
+ labelOptic =  lens (\(Constructor _ args) -> args) (\(Constructor n _) args -> Constructor n args)
 
 data DataDeclaration a
   = DataDeclaration TyName (Count "tyvar") (Vector (Constructor a)) -- Allows for representations of "empty" types in case we want to represent Void like that
@@ -491,20 +490,24 @@ instance Pretty (DataDeclaration Renamed) where
   pretty = runPrettyM . prettyDataDeclWithContext
 
 -- TODO: field label classes
-datatypeName :: forall (a :: Type). Lens' (DataDeclaration a) TyName
-datatypeName =
-  lens
+
+instance (k ~ A_Lens, a ~ TyName, b ~ TyName) => LabelOptic "datatypeName" k (DataDeclaration c) (DataDeclaration c) a b
+ where
+ {-# INLINEABLE labelOptic #-}
+ labelOptic = lens
     (\(DataDeclaration tn _ _) -> tn)
     (\(DataDeclaration _ cnt ctors) tn -> DataDeclaration tn cnt ctors)
 
-datatypeBinders :: forall (a :: Type). Lens' (DataDeclaration a) (Count "tyvar")
-datatypeBinders =
-  lens
+instance (k ~ A_Lens, a ~ Count "tyvar", b ~ Count "tyvar") => LabelOptic "datatypeBinders" k (DataDeclaration c) (DataDeclaration c) a b
+ where
+ {-# INLINEABLE labelOptic #-}
+ labelOptic = lens
     (\(DataDeclaration _ cnt _) -> cnt)
     (\(DataDeclaration tn _ ctors) cnt -> DataDeclaration tn cnt ctors)
 
-datatypeConstructors :: forall (a :: Type). Lens' (DataDeclaration a) (Vector (Constructor a))
-datatypeConstructors =
-  lens
+instance (k ~ A_Lens, a ~ Vector (Constructor c), b ~ Vector (Constructor c)) => LabelOptic "datatypeConstructors" k (DataDeclaration c) (DataDeclaration c) a b
+ where
+ {-# INLINEABLE labelOptic #-}
+ labelOptic = lens
     (\(DataDeclaration _ _ ctors) -> ctors)
     (\(DataDeclaration tn cnt _) ctors -> DataDeclaration tn cnt ctors)

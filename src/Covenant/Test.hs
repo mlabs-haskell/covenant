@@ -1,18 +1,21 @@
+{-# LANGUAGE PolyKinds #-}
 module Covenant.Test
   ( Concrete (Concrete),
     DataDeclSet (DataDeclSet),
     DataDeclFlavor (ConcreteDecl, ConcreteNestedDecl, SimpleRecursive, Poly1, Poly1PolyThunks),
+    chooseInt,
+    scale,
     testConcrete,
     testNested,
     testRecConcrete,
     testPoly1,
     testBaseF,
     testNonConcrete,
+    prettyDeclSet
   )
 where
 
 import Control.Applicative ((<|>))
-import Control.Exception (throwIO)
 import Control.Monad (void)
 import Control.Monad.Reader (MonadTrans (lift), runReader)
 import Control.Monad.State.Strict
@@ -22,17 +25,16 @@ import Control.Monad.State.Strict
     gets,
     modify,
   )
-import Covenant.DeBruijn (DeBruijn (Z), unsafeDeBruijn)
+import Covenant.DeBruijn (DeBruijn (Z), asInt)
 import Covenant.Index
   ( Count,
-    Index,
     count0,
     count1,
     intCount,
     intIndex,
     ix0,
   )
-import Covenant.Internal.Data (mkBaseFunctor)
+import Covenant.Data (mkBaseFunctor)
 import Covenant.Internal.Rename (renameDataDecl)
 import Covenant.Internal.Type
   ( CompT (CompT),
@@ -43,10 +45,6 @@ import Covenant.Internal.Type
     ScopeBoundary,
     TyName (TyName),
     ValT (Abstraction, BuiltinFlat, Datatype, ThunkT),
-    constructorName,
-    datatypeBinders,
-    datatypeConstructors,
-    datatypeName,
     runConstructorName,
   )
 import Covenant.Type
@@ -71,7 +69,7 @@ import Data.Foldable (forM_)
 import Data.Kind (Type)
 import Data.Map.Strict (Map)
 import Data.Map.Strict qualified as M
-import Data.Maybe (fromJust)
+import Data.Maybe (fromJust, mapMaybe)
 import Data.Set (Set)
 import Data.Set qualified as Set
 import Data.Text (Text)
@@ -82,13 +80,12 @@ import Data.Vector.NonEmpty qualified as NEV
 import GHC.Exts (fromListN)
 import GHC.Word (Word32)
 import Optics.Core (A_Lens, LabelOptic (labelOptic), folded, lens, over, preview, review, set, toListOf, view, (%))
-import Prettyprinter (hardline, pretty)
-import Prettyprinter.Render.Text (putDoc)
+import Prettyprinter (hardline, Pretty, pretty, layoutPretty, defaultLayoutOptions)
+import Prettyprinter.Render.Text (putDoc, renderStrict)
 import Test.QuickCheck
   ( Arbitrary (arbitrary, shrink),
     Arbitrary1 (liftArbitrary, liftShrink),
     Gen,
-    chooseInt,
     elements,
     frequency,
     generate,
@@ -96,10 +93,12 @@ import Test.QuickCheck
     suchThat,
     vectorOf,
   )
+import Test.QuickCheck qualified as QC (chooseInt)
 import Test.QuickCheck.GenT (GenT, MonadGen)
 import Test.QuickCheck.GenT qualified as GT
 import Test.QuickCheck.Instances.Containers ()
 import Test.QuickCheck.Instances.Vector ()
+
 
 -- | Wrapper for 'ValT' to provide an 'Arbitrary' instance to generate only
 -- value types without any type variables.
@@ -262,15 +261,15 @@ withBoundVars count act = do
 runDataGenM :: forall (a :: Type). DataGenM a -> Gen a
 runDataGenM (DataGenM ma) = (\x -> evalState x (DataGen M.empty Set.empty 0 M.empty M.empty)) <$> GT.runGenT ma
 
-chooseIntT :: forall (m :: Type -> Type). (MonadGen m) => (Int, Int) -> m Int
-chooseIntT bounds = GT.liftGen $ chooseInt bounds
+chooseInt :: forall (m :: Type -> Type). (MonadGen m) => (Int, Int) -> m Int
+chooseInt bounds = GT.liftGen $ QC.chooseInt bounds
 
 -- Stupid helper, saves us from forgetting to update part of the state
 returnDecl :: DataDeclaration AbstractTy -> DataGenM (DataDeclaration AbstractTy)
 returnDecl decl = do
-  let tyNm = view datatypeName decl
+  let tyNm = view #datatypeName decl
   modify $ over #decls (M.insert tyNm decl)
-  let arity = view datatypeBinders decl
+  let arity = view #datatypeBinders decl
   logArity tyNm arity
   pure decl
 
@@ -295,7 +294,7 @@ anyCtorName = ConstructorName <$> genValidCtorName
     genValidCtorName = do
       let caps = ['A' .. 'Z']
           lower = ['a' .. 'z']
-      nmLen <- chooseIntT (1, 6) -- should be more than enough to ensure `suchThat` doesn't run into clashes all the time
+      nmLen <- chooseInt (1, 6) -- should be more than enough to ensure `suchThat` doesn't run into clashes all the time
       x <- elements caps
       xs <- vectorOf nmLen $ elements (caps <> lower)
       pure . T.pack $ (x : xs)
@@ -309,7 +308,7 @@ anyTyName = TyName . runConstructorName <$> anyCtorName
 freshConstructorName :: DataGenM ConstructorName
 freshConstructorName = do
   datatypes <- gets (M.elems . view #decls)
-  let allCtorNames = Set.fromList $ toListOf (folded % datatypeConstructors % folded % constructorName) datatypes
+  let allCtorNames = Set.fromList $ toListOf (folded % #datatypeConstructors % folded % #constructorName) datatypes
   thisName <- GT.liftGen $ anyCtorName `suchThat` (`Set.notMember` allCtorNames)
   modify $ over #constructors (Set.insert thisName)
   pure thisName
@@ -317,7 +316,7 @@ freshConstructorName = do
 freshTyName :: DataGenM TyName
 freshTyName = do
   datatypes <- gets (M.elems . view #decls)
-  let allDataTypeNames = Set.fromList $ toListOf (folded % datatypeName) datatypes
+  let allDataTypeNames = Set.fromList $ toListOf (folded % #datatypeName) datatypes
   GT.liftGen $ anyTyName `suchThat` (`Set.notMember` allDataTypeNames)
 
 newtype ConcreteConstructor = ConcreteConstructor (Constructor AbstractTy)
@@ -330,7 +329,7 @@ genConcreteConstructor = ConcreteConstructor <$> go
     go :: DataGenM (Constructor AbstractTy)
     go = do
       ctorNm <- freshConstructorName
-      numArgs <- chooseIntT (0, 5)
+      numArgs <- chooseInt (0, 5)
       args <- GT.liftGen $ Vector.replicateM numArgs (arbitrary @Concrete)
       pure $ Constructor ctorNm (coerce <$> args)
 
@@ -338,7 +337,7 @@ genConcreteDataDecl :: DataGenM ConcreteDataDecl
 genConcreteDataDecl =
   ConcreteDataDecl <$> do
     tyNm <- freshTyName
-    numArgs <- chooseIntT (0, 5)
+    numArgs <- chooseInt (0, 5)
     ctors <- coerce <$> Vector.replicateM numArgs genConcreteConstructor
     let decl = DataDeclaration tyNm count0 ctors
     returnDecl decl
@@ -378,13 +377,13 @@ genNestedConcrete =
 
     nonNestedConcrete :: TyName -> DataGenM (DataDeclaration AbstractTy)
     nonNestedConcrete tyNm = do
-      numCtors <- chooseIntT (0, 5)
+      numCtors <- chooseInt (0, 5)
       ctors <- fmap coerce <$> Vector.replicateM numCtors genConcreteConstructor
       pure $ DataDeclaration tyNm count0 ctors
 
     nested :: TyName -> DataGenM (DataDeclaration AbstractTy)
     nested tyNm = do
-      numCtors <- chooseIntT (0, 5)
+      numCtors <- chooseInt (0, 5)
       ctors <- Vector.replicateM numCtors nestedCtor
       pure $ DataDeclaration tyNm count0 (coerce <$> ctors)
 
@@ -394,7 +393,7 @@ genNestedConcrete =
 nestedCtor :: DataGenM NestedConcreteCtor
 nestedCtor = do
   -- We want this: Not very much hinges on the # of args to each constructor and having finite bounds like this makes the output easier to read
-  numArgs <- chooseIntT (0, 5)
+  numArgs <- chooseInt (0, 5)
   args <- Vector.replicateM numArgs nestedCtorArg
   ctorNm <- freshConstructorName
   pure . coerce $ Constructor ctorNm args
@@ -425,7 +424,7 @@ genArbitraryRecursive =
   RecursiveConcreteDataDecl <$> do
     tyNm <- freshTyName
     baseCtor <- coerce <$> genConcreteConstructor -- any concrete ctor - or any ctor that doesn't contain the parent type - will suffice as a base case
-    numRecCtors <- chooseIntT (1, 5)
+    numRecCtors <- chooseInt (1, 5)
     recCtor <- GT.vectorOf numRecCtors $ genRecCtor tyNm
     returnDecl $ DataDeclaration tyNm count0 (Vector.fromList (baseCtor : recCtor))
   where
@@ -433,7 +432,7 @@ genArbitraryRecursive =
     genRecCtor tyNm = do
       ctorNm <- freshConstructorName
       let thisType = Datatype tyNm Vector.empty
-      numNonRecArgs <- chooseIntT (1, 5) -- need at least one to avoid "bad" types
+      numNonRecArgs <- chooseInt (1, 5) -- need at least one to avoid "bad" types
       args <- coerce $ GT.vectorOf numNonRecArgs nestedCtorArg
       pure $ Constructor ctorNm (Vector.fromList (thisType : args))
 
@@ -459,7 +458,7 @@ genPolymorphic1Decl =
   Polymorphic1 <$> do
     tyNm <- freshTyName
     logArity tyNm count1
-    numCtors <- chooseIntT (1, 5)
+    numCtors <- chooseInt (1, 5)
     polyCtors <- concat <$> GT.vectorOf numCtors (genPolyCtor tyNm)
     let result = DataDeclaration tyNm count1 (Vector.fromList polyCtors)
     returnDecl result
@@ -468,7 +467,7 @@ genPolymorphic1Decl =
     genPolyCtor :: TyName -> DataGenM [Constructor AbstractTy]
     genPolyCtor thisTy = do
       ctorNm <- freshConstructorName
-      numArgs <- chooseIntT (1, 5)
+      numArgs <- chooseInt (1, 5)
       argsRaw <- GT.vectorOf numArgs polyArg
       let recCase = Datatype thisTy (Vector.singleton (Abstraction (BoundAt Z ix0)))
       if recCase `elem` argsRaw
@@ -545,10 +544,9 @@ genNonConcrete = NonConcrete <$> GT.sized go
 
     resolveArgs :: ScopeBoundary -> (ScopeBoundary, Word32) -> [ValT AbstractTy]
     resolveArgs currentScope (varScope, numIndices) =
-      let resolvedScope = fromIntegral $ currentScope - varScope
-          unsafeIndex :: Int -> Index "tyvar"
-          unsafeIndex = fromJust . preview intIndex
-       in Abstraction . BoundAt (unsafeDeBruijn resolvedScope) . unsafeIndex <$> [0 .. (fromIntegral numIndices - 1)]
+      let resolvedScope :: DeBruijn 
+          resolvedScope = fromJust . preview asInt . fromIntegral $ currentScope - varScope
+       in mapMaybe (fmap (Abstraction  . BoundAt resolvedScope) . preview intIndex)  [0 .. (fromIntegral numIndices - 1)]
 
     unsafeFromList :: forall (a :: Type). [a] -> NEV.NonEmptyVector a
     unsafeFromList = fromJust . NEV.fromList
@@ -556,7 +554,7 @@ genNonConcrete = NonConcrete <$> GT.sized go
     helper :: Int -> DataGenM (ValT AbstractTy)
     helper size = withBoundVars count0 $ do
       -- we're going to return a thunk so we need to enter a new scope
-      funLen <- chooseIntT (1, 5)
+      funLen <- chooseInt (1, 5)
       funList <- GT.vectorOf funLen $ GT.frequency [(6, coerce <$> genConcrete), (3, appliedTyCon size), (1, helper (size `quot` 8))]
       pure $ ThunkT . CompT count0 . CompTBody $ unsafeFromList funList
 
@@ -565,7 +563,7 @@ genNonConcreteDecl :: DataGenM (DataDeclaration AbstractTy)
 genNonConcreteDecl = withBoundVars count1 $ do
   -- we need to bind the vars before we're done constructing the type
   tyNm <- freshTyName
-  numArgs <- chooseIntT (1, 5)
+  numArgs <- chooseInt (1, 5)
   ctors <- Vector.replicateM numArgs genNonConcreteCtor
   let decl = DataDeclaration tyNm count1 ctors
   returnDecl decl
@@ -573,7 +571,7 @@ genNonConcreteDecl = withBoundVars count1 $ do
     genNonConcreteCtor :: DataGenM (Constructor AbstractTy)
     genNonConcreteCtor = do
       ctorNm <- freshConstructorName
-      numArgs <- chooseIntT (0, 5)
+      numArgs <- chooseInt (0, 5)
       args <- GT.vectorOf numArgs genNonConcrete
       pure $ Constructor ctorNm (coerce . Vector.fromList $ args)
 
@@ -607,22 +605,22 @@ shrinkDataDecl :: DataDeclaration AbstractTy -> [DataDeclaration AbstractTy]
 shrinkDataDecl (DataDeclaration nm cnt ctors)
   | Vector.null ctors = []
   | otherwise =
-      let concreteShrink :: Vector (ValT AbstractTy) -> [Vector (ValT AbstractTy)]
-          concreteShrink = coerce . shrink . fmap Concrete
-
-          concreteShrink' :: Vector (ValT AbstractTy) -> [Vector (ValT AbstractTy)]
-          concreteShrink' xs = coerce $ fmap (Vector.fromList . shrink . Concrete) (Vector.toList xs)
-
-          ctorShrink :: Constructor AbstractTy -> [Constructor AbstractTy]
-          ctorShrink (Constructor ctorNm args) = Constructor ctorNm <$> concreteShrink args
-
-          ctorArgShrink :: Constructor AbstractTy -> [Constructor AbstractTy]
-          ctorArgShrink (Constructor ctorNm args) = Constructor ctorNm <$> concreteShrink' args
-
-          withShrunkenCtors = ((DataDeclaration nm cnt . Vector.fromList) . ctorShrink <$> Vector.toList ctors)
+      let withShrunkenCtors = ((DataDeclaration nm cnt . Vector.fromList) . ctorShrink <$> Vector.toList ctors)
 
           withShrunkenCtorArgs = DataDeclaration nm cnt . Vector.fromList . ctorArgShrink <$> Vector.toList ctors
        in withShrunkenCtors <|> withShrunkenCtorArgs
+  where
+    concreteShrink :: Vector (ValT AbstractTy) -> [Vector (ValT AbstractTy)]
+    concreteShrink = coerce . shrink . fmap Concrete
+
+    concreteShrink' :: Vector (ValT AbstractTy) -> [Vector (ValT AbstractTy)]
+    concreteShrink' xs = coerce $ fmap (Vector.fromList . shrink . Concrete) (Vector.toList xs)
+
+    ctorShrink :: Constructor AbstractTy -> [Constructor AbstractTy]
+    ctorShrink (Constructor ctorNm args) = Constructor ctorNm <$> concreteShrink args
+
+    ctorArgShrink :: Constructor AbstractTy -> [Constructor AbstractTy]
+    ctorArgShrink (Constructor ctorNm args) = Constructor ctorNm <$> concreteShrink' args
 
 -- REVIEW: I dunno how liftShrink works under the hood so this might be redundant?
 shrinkDataDecls :: [DataDeclaration AbstractTy] -> [[DataDeclaration AbstractTy]]
@@ -668,6 +666,12 @@ instance Arbitrary (DataDeclSet 'Poly1PolyThunks) where
 
   shrink = coerce . shrinkDataDecls . coerce
 
+
+prettyDeclSet :: forall (a :: DataDeclFlavor). DataDeclSet a -> String
+prettyDeclSet (DataDeclSet decls) = concatMap (\x ->  (prettyStr . unsafeRename  . renameDataDecl $ x) <> "\n\n") decls
+  where
+    prettyStr :: forall (b :: Type). Pretty b => b ->  String 
+    prettyStr = T.unpack . renderStrict . layoutPretty defaultLayoutOptions . pretty
 {- Misc Repl testing utilities. I'd like to leave these here because I can't exactly have a test suite
    to validate test generators, so inspection may be necessary if something goes wrong.
 -}
@@ -679,7 +683,7 @@ genPrettyDataN n dg = goPrint =<< generate (genDataN n dg)
     goPrint :: [DataDeclaration AbstractTy] -> IO ()
     goPrint [] = pure ()
     goPrint (x : xs) = do
-      x' <- unsafeRename (renameDataDecl x)
+      let x' = unsafeRename (renameDataDecl x)
       putDoc $ pretty x' <> hardline <> hardline
       goPrint xs
 
@@ -711,26 +715,26 @@ testNonConcrete n = do
     finalizeAndPrint :: [DataDeclaration AbstractTy] -> IO ()
     finalizeAndPrint [] = pure ()
     finalizeAndPrint (x : xs) = do
-      x' <- unsafeRename (renameDataDecl x)
+      let x' = unsafeRename (renameDataDecl x)
       putDoc $ pretty x' <> hardline <> hardline
       finalizeAndPrint xs
 
 -- For convenience. Don't remove this, necessary for efficient development on future work
-unsafeRename :: forall (a :: Type). RenameM a -> IO a
+unsafeRename :: forall (a :: Type). RenameM a -> a
 unsafeRename act = case runRenameM act of
-  Left err -> throwIO (userError $ show err)
-  Right res -> pure res
+  Left err -> error $ show err
+  Right res -> res
 
 -- crude base functor repl test, should be removed eventually in favor of a real test
 testBaseF :: IO ()
 testBaseF = do
   samples <- generate $ genDataN 10 (coerce <$> genPolymorphic1Decl)
   forM_ samples $ \decl -> do
-    prettyIn <- pretty <$> unsafeRename (renameDataDecl decl)
+    let prettyIn = pretty $  unsafeRename (renameDataDecl decl)
     putDoc $ hardline <> "INPUT:" <> hardline <> hardline <> prettyIn <> hardline <> hardline
     let output = runReader (mkBaseFunctor decl) 0
     case output of
       Nothing -> putDoc "OUTPUT: Nothing (base functor not needed)"
       Just outDecl -> do
-        prettyOut <- pretty <$> unsafeRename (renameDataDecl outDecl)
+        let prettyOut = pretty $ unsafeRename (renameDataDecl outDecl)
         putDoc $ "OUTPUT: " <> hardline <> hardline <> prettyOut <> hardline <> "-------------" <> hardline

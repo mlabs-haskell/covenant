@@ -253,7 +253,7 @@ arg ::
   Index "arg" ->
   m Arg
 arg scope index = do
-  let scopeAsInt = asInt scope
+  let scopeAsInt = review asInt scope
   let indexAsInt = review intIndex index
   lookedUp <- asks (preview (#argumentInfo % ix scopeAsInt % ix indexAsInt))
   case lookedUp of
