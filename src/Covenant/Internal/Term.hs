@@ -100,7 +100,9 @@ data CovenantTypeError
     --
     -- @since 1.0.0
     LambdaResultsInNonReturn (CompT AbstractTy)
-  | -- | Can't return an error node, but we tried anyway.
+  | -- | A lambda body's return is wrapping an error, instead of being directly
+    -- an error. This should not happen under normal circumstances and is most
+    -- certainly a bug.
     --
     -- @since 1.0.0
     ReturnWrapsError

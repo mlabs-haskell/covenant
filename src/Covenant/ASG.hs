@@ -215,7 +215,7 @@ newtype ASG = ASG (Id, Map Id ASGNode)
       Show
     )
 
--- Note (Koz, 24/04/25): The `rootNode` and `nodeAt` functions use `fromJust`,
+-- Note (Koz, 24/04/25): The `topLevelNode` and `nodeAt` functions use `fromJust`,
 -- because we can guarantee it's impossible to miss. For an end user, the only
 -- way to get hold of an `Id` is by inspecting a node, and since we control how
 -- these are built and assigned, and users can't change them, it's safe.
@@ -357,6 +357,12 @@ data CovenantError
     --
     -- @since 1.0.0
     TopLevelValue (Bimap Id ASGNode) (ValT AbstractTy) ValNodeInfo
+  deriving stock
+    ( -- | @since 1.0.0
+      Eq,
+      -- | @since 1.0.0
+      Show
+    )
 
 -- | A concrete monadic stack, providing the minimum amount of functionality
 -- needed to build an ASG using the combinators given in this module.
@@ -529,7 +535,7 @@ lam expectedT@(CompT _ (CompTBody xs)) bodyComp = do
             if resultT == actualT
               then refTo . ACompNode expectedT . LamInternal $ bodyId
               else throwError . WrongReturnType resultT $ actualT
-          ErrorNodeType -> throwError ReturnWrapsError
+          ErrorNodeType -> throwError ReturnWrapsError -- Should be impossible
           CompNodeType t' -> throwError . ReturnWrapsCompType $ t'
       _ -> throwError . LambdaResultsInNonReturn $ t
     Just (AValNode t _) -> throwError . LambdaResultsInValType $ t
