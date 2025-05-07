@@ -147,4 +147,14 @@ test-suite primops
   build-depends: nonempty-vector
   hs-source-dirs: test/primops
 
+test-suite asg
+  import: test-lang
+  type: exitcode-stdio-1.0
+  main-is: Main.hs
+  build-depends:
+    optics-core,
+    vector,
+
+  hs-source-dirs: test/asg
+
 -- Benchmarks
