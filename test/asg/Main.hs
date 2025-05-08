@@ -235,7 +235,9 @@ propForceThunk = forAllShrinkShow arbitrary shrink show $ \x ->
   where
     mkComps ::
       forall (a :: Type).
-      (a -> ASGBuilder Id) -> a -> (ASGBuilder Id, ASGBuilder Id)
+      (a -> ASGBuilder Id) ->
+      a ->
+      (ASGBuilder Id, ASGBuilder Id)
     mkComps f x =
       let comp = f x
           forceThunkComp = do

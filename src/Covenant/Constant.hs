@@ -49,7 +49,6 @@ data AConstant
       Show
     )
 
--- | @since 1.0.0
 instance Arbitrary AConstant where
   {-# INLINEABLE arbitrary #-}
   arbitrary =
@@ -73,7 +72,8 @@ instance Arbitrary AConstant where
 -- @since 1.0.0
 typeConstant ::
   forall (a :: Type).
-  AConstant -> ValT a
+  AConstant ->
+  ValT a
 typeConstant =
   BuiltinFlat . \case
     AUnit -> UnitT

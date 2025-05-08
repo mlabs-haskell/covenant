@@ -418,7 +418,7 @@ arg ::
   Index "arg" ->
   m Arg
 arg scope index = do
-  let scopeAsInt = asInt scope
+  let scopeAsInt = review asInt scope
   let indexAsInt = review intIndex index
   lookedUp <- asks (preview (#argumentInfo % ix scopeAsInt % ix indexAsInt))
   case lookedUp of
@@ -611,7 +611,8 @@ thunk i = do
 renameArg ::
   forall (m :: Type -> Type).
   (MonadHashCons Id ASGNode m, MonadError CovenantTypeError m) =>
-  Ref -> m (Maybe (ValT Renamed))
+  Ref ->
+  m (Maybe (ValT Renamed))
 renameArg r =
   typeRef r >>= \case
     CompNodeType t -> throwError . ApplyCompType $ t

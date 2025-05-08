@@ -3,8 +3,18 @@ module Covenant.Internal.Type
     Renamed (..),
     CompT (..),
     CompTBody (..),
+    DataDeclaration (..),
+    Constructor (..),
+    ConstructorName (..),
     ValT (..),
     BuiltinFlatT (..),
+    TyName (..),
+    ScopeBoundary (..), -- used in the generators
+    runConstructorName,
+    abstraction,
+    thunkT,
+    builtinFlat,
+    datatype,
   )
 where
 
@@ -25,6 +35,8 @@ import Data.Functor.Classes (Eq1 (liftEq))
 import Data.Kind (Type)
 import Data.Map.Strict (Map)
 import Data.Map.Strict qualified as Map
+import Data.String (IsString)
+import Data.Text (Text)
 import Data.Vector (Vector)
 import Data.Vector qualified as Vector
 import Data.Vector.NonEmpty (NonEmptyVector)
@@ -35,10 +47,12 @@ import Optics.At ()
 import Optics.Core
   ( A_Lens,
     LabelOptic (labelOptic),
+    Prism',
     ix,
     lens,
     over,
     preview,
+    prism,
     review,
     set,
     view,
@@ -48,10 +62,16 @@ import Prettyprinter
   ( Doc,
     Pretty (pretty),
     hsep,
+    indent,
     parens,
+    vcat,
     viaShow,
     (<+>),
   )
+import Test.QuickCheck.Instances.Text ()
+
+-- need the arbitary instance for TyName
+-- largely for TyName
 
 -- | A type abstraction, using a combination of a DeBruijn index (to indicate
 -- which scope it refers to) and a positional index (to indicate which bound
@@ -146,6 +166,10 @@ instance Eq1 CompT where
   liftEq f (CompT abses1 xs) (CompT abses2 ys) =
     abses1 == abses2 && liftEq f xs ys
 
+-- | @since 1.1.0
+newtype TyName = TyName Text
+  deriving (Show, Eq, Ord, IsString) via Text
+
 -- | @since 1.0.0
 instance Pretty (CompT Renamed) where
   pretty = runPrettyM . prettyCompTWithContext
@@ -162,6 +186,8 @@ data ValT (a :: Type)
     ThunkT (CompT a)
   | -- | A builtin type without any nesting.
     BuiltinFlat BuiltinFlatT
+  | -- An applied type constructor, with a vector of arguments (which may be empty if the constructor is nullary)
+    Datatype TyName (Vector (ValT a))
   deriving stock
     ( -- | @since 1.0.0
       Eq,
@@ -170,6 +196,21 @@ data ValT (a :: Type)
       -- | @since 1.0.0
       Show
     )
+
+abstraction :: forall (a :: Type). Prism' (ValT a) a
+abstraction = prism Abstraction (\case (Abstraction a) -> Right a; other -> Left other)
+
+thunkT :: forall (a :: Type). Prism' (ValT a) (CompT a)
+thunkT = prism ThunkT (\case (ThunkT compT) -> Right compT; other -> Left other)
+
+builtinFlat :: forall (a :: Type). Prism' (ValT a) BuiltinFlatT
+builtinFlat = prism BuiltinFlat (\case (BuiltinFlat bi) -> Right bi; other -> Left other)
+
+datatype :: forall (a :: Type). Prism' (ValT a) (TyName, Vector (ValT a))
+datatype =
+  prism
+    (uncurry Datatype)
+    (\case (Datatype tn args) -> Right (tn, args); other -> Left other)
 
 -- | @since 1.0.0
 instance Eq1 ValT where
@@ -183,6 +224,9 @@ instance Eq1 ValT where
       _ -> False
     BuiltinFlat t1 -> \case
       BuiltinFlat t2 -> t1 == t2
+      _ -> False
+    Datatype tn1 args1 -> \case
+      Datatype tn2 args2 -> tn1 == tn2 && liftEq (liftEq f) args1 args2
       _ -> False
 
 -- | All builtin types that are \'flat\': that is, do not have other types
@@ -208,7 +252,7 @@ data BuiltinFlatT
 -- Helpers
 
 newtype ScopeBoundary = ScopeBoundary Int
-  deriving (Show, Eq, Ord, Num) via Int
+  deriving (Show, Eq, Ord, Num, Real, Enum, Integral) via Int
 
 -- Keeping the field names for clarity even if we don't use them
 data PrettyContext (ann :: Type)
@@ -282,7 +326,7 @@ prettyFunTy ::
   NonEmptyVector (ValT Renamed) ->
   PrettyM ann (Doc ann)
 prettyFunTy args = case NonEmpty.uncons args of
-  (arg, rest) -> Vector.foldl' go (("!" <>) <$> prettyArg arg) rest
+  (arg, rest) -> parens <$> Vector.foldl' go (("!" <>) <$> prettyArg arg) rest
   where
     go ::
       PrettyM ann (Doc ann) ->
@@ -339,6 +383,20 @@ prettyValTWithContext = \case
   Abstraction abstr -> prettyRenamedWithContext abstr
   ThunkT compT -> prettyCompTWithContext compT
   BuiltinFlat biFlat -> pure $ viaShow biFlat
+  Datatype (TyName tn) args -> do
+    args' <- traverse prettyValTWithContext args
+    let tn' = pretty tn
+    case Vector.toList args' of
+      [] -> pure tn'
+      argsList -> pure . parens $ tn' <+> hsep argsList
+
+prettyCtorWithContext :: forall (ann :: Type). Constructor Renamed -> PrettyM ann (Doc ann)
+prettyCtorWithContext (Constructor ctorNm ctorArgs)
+  | Vector.null ctorArgs = pure $ pretty (runConstructorName ctorNm)
+  | otherwise = do
+      let ctorNm' = pretty (runConstructorName ctorNm)
+      args' <- Vector.toList <$> traverse prettyValTWithContext ctorArgs
+      pure $ ctorNm' <+> hsep args'
 
 -- Generate N fresh var names and use the supplied monadic function to do something with them.
 withFreshVarNames ::
@@ -373,3 +431,78 @@ lookupAbstraction offset argIndex = do
           <> " but could not locate the corresponding pretty form at scope level "
           <> show here
     Just res' -> pure res'
+
+prettyDataDeclWithContext :: forall (ann :: Type). DataDeclaration Renamed -> PrettyM ann (Doc ann)
+prettyDataDeclWithContext (DataDeclaration (TyName tn) numVars ctors) = bindVars numVars $ \boundVars -> do
+  let tn' = pretty tn
+  ctors' <- traverse prettyCtorWithContext ctors
+  let prettyCtors = indent 2 . vcat . prefix "| " . Vector.toList $ ctors'
+  if Vector.null ctors
+    then pure $ "data" <+> tn' <+> hsep (Vector.toList boundVars)
+    else pure $ "data" <+> tn' <+> hsep (Vector.toList boundVars) <+> "=" <+> prettyCtors
+  where
+    -- I don't think there's a library fn that does this? This is for the `|` in a sum type.
+    prefix :: Doc ann -> [Doc ann] -> [Doc ann]
+    prefix _ [] = []
+    prefix _ [x] = [x]
+    prefix sep (x : xs) = x : goPrefix xs
+      where
+        goPrefix [] = []
+        goPrefix (y : ys) = (sep <> y) : goPrefix ys
+
+-- Datatype stuff. Stashing this here for now because this much is needed for the ValT change PR
+-- (technically only need TyName for the ValT change but the "kind checker" needs decls)
+
+-- @since 1.1.0
+newtype ConstructorName = ConstructorName Text
+  deriving (Show, Eq, Ord, IsString) via Text
+
+-- @since 1.1.0
+runConstructorName :: ConstructorName -> Text
+runConstructorName (ConstructorName nm) = nm
+
+-- I.e. a product in the sum of products
+data Constructor (a :: Type)
+  = Constructor ConstructorName (Vector (ValT a))
+  deriving stock (Show, Eq)
+
+instance Eq1 Constructor where
+  liftEq f (Constructor nm args) (Constructor nm' args') = nm == nm' && liftEq (liftEq f) args args'
+
+instance (k ~ A_Lens, a ~ ConstructorName, b ~ ConstructorName) => LabelOptic "constructorName" k (Constructor c) (Constructor c) a b where
+  {-# INLINEABLE labelOptic #-}
+  labelOptic = lens (\(Constructor n _) -> n) (\(Constructor _ args) n -> Constructor n args)
+
+instance (k ~ A_Lens, a ~ Vector (ValT c), b ~ Vector (ValT c)) => LabelOptic "constructorArgs" k (Constructor c) (Constructor c) a b where
+  {-# INLINEABLE labelOptic #-}
+  labelOptic = lens (\(Constructor _ args) -> args) (\(Constructor n _) args -> Constructor n args)
+
+data DataDeclaration a
+  = DataDeclaration TyName (Count "tyvar") (Vector (Constructor a)) -- Allows for representations of "empty" types in case we want to represent Void like that
+  deriving stock (Show, Eq)
+
+instance Pretty (DataDeclaration Renamed) where
+  pretty = runPrettyM . prettyDataDeclWithContext
+
+-- TODO: field label classes
+
+instance (k ~ A_Lens, a ~ TyName, b ~ TyName) => LabelOptic "datatypeName" k (DataDeclaration c) (DataDeclaration c) a b where
+  {-# INLINEABLE labelOptic #-}
+  labelOptic =
+    lens
+      (\(DataDeclaration tn _ _) -> tn)
+      (\(DataDeclaration _ cnt ctors) tn -> DataDeclaration tn cnt ctors)
+
+instance (k ~ A_Lens, a ~ Count "tyvar", b ~ Count "tyvar") => LabelOptic "datatypeBinders" k (DataDeclaration c) (DataDeclaration c) a b where
+  {-# INLINEABLE labelOptic #-}
+  labelOptic =
+    lens
+      (\(DataDeclaration _ cnt _) -> cnt)
+      (\(DataDeclaration tn _ ctors) cnt -> DataDeclaration tn cnt ctors)
+
+instance (k ~ A_Lens, a ~ Vector (Constructor c), b ~ Vector (Constructor c)) => LabelOptic "datatypeConstructors" k (DataDeclaration c) (DataDeclaration c) a b where
+  {-# INLINEABLE labelOptic #-}
+  labelOptic =
+    lens
+      (\(DataDeclaration _ _ ctors) -> ctors)
+      (\(DataDeclaration tn cnt _) ctors -> DataDeclaration tn cnt ctors)

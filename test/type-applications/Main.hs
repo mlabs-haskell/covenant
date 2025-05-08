@@ -37,6 +37,7 @@ import Data.Coerce (coerce)
 import Data.Functor.Identity (Identity (Identity))
 import Data.Kind (Type)
 import Data.Vector qualified as Vector
+import Optics.Core (review)
 import Test.QuickCheck
   ( Gen,
     Property,
@@ -210,7 +211,7 @@ propUnifyRigidConcrete = forAllShrink arbitrary shrink $ \(Concrete t, scope, ix
       -- be based on `S scope`, since that's what's in the computation type.
       -- However, we actually have to reduce it by 1, as we have a 'scope
       -- stepdown' for `f` even though we bind no variables.
-      let trueLevel = negate . asInt $ scope
+      let trueLevel = negate . review asInt $ scope
           expected = Left . DoesNotUnify (Abstraction . Rigid trueLevel $ ix) $ t'
           actual = checkApp f [Just t']
        in expected === actual
@@ -247,7 +248,7 @@ propUnifyConcreteRigid = forAllShrink arbitrary shrink $ \(Concrete aT, scope, i
   withRenamedComp (Comp0 $ aT :--:> ReturnT integerT) $ \f ->
     withRenamedVals (Identity $ tyvar scope index) $ \(Identity arg) ->
       withRenamedVals (Identity aT) $ \(Identity aT') ->
-        let level = negate . asInt $ scope
+        let level = negate . review asInt $ scope
             expected = Left . DoesNotUnify aT' . Abstraction . Rigid level $ index
             actual = checkApp f [Just arg]
          in expected === actual
@@ -312,7 +313,7 @@ propUnifyRigid = forAllShrink gen shr $ \testData ->
           Nothing -> withRenamedVals (Identity . tyvar db $ index) $ \(Identity arg) ->
             f (fun, arg, Right integerT)
           Just rest ->
-            let level = negate . asInt $ db
+            let level = negate . review asInt $ db
                 lhs = Abstraction . Rigid level $ index
              in case rest of
                   Left db2 -> withRenamedVals (Identity . tyvar db2 $ index) $ \(Identity arg) ->

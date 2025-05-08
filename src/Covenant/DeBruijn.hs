@@ -19,6 +19,7 @@ import Data.Coerce (coerce)
 import Data.List.NonEmpty (NonEmpty)
 import Data.Semigroup (Semigroup (sconcat, stimes), Sum (Sum))
 import Data.Word (Word32)
+import Optics.Core (Prism', prism)
 import Test.QuickCheck (Arbitrary)
 
 -- | A DeBruijn index.
@@ -75,13 +76,12 @@ pattern S x <- (reduce -> Just x)
 
 {-# COMPLETE Z, S #-}
 
--- | Convert a DeBruijn index into a (non-negative) 'Int'.
+-- | Construct a DeBruijn from an Int, or deconstruct a Debruijn into an Int
 --
--- @since 1.0.0
-asInt :: DeBruijn -> Int
-asInt (DeBruijn i) = fromIntegral i
+-- @since 1.1.0
+asInt :: Prism' Int DeBruijn
+asInt = prism (\(DeBruijn x) -> fromIntegral x) (\x -> if x >= 0 then Right . DeBruijn $ fromIntegral x else Left x)
 
 -- Helpers
-
 reduce :: DeBruijn -> Maybe DeBruijn
 reduce (DeBruijn x) = DeBruijn (x - 1) <$ guard (x > 0)
