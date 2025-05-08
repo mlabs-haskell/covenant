@@ -87,7 +87,7 @@ hasRecursive tn = \case
     aComponentIsRecursive <- or <$> traverse (hasRecursive tn) args
     pure $ thisTypeIsRecursive || aComponentIsRecursive
 
--- Yeah yeah I could use ReaderT but this is less awkward imo, we only care about the "maybe" at the top level when detecting recursion
+-- | Constructs a base functor from a suitable data declaration, returning 'Nothing' if the input is not a recursive type
 mkBaseFunctor :: DataDeclaration AbstractTy -> Reader ScopeBoundary (Maybe (DataDeclaration AbstractTy))
 mkBaseFunctor (DataDeclaration tn numVars ctors) = do
   anyRecComponents <- or <$> traverse (hasRecursive tn) allCtorArgs

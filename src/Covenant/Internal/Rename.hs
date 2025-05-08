@@ -128,7 +128,7 @@ data RenameError
     -- by any argument. For example, the type @forall a b . a -> !(b -> !a)@
     -- has @b@ undetermined.
     --
-    -- @since 1.1.1
+    -- @since 1.1.0
     UndeterminedAbstraction (Vector (ValT AbstractTy)) (Vector (ValT Renamed))
   deriving stock (Eq, Show)
 

@@ -72,9 +72,9 @@ pattern S x <- (reduce -> Just x)
 
 {-# COMPLETE Z, S #-}
 
--- | Convert a DeBruijn index into a (non-negative) 'Int'.
+-- | Construct a DeBruijn from an Int, or deconstruct a Debruijn into an Int
 --
--- @since 1.0.0
+-- @since 1.1.0
 asInt :: Prism' Int DeBruijn
 asInt = prism (\(DeBruijn x) -> fromIntegral x) (\x -> if x >= 0 then Right . DeBruijn $ fromIntegral x else Left x)
 

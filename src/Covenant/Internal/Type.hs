@@ -171,7 +171,7 @@ instance Eq1 CompT where
   liftEq f (CompT abses1 xs) (CompT abses2 ys) =
     abses1 == abses2 && liftEq f xs ys
 
--- | @since 1.1.1
+-- | @since 1.1.0
 newtype TyName = TyName Text
   deriving (Show, Eq, Ord, IsString) via Text
 
@@ -458,9 +458,11 @@ prettyDataDeclWithContext (DataDeclaration (TyName tn) numVars ctors) = bindVars
 -- Datatype stuff. Stashing this here for now because this much is needed for the ValT change PR
 -- (technically only need TyName for the ValT change but the "kind checker" needs decls)
 
+-- @since 1.1.0
 newtype ConstructorName = ConstructorName Text
   deriving (Show, Eq, Ord, IsString) via Text
 
+-- @since 1.1.0
 runConstructorName :: ConstructorName -> Text
 runConstructorName (ConstructorName nm) = nm
 
