@@ -1,8 +1,10 @@
 cabal-version: 3.0
 name: covenant
 version: 1.1.0
-synopsis: Someday something will go here.
-description: Someday something will go here.
+synopsis: Standalone IR for Cardano scripts.
+description:
+  A library describing a call-by-push-value, Turner-total IR. Includes the ability to build up the IR programmatically.
+
 homepage: https://github.com/mlabs-haskell/covenant
 license: Apache-2.0
 license-file: LICENSE
@@ -99,7 +101,6 @@ library
     Covenant.Data
     Covenant.DeBruijn
     Covenant.Index
-    Covenant.Ledger
     Covenant.Prim
     Covenant.Test
     Covenant.Type
@@ -159,5 +160,15 @@ test-suite primops
   main-is: Main.hs
   build-depends: nonempty-vector
   hs-source-dirs: test/primops
+
+test-suite asg
+  import: test-lang
+  type: exitcode-stdio-1.0
+  main-is: Main.hs
+  build-depends:
+    optics-core,
+    vector,
+
+  hs-source-dirs: test/asg
 
 -- Benchmarks

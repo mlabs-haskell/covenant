@@ -1,9 +1,13 @@
 {-# LANGUAGE PatternSynonyms #-}
 {-# LANGUAGE ViewPatterns #-}
 
--- | Module: Covenant.DeBruijn
+-- |
+-- Module: Covenant.DeBruijn
+-- Copyright: (C) MLabs 2025
+-- License: Apache 2.0
+-- Maintainer: koz@mlabs.city, sean@mlabs.city
 --
--- DeBruijn indexing type and helpers.
+-- DeBruijn indexing type and helpers. These are mainly used for scope tracking.
 module Covenant.DeBruijn
   ( DeBruijn (Z, S),
     asInt,
