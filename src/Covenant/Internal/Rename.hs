@@ -216,9 +216,6 @@ renameDataDecl :: DataDeclaration AbstractTy -> RenameM (DataDeclaration Renamed
 renameDataDecl (DataDeclaration tn cnt ctors) = RenameM $ do
   modify (stepUpScope cnt)
   renamedCtors <- Vector.mapM (coerce . renameCtor) ctors
-  -- REVIEW: @Koz is it ok to skip this here? It SEEMS ok
-  -- ourAbstractions <- gets (view (#tracker % to Vector.head % _1))
-  -- unless (Vector.and ourAbstractions) (throwError $ UndeterminedAbstraction)
   modify dropDownScope
   pure $ DataDeclaration tn cnt renamedCtors
   where

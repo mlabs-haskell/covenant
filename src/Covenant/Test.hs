@@ -622,7 +622,6 @@ shrinkDataDecl (DataDeclaration nm cnt ctors)
     ctorArgShrink :: Constructor AbstractTy -> [Constructor AbstractTy]
     ctorArgShrink (Constructor ctorNm args) = Constructor ctorNm <$> concreteShrink' args
 
--- REVIEW: I dunno how liftShrink works under the hood so this might be redundant?
 shrinkDataDecls :: [DataDeclaration AbstractTy] -> [[DataDeclaration AbstractTy]]
 shrinkDataDecls decls = liftShrink shrinkDataDecl decls <|> (shrinkDataDecl <$> decls)
 
