@@ -1,10 +1,10 @@
 {-# LANGUAGE ViewPatterns #-}
 
-module Covenant.Data (mkBaseFunctor, isRecursiveChildOf, allComponentTypes, hasRecursive) where
+module Covenant.Data (mkBaseFunctor, isRecursiveChildOf, allComponentTypes, hasRecursive, mkBBF) where
 
 import Control.Monad.Reader (MonadReader (ask, local), Reader)
-import Covenant.DeBruijn (asInt)
-import Covenant.Index (Count, Index, intCount, intIndex)
+import Covenant.DeBruijn (asInt, DeBruijn (S,Z))
+import Covenant.Index (Count, Index, intCount, intIndex, count0)
 import Covenant.Internal.Type
   ( AbstractTy (BoundAt),
     CompT (CompT),
@@ -14,7 +14,7 @@ import Covenant.Internal.Type
     DataDeclaration (DataDeclaration),
     ScopeBoundary (ScopeBoundary),
     TyName (TyName),
-    ValT (Abstraction, BuiltinFlat, Datatype, ThunkT),
+    ValT (Abstraction, BuiltinFlat, Datatype, ThunkT)
   )
 import Data.Kind (Type)
 import Data.Maybe (fromJust)
@@ -42,14 +42,14 @@ import Optics.Core (folded, preview, review, toListOf, view, (%))
 -- TODO: Rewrite this as `mapMValT`. The change to a `Reader` below makes this unusable, but we can
 --       write the non-monadic version as a special case of the monadic version and it is *highly* likely
 --       we will need both going forward.
-_mapValT :: forall (a :: Type). (ValT a -> ValT a) -> ValT a -> ValT a
-_mapValT f = \case
+mapValT :: forall (a :: Type). (ValT a -> ValT a) -> ValT a -> ValT a
+mapValT f = \case
   -- for terminal nodes we just apply the function
   absr@(Abstraction {}) -> f absr
   bif@BuiltinFlat {} -> f bif
   -- For CompT and Datatype we apply the function to the components and then to the top level
   ThunkT (CompT cnt (CompTBody compTargs)) -> f (ThunkT $ CompT cnt (CompTBody (f <$> compTargs)))
-  Datatype tn args -> f $ Datatype tn (_mapValT f <$> args)
+  Datatype tn args -> f $ Datatype tn (mapValT f <$> args)
 
 -- This tells us whether the ValT *is* a recursive child of the parent type
 isRecursiveChildOf :: TyName -> ValT AbstractTy -> Reader ScopeBoundary Bool
@@ -87,7 +87,7 @@ hasRecursive tn = \case
     aComponentIsRecursive <- or <$> traverse (hasRecursive tn) args
     pure $ thisTypeIsRecursive || aComponentIsRecursive
 
--- | Constructs a base functor from a suitable data declaration, returning 'Nothing' if the input is not a recursive type
+-- | Constructs a base functor from a suitable data declaration, returning 'Nothing' if the input is not a recursive type 
 mkBaseFunctor :: DataDeclaration AbstractTy -> Reader ScopeBoundary (Maybe (DataDeclaration AbstractTy))
 mkBaseFunctor (DataDeclaration tn numVars ctors) = do
   anyRecComponents <- or <$> traverse (hasRecursive tn) allCtorArgs
@@ -143,3 +143,45 @@ mkBaseFunctor (DataDeclaration tn numVars ctors) = do
     -- This tells us whether the ValT *is* a recursive child of the parent type
     isRecursive :: ValT AbstractTy -> Reader ScopeBoundary Bool
     isRecursive = isRecursiveChildOf tn
+
+
+-- data Maybe a = Just a | Nothing ~> forall out. (a -> out) -> out -> out
+
+-- Only returns `Nothing` if there are no Constructors
+mkBBF :: DataDeclaration AbstractTy -> Maybe (ValT AbstractTy)
+mkBBF (DataDeclaration _ numVars ctors)
+  | V.null ctors = Nothing
+  | otherwise = ThunkT . CompT bbfCount . CompTBody . flip NEV.snoc topLevelOut  <$> (NEV.fromVector =<< traverse mkEliminator ctors)
+  where
+    mkEliminator :: Constructor AbstractTy -> Maybe (ValT AbstractTy)
+    mkEliminator (Constructor _ (fmap incAbstractionDB -> args))
+      | V.null args = Just topLevelOut
+      | otherwise = let out = Abstraction $ BoundAt (S Z) outIx
+                    in ThunkT . CompT count0 . CompTBody . flip NEV.snoc out <$> NEV.fromVector args
+
+    incAbstractionDB :: ValT AbstractTy -> ValT AbstractTy
+    incAbstractionDB = mapValT $ \case
+      Abstraction (BoundAt db indx) ->
+        let db' = fromJust . preview asInt $ review asInt db + 1
+        in Abstraction (BoundAt db' indx)
+      other -> other 
+
+    topLevelOut = Abstraction $ BoundAt Z outIx
+
+    -- We have to add a type parameter for the result.
+    bbfCount = fromJust . preview intCount $ review intCount numVars + 1
+
+    -- The index of the 'out' parameter, indicates the return type
+    outIx :: Index "tyvar"
+    outIx = fromJust .  preview intIndex $ review intCount numVars
+
+    {- Note (largely to self) on DeBruijn indices:
+
+         - None of the existing variable DeBruijn or position indices change at all b/c the binding context of the
+           `forall` we're introducing replaces the binding context of the datatype declaration and only extends it.
+
+         - The only special thing we have to keep track of is the (DeBruijn) index of the `out` variable, but this doesn't require
+           any fancy scope tracking: It will always be Z for the top-level result and `S Z` wherever it occurs in a
+           transformed constructor. It won't ever occur any "deeper" than that (because we don't nest these, and a constructor gets exactly one
+           `out`)
+    -}

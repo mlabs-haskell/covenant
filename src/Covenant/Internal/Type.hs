@@ -316,29 +316,31 @@ runPrettyM (PrettyM ma) = runReader ma (PrettyContext mempty 0 infiniteVars)
 
 prettyCompTWithContext :: forall (ann :: Type). CompT Renamed -> PrettyM ann (Doc ann)
 prettyCompTWithContext (CompT count (CompTBody funArgs))
-  | review intCount count == 0 = prettyFunTy funArgs
+  | review intCount count == 0 = prettyFunTy' funArgs
   | otherwise = bindVars count $ \newVars -> do
-      funTy <- prettyFunTy funArgs
+      funTy <- prettyFunTy' funArgs
       pure $ mkForall newVars funTy
 
-prettyFunTy ::
+prettyFunTy' ::
   forall (ann :: Type).
   NonEmptyVector (ValT Renamed) ->
   PrettyM ann (Doc ann)
-prettyFunTy args = case NonEmpty.uncons args of
-  (arg, rest) -> parens <$> Vector.foldl' go (("!" <>) <$> prettyArg arg) rest
-  where
-    go ::
-      PrettyM ann (Doc ann) ->
-      ValT Renamed ->
-      PrettyM ann (Doc ann)
-    go acc t = (\x y -> x <+> "->" <+> y) <$> prettyArg t <*> acc
-    prettyArg :: ValT Renamed -> PrettyM ann (Doc ann)
-    prettyArg vt =
-      let prettyVT = prettyValTWithContext vt
-       in if isSimpleValT vt
-            then prettyVT
-            else parens <$> prettyVT
+prettyFunTy' args = case NonEmpty.unsnoc args of
+  (rest,resTy) -> do
+    resTy' <- ("!" <>) <$> prettyValTWithContext resTy
+    case Vector.uncons rest of
+      Nothing -> pure resTy'
+      Just (firstArg,otherArgs) -> do
+        prettyArg1 <- prettyValTWithContext firstArg
+        argsWithoutResult <- Vector.foldM (\acc x -> (\z -> acc <+> "->" <+> z) <$> prettyValTWithContext x) prettyArg1 otherArgs
+        pure . parens $ argsWithoutResult <+> "->" <+> resTy'
+ where
+   prettyArg :: ValT Renamed -> PrettyM ann (Doc ann)
+   prettyArg vt = do
+     prettyVT <- prettyValTWithContext vt
+     if isSimpleValT vt
+       then pure prettyVT
+       else pure (parens prettyVT)
 
 bindVars ::
   forall (ann :: Type) (a :: Type).
@@ -377,6 +379,13 @@ isSimpleValT = \case
     isSimpleCompT :: CompT a -> Bool
     isSimpleCompT (CompT count (CompTBody args)) =
       review intCount count == 0 && NonEmpty.length args == 1
+
+
+-- | DO NOT USE THIS TO WRITE OTHER INSTANCES
+--   It exists soley to make readable tests easier to write w/o having to export a bunch of internal printing stuff
+
+instance Pretty (ValT Renamed) where
+  pretty = runPrettyM . prettyValTWithContext
 
 prettyValTWithContext :: forall (ann :: Type). ValT Renamed -> PrettyM ann (Doc ann)
 prettyValTWithContext = \case

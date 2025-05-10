@@ -13,6 +13,7 @@ module Covenant.Test
     testBaseF,
     testNonConcrete,
     prettyDeclSet,
+    testBBF 
   )
 where
 
@@ -26,7 +27,7 @@ import Control.Monad.State.Strict
     gets,
     modify,
   )
-import Covenant.Data (mkBaseFunctor)
+import Covenant.Data (mkBaseFunctor, mkBBF)
 import Covenant.DeBruijn (DeBruijn (Z), asInt)
 import Covenant.Index
   ( Count,
@@ -36,7 +37,7 @@ import Covenant.Index
     intIndex,
     ix0,
   )
-import Covenant.Internal.Rename (renameDataDecl)
+import Covenant.Internal.Rename (renameDataDecl, renameValT)
 import Covenant.Internal.Type
   ( CompT (CompT),
     CompTBody (CompTBody),
@@ -555,7 +556,7 @@ genNonConcrete = NonConcrete <$> GT.sized go
     helper size = withBoundVars count0 $ do
       -- we're going to return a thunk so we need to enter a new scope
       funLen <- chooseInt (1, 5)
-      funList <- GT.vectorOf funLen $ GT.frequency [(6, coerce <$> genConcrete), (3, appliedTyCon size), (1, helper (size `quot` 8))]
+      funList <- GT.vectorOf funLen $ GT.frequency [(5, coerce <$> genConcrete), (2, appliedTyCon size), (3, helper (size `quot` 8))]
       pure $ ThunkT . CompT count0 . CompTBody $ unsafeFromList funList
 
 -- NOTE: We have to call this with a "driver" which pre-generates suitable (i.e. polymorphic) data declarations, see notes in `genNonConcrete`
@@ -737,3 +738,15 @@ testBaseF = do
       Just outDecl -> do
         let prettyOut = pretty $ unsafeRename (renameDataDecl outDecl)
         putDoc $ "OUTPUT: " <> hardline <> hardline <> prettyOut <> hardline <> "-------------" <> hardline
+
+testBBF :: IO ()
+testBBF = do
+  DataDeclSet inputs <- generate (arbitrary @(DataDeclSet 'Poly1))
+  forM_ inputs $ \inp -> do
+    let inpPretty = pretty $ unsafeRename (renameDataDecl inp)
+    putDoc $ hardline <> "INPUT:" <> hardline <> hardline <> inpPretty <> hardline
+    case mkBBF inp of
+      Nothing -> putDoc $ hardline <> "OUTPUT: Nothing (Empty datatype)"
+      Just out -> do
+        let outPretty = pretty $ unsafeRename (renameValT out)
+        putDoc $ hardline <> "OUTPUT:" <> hardline <> hardline <> outPretty <> hardline
