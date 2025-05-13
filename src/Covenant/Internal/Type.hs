@@ -327,21 +327,21 @@ prettyFunTy' ::
   NonEmptyVector (ValT Renamed) ->
   PrettyM ann (Doc ann)
 prettyFunTy' args = case NonEmpty.unsnoc args of
-  (rest,resTy) -> do
+  (rest, resTy) -> do
     resTy' <- ("!" <>) <$> prettyValTWithContext resTy
     case Vector.uncons rest of
       Nothing -> pure resTy'
-      Just (firstArg,otherArgs) -> do
+      Just (firstArg, otherArgs) -> do
         prettyArg1 <- prettyValTWithContext firstArg
         argsWithoutResult <- Vector.foldM (\acc x -> (\z -> acc <+> "->" <+> z) <$> prettyValTWithContext x) prettyArg1 otherArgs
         pure . parens $ argsWithoutResult <+> "->" <+> resTy'
- where
-   prettyArg :: ValT Renamed -> PrettyM ann (Doc ann)
-   prettyArg vt = do
-     prettyVT <- prettyValTWithContext vt
-     if isSimpleValT vt
-       then pure prettyVT
-       else pure (parens prettyVT)
+  where
+    prettyArg :: ValT Renamed -> PrettyM ann (Doc ann)
+    prettyArg vt = do
+      prettyVT <- prettyValTWithContext vt
+      if isSimpleValT vt
+        then pure prettyVT
+        else pure (parens prettyVT)
 
 bindVars ::
   forall (ann :: Type) (a :: Type).
@@ -381,10 +381,8 @@ isSimpleValT = \case
     isSimpleCompT (CompT count (CompTBody args)) =
       review intCount count == 0 && NonEmpty.length args == 1
 
-
 -- | DO NOT USE THIS TO WRITE OTHER INSTANCES
 --   It exists soley to make readable tests easier to write w/o having to export a bunch of internal printing stuff
-
 instance Pretty (ValT Renamed) where
   pretty = runPrettyM . prettyValTWithContext
 
@@ -518,7 +516,6 @@ checkStrategy (DataDeclaration _ _ ctors) = \case
     _ -> False
   EnumData -> all (\(Constructor _ args) -> Vector.null args) ctors
   ProductListData -> Vector.length ctors == 1
-
 
 instance Pretty (DataDeclaration Renamed) where
   pretty = runPrettyM . prettyDataDeclWithContext
