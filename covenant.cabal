@@ -22,7 +22,7 @@ extra-source-files:
 -- Common sections
 common lang
   ghc-options:
-    -- -Wall
+    -Wall
     -Wcompat
     -Wredundant-bang-patterns
     -Wredundant-strictness-flags
@@ -30,8 +30,8 @@ common lang
     -Woperator-whitespace
     -Wambiguous-fields
     -Wmisplaced-pragmas
-    -- -Wmissing-export-lists
-    -- -Wmissing-import-lists
+    -Wmissing-export-lists
+    -Wmissing-import-lists
 
   default-extensions:
     BangPatterns
@@ -171,4 +171,9 @@ test-suite asg
 
   hs-source-dirs: test/asg
 
+test-suite bb
+  import: test-lang
+  type: exitcode-stdio-1.0
+  main-is: Main.hs
+  hs-source-dirs: test/bb
 -- Benchmarks

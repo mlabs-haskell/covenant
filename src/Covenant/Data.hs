@@ -1,8 +1,8 @@
 {-# LANGUAGE ViewPatterns #-}
 
-module Covenant.Data (mkBaseFunctor, isRecursiveChildOf, allComponentTypes, hasRecursive, mkBBF) where
+module Covenant.Data (mkBaseFunctor, isRecursiveChildOf, allComponentTypes, hasRecursive, mkBBF, noPhantomTyVars) where
 
-import Control.Monad.Reader (MonadReader (ask, local), Reader)
+import Control.Monad.Reader (MonadReader (ask, local), Reader, runReader)
 import Covenant.DeBruijn (asInt, DeBruijn (S,Z))
 import Covenant.Index (Count, Index, intCount, intIndex, count0)
 import Covenant.Internal.Type
@@ -17,6 +17,8 @@ import Covenant.Internal.Type
     ValT (Abstraction, BuiltinFlat, Datatype, ThunkT)
   )
 import Data.Kind (Type)
+import Data.Set (Set)
+import Data.Set qualified as Set
 import Data.Maybe (fromJust)
 import Data.Vector qualified as V
 import Data.Vector.NonEmpty qualified as NEV
@@ -50,6 +52,41 @@ mapValT f = \case
   -- For CompT and Datatype we apply the function to the components and then to the top level
   ThunkT (CompT cnt (CompTBody compTargs)) -> f (ThunkT $ CompT cnt (CompTBody (f <$> compTargs)))
   Datatype tn args -> f $ Datatype tn (mapValT f <$> args)
+
+-- think I'll need this sooner or later
+_foldValT :: forall (a :: Type) (b :: Type). (b -> ValT a -> b) -> b -> ValT a -> b
+_foldValT f e = \case
+  absr@(Abstraction{}) -> f e absr
+  bif@(BuiltinFlat{}) -> f e bif
+  thk@(ThunkT (CompT _ (CompTBody compTArgs))) ->
+    let e' = NEV.foldl' f e compTArgs
+    in f e' thk
+  dt@(Datatype _ args) ->
+    let e' = V.foldl' f e args
+    in f e' dt
+
+noPhantomTyVars :: DataDeclaration AbstractTy -> Bool
+noPhantomTyVars decl@(DataDeclaration _ numVars _) =
+  let allChildren = allComponentTypes decl
+      allResolved = Set.unions $ runReader (traverse allResolvedTyVars' allChildren) 0
+      indices :: [Index "tyvar"]
+      indices = fromJust . preview intIndex <$> [0..(review intCount numVars - 1)]
+      declaredTyVars =  BoundAt Z <$> indices
+  in all (`Set.member` allResolved) declaredTyVars
+
+allResolvedTyVars'  ::  ValT AbstractTy -> Reader Int (Set AbstractTy)
+allResolvedTyVars' = \case
+  Abstraction (BoundAt db argpos) -> do
+    here <- ask
+    let db' = fromJust . preview asInt $ review asInt db - here
+    pure . Set.singleton $ BoundAt db' argpos
+
+  ThunkT (CompT _ (CompTBody nev)) -> local (+ 1) $ do
+    Set.unions <$> traverse allResolvedTyVars' nev
+
+  BuiltinFlat{} -> pure Set.empty
+
+  Datatype _ args -> Set.unions <$> traverse allResolvedTyVars' args 
 
 -- This tells us whether the ValT *is* a recursive child of the parent type
 isRecursiveChildOf :: TyName -> ValT AbstractTy -> Reader ScopeBoundary Bool
@@ -164,7 +201,7 @@ mkBBF (DataDeclaration _ numVars ctors)
       Abstraction (BoundAt db indx) ->
         let db' = fromJust . preview asInt $ review asInt db + 1
         in Abstraction (BoundAt db' indx)
-      other -> other 
+      other -> other
 
     topLevelOut = Abstraction $ BoundAt Z outIx
 

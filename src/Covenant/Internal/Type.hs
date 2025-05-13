@@ -334,13 +334,6 @@ prettyFunTy' args = case NonEmpty.unsnoc args of
         prettyArg1 <- prettyValTWithContext firstArg
         argsWithoutResult <- Vector.foldM (\acc x -> (\z -> acc <+> "->" <+> z) <$> prettyValTWithContext x) prettyArg1 otherArgs
         pure . parens $ argsWithoutResult <+> "->" <+> resTy'
- where
-   prettyArg :: ValT Renamed -> PrettyM ann (Doc ann)
-   prettyArg vt = do
-     prettyVT <- prettyValTWithContext vt
-     if isSimpleValT vt
-       then pure prettyVT
-       else pure (parens prettyVT)
 
 bindVars ::
   forall (ann :: Type) (a :: Type).
@@ -370,20 +363,9 @@ mkForall tvars funTyBody =
     then funTyBody
     else "forall" <+> hsep (Vector.toList tvars) <> "." <+> funTyBody
 
--- I.e. can we omit parens and get something unambiguous? This might be overly aggressive w/ parens but that's OK
-isSimpleValT :: forall (a :: Type). ValT a -> Bool
-isSimpleValT = \case
-  ThunkT thunk -> isSimpleCompT thunk
-  _ -> True
-  where
-    isSimpleCompT :: CompT a -> Bool
-    isSimpleCompT (CompT count (CompTBody args)) =
-      review intCount count == 0 && NonEmpty.length args == 1
-
 
 -- | DO NOT USE THIS TO WRITE OTHER INSTANCES
 --   It exists soley to make readable tests easier to write w/o having to export a bunch of internal printing stuff
-
 instance Pretty (ValT Renamed) where
   pretty = runPrettyM . prettyValTWithContext
 

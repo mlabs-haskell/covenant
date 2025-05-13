@@ -13,7 +13,7 @@ module Covenant.Test
     testBaseF,
     testNonConcrete,
     prettyDeclSet,
-    testBBF 
+    testBBF
   )
 where
 
@@ -27,7 +27,7 @@ import Control.Monad.State.Strict
     gets,
     modify,
   )
-import Covenant.Data (mkBaseFunctor, mkBBF)
+import Covenant.Data (mkBaseFunctor, mkBBF, noPhantomTyVars)
 import Covenant.DeBruijn (DeBruijn (Z), asInt)
 import Covenant.Index
   ( Count,
@@ -456,13 +456,13 @@ newtype Polymorphic1 = Polymorphic1 (DataDeclaration AbstractTy)
 -}
 genPolymorphic1Decl :: DataGenM Polymorphic1
 genPolymorphic1Decl =
-  Polymorphic1 <$> do
+  Polymorphic1 <$> GT.suchThat (do -- this is a hack to save avoid reworking generator logic. It should be fine cuz we're not super likely to get phantoms anyway
     tyNm <- freshTyName
     logArity tyNm count1
     numCtors <- chooseInt (1, 5)
     polyCtors <- concat <$> GT.vectorOf numCtors (genPolyCtor tyNm)
     let result = DataDeclaration tyNm count1 (Vector.fromList polyCtors)
-    returnDecl result
+    returnDecl result) noPhantomTyVars
   where
     -- We return a single constructor UNLESS we're generating a recursive type, in which case we have to return 2 to ensure a base case
     genPolyCtor :: TyName -> DataGenM [Constructor AbstractTy]
@@ -561,7 +561,7 @@ genNonConcrete = NonConcrete <$> GT.sized go
 
 -- NOTE: We have to call this with a "driver" which pre-generates suitable (i.e. polymorphic) data declarations, see notes in `genNonConcrete`
 genNonConcreteDecl :: DataGenM (DataDeclaration AbstractTy)
-genNonConcreteDecl = withBoundVars count1 $ do
+genNonConcreteDecl = withBoundVars count1 . flip GT.suchThat noPhantomTyVars $ do
   -- we need to bind the vars before we're done constructing the type
   tyNm <- freshTyName
   numArgs <- chooseInt (1, 5)
