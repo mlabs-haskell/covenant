@@ -321,6 +321,7 @@ prettyCompTWithContext (CompT count (CompTBody funArgs))
       funTy <- prettyFunTy' funArgs
       pure $ mkForall newVars funTy
 
+-- NOTE: Don't change this. It's annoying to get right.
 prettyFunTy' ::
   forall (ann :: Type).
   NonEmptyVector (ValT Renamed) ->
@@ -486,9 +487,38 @@ instance (k ~ A_Lens, a ~ Vector (ValT c), b ~ Vector (ValT c)) => LabelOptic "c
   {-# INLINEABLE labelOptic #-}
   labelOptic = lens (\(Constructor _ args) -> args) (\(Constructor n _) args -> Constructor n args)
 
+data DataEncoding a
+  = SOP
+  | PlutusData (PlutusDataStrategy a)
+  deriving stock (Show, Eq, Ord)
+
+data PlutusDataStrategy a
+  = ManualData a
+  | WrapperData
+  | EnumData
+  | ProductListData
+  | ConstrData
+  deriving stock (Show, Eq, Ord)
+
 data DataDeclaration a
   = DataDeclaration TyName (Count "tyvar") (Vector (Constructor a)) -- Allows for representations of "empty" types in case we want to represent Void like that
   deriving stock (Show, Eq)
+
+checkStrategy :: forall term a. DataDeclaration a -> PlutusDataStrategy term -> Bool
+checkStrategy (DataDeclaration _ _ ctors) = \case
+  ManualData _ -> True
+  ConstrData -> True
+  WrapperData -> case Vector.toList ctors of
+    [Constructor _ ctorArgs] -> case Vector.toList ctorArgs of
+      [bsOrInt] -> case bsOrInt of
+        BuiltinFlat IntegerT -> True
+        BuiltinFlat ByteStringT -> True
+        _ -> False
+      _ -> False
+    _ -> False
+  EnumData -> all (\(Constructor _ args) -> Vector.null args) ctors
+  ProductListData -> Vector.length ctors == 1
+
 
 instance Pretty (DataDeclaration Renamed) where
   pretty = runPrettyM . prettyDataDeclWithContext

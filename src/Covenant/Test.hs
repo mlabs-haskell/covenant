@@ -13,7 +13,7 @@ module Covenant.Test
     testBaseF,
     testNonConcrete,
     prettyDeclSet,
-    testBBF 
+    testBBF,
   )
 where
 
@@ -27,7 +27,7 @@ import Control.Monad.State.Strict
     gets,
     modify,
   )
-import Covenant.Data (mkBaseFunctor, mkBBF)
+import Covenant.Data (mkBBF, mkBaseFunctor)
 import Covenant.DeBruijn (DeBruijn (Z), asInt)
 import Covenant.Index
   ( Count,
