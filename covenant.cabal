@@ -176,4 +176,5 @@ test-suite bb
   type: exitcode-stdio-1.0
   main-is: Main.hs
   hs-source-dirs: test/bb
+
 -- Benchmarks

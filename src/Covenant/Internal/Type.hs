@@ -326,11 +326,11 @@ prettyFunTy' ::
   NonEmptyVector (ValT Renamed) ->
   PrettyM ann (Doc ann)
 prettyFunTy' args = case NonEmpty.unsnoc args of
-  (rest,resTy) -> do
+  (rest, resTy) -> do
     resTy' <- ("!" <>) <$> prettyValTWithContext resTy
     case Vector.uncons rest of
       Nothing -> pure resTy'
-      Just (firstArg,otherArgs) -> do
+      Just (firstArg, otherArgs) -> do
         prettyArg1 <- prettyValTWithContext firstArg
         argsWithoutResult <- Vector.foldM (\acc x -> (\z -> acc <+> "->" <+> z) <$> prettyValTWithContext x) prettyArg1 otherArgs
         pure . parens $ argsWithoutResult <+> "->" <+> resTy'
@@ -362,7 +362,6 @@ mkForall tvars funTyBody =
   if Vector.null tvars
     then funTyBody
     else "forall" <+> hsep (Vector.toList tvars) <> "." <+> funTyBody
-
 
 -- | DO NOT USE THIS TO WRITE OTHER INSTANCES
 --   It exists soley to make readable tests easier to write w/o having to export a bunch of internal printing stuff

@@ -3,8 +3,8 @@
 module Covenant.Data (mkBaseFunctor, isRecursiveChildOf, allComponentTypes, hasRecursive, mkBBF, noPhantomTyVars) where
 
 import Control.Monad.Reader (MonadReader (ask, local), Reader, runReader)
-import Covenant.DeBruijn (asInt, DeBruijn (S,Z))
-import Covenant.Index (Count, Index, intCount, intIndex, count0)
+import Covenant.DeBruijn (DeBruijn (S, Z), asInt)
+import Covenant.Index (Count, Index, count0, intCount, intIndex)
 import Covenant.Internal.Type
   ( AbstractTy (BoundAt),
     CompT (CompT),
@@ -14,12 +14,12 @@ import Covenant.Internal.Type
     DataDeclaration (DataDeclaration),
     ScopeBoundary (ScopeBoundary),
     TyName (TyName),
-    ValT (Abstraction, BuiltinFlat, Datatype, ThunkT)
+    ValT (Abstraction, BuiltinFlat, Datatype, ThunkT),
   )
 import Data.Kind (Type)
+import Data.Maybe (fromJust)
 import Data.Set (Set)
 import Data.Set qualified as Set
-import Data.Maybe (fromJust)
 import Data.Vector qualified as V
 import Data.Vector.NonEmpty qualified as NEV
 import Optics.Core (folded, preview, review, toListOf, view, (%))
@@ -56,37 +56,34 @@ mapValT f = \case
 -- think I'll need this sooner or later
 _foldValT :: forall (a :: Type) (b :: Type). (b -> ValT a -> b) -> b -> ValT a -> b
 _foldValT f e = \case
-  absr@(Abstraction{}) -> f e absr
-  bif@(BuiltinFlat{}) -> f e bif
+  absr@(Abstraction {}) -> f e absr
+  bif@(BuiltinFlat {}) -> f e bif
   thk@(ThunkT (CompT _ (CompTBody compTArgs))) ->
     let e' = NEV.foldl' f e compTArgs
-    in f e' thk
+     in f e' thk
   dt@(Datatype _ args) ->
     let e' = V.foldl' f e args
-    in f e' dt
+     in f e' dt
 
 noPhantomTyVars :: DataDeclaration AbstractTy -> Bool
 noPhantomTyVars decl@(DataDeclaration _ numVars _) =
   let allChildren = allComponentTypes decl
       allResolved = Set.unions $ runReader (traverse allResolvedTyVars' allChildren) 0
       indices :: [Index "tyvar"]
-      indices = fromJust . preview intIndex <$> [0..(review intCount numVars - 1)]
-      declaredTyVars =  BoundAt Z <$> indices
-  in all (`Set.member` allResolved) declaredTyVars
+      indices = fromJust . preview intIndex <$> [0 .. (review intCount numVars - 1)]
+      declaredTyVars = BoundAt Z <$> indices
+   in all (`Set.member` allResolved) declaredTyVars
 
-allResolvedTyVars'  ::  ValT AbstractTy -> Reader Int (Set AbstractTy)
+allResolvedTyVars' :: ValT AbstractTy -> Reader Int (Set AbstractTy)
 allResolvedTyVars' = \case
   Abstraction (BoundAt db argpos) -> do
     here <- ask
     let db' = fromJust . preview asInt $ review asInt db - here
     pure . Set.singleton $ BoundAt db' argpos
-
   ThunkT (CompT _ (CompTBody nev)) -> local (+ 1) $ do
     Set.unions <$> traverse allResolvedTyVars' nev
-
-  BuiltinFlat{} -> pure Set.empty
-
-  Datatype _ args -> Set.unions <$> traverse allResolvedTyVars' args 
+  BuiltinFlat {} -> pure Set.empty
+  Datatype _ args -> Set.unions <$> traverse allResolvedTyVars' args
 
 -- This tells us whether the ValT *is* a recursive child of the parent type
 isRecursiveChildOf :: TyName -> ValT AbstractTy -> Reader ScopeBoundary Bool
@@ -124,7 +121,7 @@ hasRecursive tn = \case
     aComponentIsRecursive <- or <$> traverse (hasRecursive tn) args
     pure $ thisTypeIsRecursive || aComponentIsRecursive
 
--- | Constructs a base functor from a suitable data declaration, returning 'Nothing' if the input is not a recursive type 
+-- | Constructs a base functor from a suitable data declaration, returning 'Nothing' if the input is not a recursive type
 mkBaseFunctor :: DataDeclaration AbstractTy -> Reader ScopeBoundary (Maybe (DataDeclaration AbstractTy))
 mkBaseFunctor (DataDeclaration tn numVars ctors) = do
   anyRecComponents <- or <$> traverse (hasRecursive tn) allCtorArgs
@@ -181,26 +178,26 @@ mkBaseFunctor (DataDeclaration tn numVars ctors) = do
     isRecursive :: ValT AbstractTy -> Reader ScopeBoundary Bool
     isRecursive = isRecursiveChildOf tn
 
-
 -- data Maybe a = Just a | Nothing ~> forall out. (a -> out) -> out -> out
 
 -- Only returns `Nothing` if there are no Constructors
 mkBBF :: DataDeclaration AbstractTy -> Maybe (ValT AbstractTy)
 mkBBF (DataDeclaration _ numVars ctors)
   | V.null ctors = Nothing
-  | otherwise = ThunkT . CompT bbfCount . CompTBody . flip NEV.snoc topLevelOut  <$> (NEV.fromVector =<< traverse mkEliminator ctors)
+  | otherwise = ThunkT . CompT bbfCount . CompTBody . flip NEV.snoc topLevelOut <$> (NEV.fromVector =<< traverse mkEliminator ctors)
   where
     mkEliminator :: Constructor AbstractTy -> Maybe (ValT AbstractTy)
     mkEliminator (Constructor _ (fmap incAbstractionDB -> args))
       | V.null args = Just topLevelOut
-      | otherwise = let out = Abstraction $ BoundAt (S Z) outIx
-                    in ThunkT . CompT count0 . CompTBody . flip NEV.snoc out <$> NEV.fromVector args
+      | otherwise =
+          let out = Abstraction $ BoundAt (S Z) outIx
+           in ThunkT . CompT count0 . CompTBody . flip NEV.snoc out <$> NEV.fromVector args
 
     incAbstractionDB :: ValT AbstractTy -> ValT AbstractTy
     incAbstractionDB = mapValT $ \case
       Abstraction (BoundAt db indx) ->
         let db' = fromJust . preview asInt $ review asInt db + 1
-        in Abstraction (BoundAt db' indx)
+         in Abstraction (BoundAt db' indx)
       other -> other
 
     topLevelOut = Abstraction $ BoundAt Z outIx
@@ -210,15 +207,15 @@ mkBBF (DataDeclaration _ numVars ctors)
 
     -- The index of the 'out' parameter, indicates the return type
     outIx :: Index "tyvar"
-    outIx = fromJust .  preview intIndex $ review intCount numVars
+    outIx = fromJust . preview intIndex $ review intCount numVars
 
-    {- Note (largely to self) on DeBruijn indices:
+{- Note (largely to self) on DeBruijn indices:
 
-         - None of the existing variable DeBruijn or position indices change at all b/c the binding context of the
-           `forall` we're introducing replaces the binding context of the datatype declaration and only extends it.
+     - None of the existing variable DeBruijn or position indices change at all b/c the binding context of the
+       `forall` we're introducing replaces the binding context of the datatype declaration and only extends it.
 
-         - The only special thing we have to keep track of is the (DeBruijn) index of the `out` variable, but this doesn't require
-           any fancy scope tracking: It will always be Z for the top-level result and `S Z` wherever it occurs in a
-           transformed constructor. It won't ever occur any "deeper" than that (because we don't nest these, and a constructor gets exactly one
-           `out`)
-    -}
+     - The only special thing we have to keep track of is the (DeBruijn) index of the `out` variable, but this doesn't require
+       any fancy scope tracking: It will always be Z for the top-level result and `S Z` wherever it occurs in a
+       transformed constructor. It won't ever occur any "deeper" than that (because we don't nest these, and a constructor gets exactly one
+       `out`)
+-}

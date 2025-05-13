@@ -13,7 +13,7 @@ module Covenant.Test
     testBaseF,
     testNonConcrete,
     prettyDeclSet,
-    testBBF
+    testBBF,
   )
 where
 
@@ -27,7 +27,7 @@ import Control.Monad.State.Strict
     gets,
     modify,
   )
-import Covenant.Data (mkBaseFunctor, mkBBF, noPhantomTyVars)
+import Covenant.Data (mkBBF, mkBaseFunctor, noPhantomTyVars)
 import Covenant.DeBruijn (DeBruijn (Z), asInt)
 import Covenant.Index
   ( Count,
@@ -456,13 +456,18 @@ newtype Polymorphic1 = Polymorphic1 (DataDeclaration AbstractTy)
 -}
 genPolymorphic1Decl :: DataGenM Polymorphic1
 genPolymorphic1Decl =
-  Polymorphic1 <$> GT.suchThat (do -- this is a hack to save avoid reworking generator logic. It should be fine cuz we're not super likely to get phantoms anyway
-    tyNm <- freshTyName
-    logArity tyNm count1
-    numCtors <- chooseInt (1, 5)
-    polyCtors <- concat <$> GT.vectorOf numCtors (genPolyCtor tyNm)
-    let result = DataDeclaration tyNm count1 (Vector.fromList polyCtors)
-    returnDecl result) noPhantomTyVars
+  Polymorphic1
+    <$> GT.suchThat
+      ( do
+          -- this is a hack to save avoid reworking generator logic. It should be fine cuz we're not super likely to get phantoms anyway
+          tyNm <- freshTyName
+          logArity tyNm count1
+          numCtors <- chooseInt (1, 5)
+          polyCtors <- concat <$> GT.vectorOf numCtors (genPolyCtor tyNm)
+          let result = DataDeclaration tyNm count1 (Vector.fromList polyCtors)
+          returnDecl result
+      )
+      noPhantomTyVars
   where
     -- We return a single constructor UNLESS we're generating a recursive type, in which case we have to return 2 to ensure a base case
     genPolyCtor :: TyName -> DataGenM [Constructor AbstractTy]
