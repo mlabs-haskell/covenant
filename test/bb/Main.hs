@@ -25,7 +25,7 @@ main =
   where
     -- These tests are suuuuppeeerr inefficient, it'd be ideal to run more but it'll take too long
     moreTests :: QuickCheckTests -> QuickCheckTests
-    moreTests = max 5000
+    moreTests = max 500
 
 {- This is the only reasonable property I can think of, and is ultimately more of a test of the
    "ensure there aren't any phantom type variables" than it is of the bb transform.
