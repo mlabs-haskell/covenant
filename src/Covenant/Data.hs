@@ -44,14 +44,14 @@ import Optics.Core (folded, preview, review, toListOf, view, (%))
 -- TODO: Rewrite this as `mapMValT`. The change to a `Reader` below makes this unusable, but we can
 --       write the non-monadic version as a special case of the monadic version and it is *highly* likely
 --       we will need both going forward.
-mapValT :: forall (a :: Type). (ValT a -> ValT a) -> ValT a -> ValT a
-mapValT f = \case
+_mapValT :: forall (a :: Type). (ValT a -> ValT a) -> ValT a -> ValT a
+_mapValT f = \case
   -- for terminal nodes we just apply the function
   absr@(Abstraction {}) -> f absr
   bif@BuiltinFlat {} -> f bif
   -- For CompT and Datatype we apply the function to the components and then to the top level
   ThunkT (CompT cnt (CompTBody compTargs)) -> f (ThunkT $ CompT cnt (CompTBody (f <$> compTargs)))
-  Datatype tn args -> f $ Datatype tn (mapValT f <$> args)
+  Datatype tn args -> f $ Datatype tn (_mapValT f <$> args)
 
 -- think I'll need this sooner or later
 _foldValT :: forall (a :: Type) (b :: Type). (b -> ValT a -> b) -> b -> ValT a -> b
@@ -72,7 +72,8 @@ noPhantomTyVars decl@(DataDeclaration _ numVars _) =
       indices :: [Index "tyvar"]
       indices = fromJust . preview intIndex <$> [0 .. (review intCount numVars - 1)]
       declaredTyVars = BoundAt Z <$> indices
-   in all (`Set.member` allResolved) declaredTyVars
+   in  all (`Set.member` allResolved) declaredTyVars
+
 
 allResolvedTyVars' :: ValT AbstractTy -> Reader Int (Set AbstractTy)
 allResolvedTyVars' = \case
@@ -194,10 +195,12 @@ mkBBF (DataDeclaration _ numVars ctors)
            in ThunkT . CompT count0 . CompTBody . flip NEV.snoc out <$> NEV.fromVector args
 
     incAbstractionDB :: ValT AbstractTy -> ValT AbstractTy
-    incAbstractionDB = mapValT $ \case
+    incAbstractionDB =  \case
       Abstraction (BoundAt db indx) ->
         let db' = fromJust . preview asInt $ review asInt db + 1
          in Abstraction (BoundAt db' indx)
+      Datatype tn args -> Datatype tn (incAbstractionDB <$> args)
+      ThunkT (CompT cnt (CompTBody compTargs)) -> ThunkT . CompT cnt . CompTBody . fmap incAbstractionDB $ compTargs
       other -> other
 
     topLevelOut = Abstraction $ BoundAt Z outIx

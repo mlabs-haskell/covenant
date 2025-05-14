@@ -15,6 +15,8 @@ module Covenant.Internal.Type
     thunkT,
     builtinFlat,
     datatype,
+    -- generic utility for debugging/testing
+    prettyStr
   )
 where
 
@@ -66,9 +68,11 @@ import Prettyprinter
     parens,
     vcat,
     viaShow,
-    (<+>),
+    (<+>), defaultLayoutOptions, layoutPretty,
   )
 import Test.QuickCheck.Instances.Text ()
+import qualified Data.Text as T
+import Prettyprinter.Render.Text  (renderStrict)
 
 -- need the arbitary instance for TyName
 -- largely for TyName
@@ -250,6 +254,9 @@ data BuiltinFlatT
     )
 
 -- Helpers
+
+prettyStr :: forall (b :: Type). (Pretty b) => b -> String
+prettyStr = T.unpack . renderStrict . layoutPretty defaultLayoutOptions . pretty
 
 newtype ScopeBoundary = ScopeBoundary Int
   deriving (Show, Eq, Ord, Num, Real, Enum, Integral) via Int
