@@ -72,8 +72,7 @@ noPhantomTyVars decl@(DataDeclaration _ numVars _) =
       indices :: [Index "tyvar"]
       indices = fromJust . preview intIndex <$> [0 .. (review intCount numVars - 1)]
       declaredTyVars = BoundAt Z <$> indices
-   in  all (`Set.member` allResolved) declaredTyVars
-
+   in all (`Set.member` allResolved) declaredTyVars
 
 allResolvedTyVars' :: ValT AbstractTy -> Reader Int (Set AbstractTy)
 allResolvedTyVars' = \case
@@ -195,7 +194,7 @@ mkBBF (DataDeclaration _ numVars ctors)
            in ThunkT . CompT count0 . CompTBody . flip NEV.snoc out <$> NEV.fromVector args
 
     incAbstractionDB :: ValT AbstractTy -> ValT AbstractTy
-    incAbstractionDB =  \case
+    incAbstractionDB = \case
       Abstraction (BoundAt db indx) ->
         let db' = fromJust . preview asInt $ review asInt db + 1
          in Abstraction (BoundAt db' indx)

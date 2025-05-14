@@ -47,7 +47,8 @@ import Covenant.Internal.Type
     ScopeBoundary,
     TyName (TyName),
     ValT (Abstraction, BuiltinFlat, Datatype, ThunkT),
-    runConstructorName, prettyStr,
+    prettyStr,
+    runConstructorName,
   )
 import Covenant.Type
   ( AbstractTy (BoundAt),
@@ -69,6 +70,7 @@ import Covenant.Type
 import Data.Coerce (coerce)
 import Data.Foldable (forM_)
 import Data.Kind (Type)
+import Data.List (subsequences)
 import Data.Map.Strict (Map)
 import Data.Map.Strict qualified as M
 import Data.Maybe (fromJust, mapMaybe)
@@ -100,7 +102,6 @@ import Test.QuickCheck.GenT (GenT, MonadGen)
 import Test.QuickCheck.GenT qualified as GT
 import Test.QuickCheck.Instances.Containers ()
 import Test.QuickCheck.Instances.Vector ()
-import Data.List (subsequences)
 
 -- | Wrapper for 'ValT' to provide an 'Arbitrary' instance to generate only
 -- value types without any type variables.
@@ -567,7 +568,7 @@ genNonConcrete = NonConcrete <$> GT.sized go
 
 -- NOTE: We have to call this with a "driver" which pre-generates suitable (i.e. polymorphic) data declarations, see notes in `genNonConcrete`
 genNonConcreteDecl :: DataGenM (DataDeclaration AbstractTy)
-genNonConcreteDecl =  flip GT.suchThat noPhantomTyVars . withBoundVars count1  $ do
+genNonConcreteDecl = flip GT.suchThat noPhantomTyVars . withBoundVars count1 $ do
   -- we need to bind the vars before we're done constructing the type
   tyNm <- freshTyName
   numArgs <- chooseInt (1, 5)
@@ -612,26 +613,25 @@ shrinkDataDecl :: DataDeclaration AbstractTy -> [DataDeclaration AbstractTy]
 shrinkDataDecl (DataDeclaration nm cnt ctors)
   | Vector.null ctors = []
   | otherwise = filter noPhantomTyVars $ smallerNumCtors <|> smallerCtorArgs
- where
-   smallerNumCtors = DataDeclaration nm cnt . Vector.fromList <$> init (subsequences (Vector.toList ctors))
-   smallerCtorArgs = DataDeclaration nm cnt <$> shrinkCtorsNumArgs ctors
+  where
+    smallerNumCtors = DataDeclaration nm cnt . Vector.fromList <$> init (subsequences (Vector.toList ctors))
+    smallerCtorArgs = DataDeclaration nm cnt <$> shrinkCtorsNumArgs ctors
 
-   -- need a fn which takes a single ctor and just shrinks the args
-   -- this is difficult to keep track of: THIS ONE GIVES US IDENTICALLY NAMED CTORS WITH DIFFERENT ARG LISTS
-   shrinkNumArgs :: Constructor AbstractTy -> [Constructor AbstractTy]
-   shrinkNumArgs (Constructor ctorNm args) = 
-     let smallerArgs :: [Vector (ValT AbstractTy)]
-         smallerArgs = coerce $ shrink (fmap Concrete args)
-     in  fmap (Constructor ctorNm)  smallerArgs 
+    -- need a fn which takes a single ctor and just shrinks the args
+    -- this is difficult to keep track of: THIS ONE GIVES US IDENTICALLY NAMED CTORS WITH DIFFERENT ARG LISTS
+    shrinkNumArgs :: Constructor AbstractTy -> [Constructor AbstractTy]
+    shrinkNumArgs (Constructor ctorNm args) =
+      let smallerArgs :: [Vector (ValT AbstractTy)]
+          smallerArgs = coerce $ shrink (fmap Concrete args)
+       in fmap (Constructor ctorNm) smallerArgs
 
-   shrinkCtorsNumArgs :: Vector (Constructor AbstractTy) -> [Vector (Constructor AbstractTy)]
-   shrinkCtorsNumArgs cs =
-    let -- the inner lists exhaust the arg-deletion possibilities for each constructor
-        cs' = Vector.toList $ shrinkNumArgs <$> cs
-        go [] = []
-        go (x:xs) =  (:) <$> x <*> xs
-    in Vector.fromList <$> go cs'
-
+    shrinkCtorsNumArgs :: Vector (Constructor AbstractTy) -> [Vector (Constructor AbstractTy)]
+    shrinkCtorsNumArgs cs =
+      let -- the inner lists exhaust the arg-deletion possibilities for each constructor
+          cs' = Vector.toList $ shrinkNumArgs <$> cs
+          go [] = []
+          go (x : xs) = (:) <$> x <*> xs
+       in Vector.fromList <$> go cs'
 
 shrinkDataDecls :: [DataDeclaration AbstractTy] -> [[DataDeclaration AbstractTy]]
 shrinkDataDecls decls = liftShrink shrinkDataDecl decls <|> (shrinkDataDecl <$> decls)
@@ -673,12 +673,11 @@ instance Arbitrary (DataDeclSet 'Poly1PolyThunks) where
     void $ GT.vectorOf 10 genPolymorphic1Decl
     void $ GT.listOf genNonConcreteDecl
     decls <- M.elems <$> gets (view #decls) -- simpler to just pluck them from the monadic context
-    pure  $ filter noPhantomTyVars decls -- TODO/FIXME: We shouldn't have to filter here, better to catch things earlier
+    pure $ filter noPhantomTyVars decls -- TODO/FIXME: We shouldn't have to filter here, better to catch things earlier
   shrink = coerce . shrinkDataDecls . coerce
 
 prettyDeclSet :: forall (a :: DataDeclFlavor). DataDeclSet a -> String
 prettyDeclSet (DataDeclSet decls) = concatMap (\x -> (prettyStr . unsafeRename . renameDataDecl $ x) <> "\n\n") decls
-
 
 {- Misc Repl testing utilities. I'd like to leave these here because I can't exactly have a test suite
    to validate test generators, so inspection may be necessary if something goes wrong.

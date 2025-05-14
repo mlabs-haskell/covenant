@@ -16,7 +16,7 @@ module Covenant.Internal.Type
     builtinFlat,
     datatype,
     -- generic utility for debugging/testing
-    prettyStr
+    prettyStr,
   )
 where
 
@@ -39,6 +39,7 @@ import Data.Map.Strict (Map)
 import Data.Map.Strict qualified as Map
 import Data.String (IsString)
 import Data.Text (Text)
+import Data.Text qualified as T
 import Data.Vector (Vector)
 import Data.Vector qualified as Vector
 import Data.Vector.NonEmpty (NonEmptyVector)
@@ -63,16 +64,17 @@ import Optics.Core
 import Prettyprinter
   ( Doc,
     Pretty (pretty),
+    defaultLayoutOptions,
     hsep,
     indent,
+    layoutPretty,
     parens,
     vcat,
     viaShow,
-    (<+>), defaultLayoutOptions, layoutPretty,
+    (<+>),
   )
+import Prettyprinter.Render.Text (renderStrict)
 import Test.QuickCheck.Instances.Text ()
-import qualified Data.Text as T
-import Prettyprinter.Render.Text  (renderStrict)
 
 -- need the arbitary instance for TyName
 -- largely for TyName
