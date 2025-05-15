@@ -614,7 +614,7 @@ shrinkDataDecl (DataDeclaration nm cnt ctors)
   | otherwise = filter noPhantomTyVars $ smallerNumCtors <|> smallerCtorArgs
   where
     smallerNumCtors :: [DataDeclaration AbstractTy]
-    smallerNumCtors = Vector.toList $ DataDeclaration nm cnt  <$> Vector.init (subVectors  ctors)
+    smallerNumCtors = Vector.toList $ DataDeclaration nm cnt <$> Vector.init (subVectors ctors)
     smallerCtorArgs = DataDeclaration nm cnt <$> shrinkCtorsNumArgs ctors
 
     -- need a fn which takes a single ctor and just shrinks the args
@@ -640,10 +640,10 @@ subVectors xs = Vector.cons Vector.empty (nonEmptySubVectors xs)
 nonEmptySubVectors :: forall (a :: Type). Vector a -> Vector (Vector a)
 nonEmptySubVectors v = case Vector.uncons v of
   Nothing -> Vector.empty
-  Just (x,xs) ->
+  Just (x, xs) ->
     let f :: Vector a -> Vector (Vector a) -> Vector (Vector a)
-        f ys r =  ys `Vector.cons` ((x `Vector.cons` ys) `Vector.cons` r)
-    in Vector.singleton x `Vector.cons` foldr f Vector.empty (nonEmptySubVectors xs)
+        f ys r = ys `Vector.cons` ((x `Vector.cons` ys) `Vector.cons` r)
+     in Vector.singleton x `Vector.cons` foldr f Vector.empty (nonEmptySubVectors xs)
 
 shrinkDataDecls :: [DataDeclaration AbstractTy] -> [[DataDeclaration AbstractTy]]
 shrinkDataDecls decls = liftShrink shrinkDataDecl decls <|> (shrinkDataDecl <$> decls)
