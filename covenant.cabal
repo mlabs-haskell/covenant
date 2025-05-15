@@ -171,4 +171,10 @@ test-suite asg
 
   hs-source-dirs: test/asg
 
+test-suite bb
+  import: test-lang
+  type: exitcode-stdio-1.0
+  main-is: Main.hs
+  hs-source-dirs: test/bb
+
 -- Benchmarks
