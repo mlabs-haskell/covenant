@@ -209,7 +209,7 @@ mkBBF (DataDeclaration _ numVars ctors)
     outIx :: Index "tyvar"
     outIx = fromJust . preview intIndex $ review intCount numVars
 
-{- Note (largely to self) on DeBruijn indices:
+{- Note (Sean, 14/05/25): Re  DeBruijn indices:
 
      - None of the existing variable DeBruijn or position indices change at all b/c the binding context of the
        `forall` we're introducing replaces the binding context of the datatype declaration and only extends it.
@@ -218,4 +218,7 @@ mkBBF (DataDeclaration _ numVars ctors)
        any fancy scope tracking: It will always be Z for the top-level result and `S Z` wherever it occurs in a
        transformed constructor. It won't ever occur any "deeper" than that (because we don't nest these, and a constructor gets exactly one
        `out`)
+
+     - Actually this is slightly false, we need to "bump" all of the indices inside constructor arms by one (because
+       they now occur within a Thunk), but after that bump everything is stable as indicated above.
 -}
