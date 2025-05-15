@@ -27,7 +27,7 @@ import Control.Monad.State.Strict
     gets,
     modify,
   )
-import Covenant.Data (mkBBF, mkBaseFunctor)
+import Covenant.Data (mkBBF, mkBaseFunctor, noPhantomTyVars)
 import Covenant.DeBruijn (DeBruijn (Z), asInt)
 import Covenant.Index
   ( Count,
@@ -47,6 +47,7 @@ import Covenant.Internal.Type
     ScopeBoundary,
     TyName (TyName),
     ValT (Abstraction, BuiltinFlat, Datatype, ThunkT),
+    prettyStr,
     runConstructorName,
   )
 import Covenant.Type
@@ -82,8 +83,8 @@ import Data.Vector.NonEmpty qualified as NEV
 import GHC.Exts (fromListN)
 import GHC.Word (Word32)
 import Optics.Core (A_Lens, LabelOptic (labelOptic), folded, lens, over, preview, review, set, toListOf, view, (%))
-import Prettyprinter (Pretty, defaultLayoutOptions, hardline, layoutPretty, pretty)
-import Prettyprinter.Render.Text (putDoc, renderStrict)
+import Prettyprinter (hardline, pretty)
+import Prettyprinter.Render.Text (putDoc)
 import Test.QuickCheck
   ( Arbitrary (arbitrary, shrink),
     Arbitrary1 (liftArbitrary, liftShrink),
@@ -456,13 +457,18 @@ newtype Polymorphic1 = Polymorphic1 (DataDeclaration AbstractTy)
 -}
 genPolymorphic1Decl :: DataGenM Polymorphic1
 genPolymorphic1Decl =
-  Polymorphic1 <$> do
-    tyNm <- freshTyName
-    logArity tyNm count1
-    numCtors <- chooseInt (1, 5)
-    polyCtors <- concat <$> GT.vectorOf numCtors (genPolyCtor tyNm)
-    let result = DataDeclaration tyNm count1 (Vector.fromList polyCtors)
-    returnDecl result
+  Polymorphic1
+    <$> GT.suchThat
+      ( do
+          -- this is a hack to save avoid reworking generator logic. It should be fine cuz we're not super likely to get phantoms anyway
+          tyNm <- freshTyName
+          logArity tyNm count1
+          numCtors <- chooseInt (1, 5)
+          polyCtors <- concat <$> GT.vectorOf numCtors (genPolyCtor tyNm)
+          let result = DataDeclaration tyNm count1 (Vector.fromList polyCtors)
+          returnDecl result
+      )
+      noPhantomTyVars
   where
     -- We return a single constructor UNLESS we're generating a recursive type, in which case we have to return 2 to ensure a base case
     genPolyCtor :: TyName -> DataGenM [Constructor AbstractTy]
@@ -561,7 +567,7 @@ genNonConcrete = NonConcrete <$> GT.sized go
 
 -- NOTE: We have to call this with a "driver" which pre-generates suitable (i.e. polymorphic) data declarations, see notes in `genNonConcrete`
 genNonConcreteDecl :: DataGenM (DataDeclaration AbstractTy)
-genNonConcreteDecl = withBoundVars count1 $ do
+genNonConcreteDecl = flip GT.suchThat noPhantomTyVars . withBoundVars count1 $ do
   -- we need to bind the vars before we're done constructing the type
   tyNm <- freshTyName
   numArgs <- chooseInt (1, 5)
@@ -605,23 +611,39 @@ newtype DataDeclSet (flavor :: DataDeclFlavor) = DataDeclSet [DataDeclaration Ab
 shrinkDataDecl :: DataDeclaration AbstractTy -> [DataDeclaration AbstractTy]
 shrinkDataDecl (DataDeclaration nm cnt ctors)
   | Vector.null ctors = []
-  | otherwise =
-      let withShrunkenCtors = ((DataDeclaration nm cnt . Vector.fromList) . ctorShrink <$> Vector.toList ctors)
-
-          withShrunkenCtorArgs = DataDeclaration nm cnt . Vector.fromList . ctorArgShrink <$> Vector.toList ctors
-       in withShrunkenCtors <|> withShrunkenCtorArgs
+  | otherwise = filter noPhantomTyVars $ smallerNumCtors <|> smallerCtorArgs
   where
-    concreteShrink :: Vector (ValT AbstractTy) -> [Vector (ValT AbstractTy)]
-    concreteShrink = coerce . shrink . fmap Concrete
+    smallerNumCtors :: [DataDeclaration AbstractTy]
+    smallerNumCtors = Vector.toList $ DataDeclaration nm cnt <$> Vector.init (subVectors ctors)
+    smallerCtorArgs = DataDeclaration nm cnt <$> shrinkCtorsNumArgs ctors
 
-    concreteShrink' :: Vector (ValT AbstractTy) -> [Vector (ValT AbstractTy)]
-    concreteShrink' xs = coerce $ fmap (Vector.fromList . shrink . Concrete) (Vector.toList xs)
+    -- need a fn which takes a single ctor and just shrinks the args
+    -- this is difficult to keep track of: THIS ONE GIVES US IDENTICALLY NAMED CTORS WITH DIFFERENT ARG LISTS
+    shrinkNumArgs :: Constructor AbstractTy -> [Constructor AbstractTy]
+    shrinkNumArgs (Constructor ctorNm args) =
+      let smallerArgs :: [Vector (ValT AbstractTy)]
+          smallerArgs = coerce $ shrink (fmap Concrete args)
+       in fmap (Constructor ctorNm) smallerArgs
 
-    ctorShrink :: Constructor AbstractTy -> [Constructor AbstractTy]
-    ctorShrink (Constructor ctorNm args) = Constructor ctorNm <$> concreteShrink args
+    shrinkCtorsNumArgs :: Vector (Constructor AbstractTy) -> [Vector (Constructor AbstractTy)]
+    shrinkCtorsNumArgs cs =
+      let -- the inner lists exhaust the arg-deletion possibilities for each constructor
+          cs' = Vector.toList $ shrinkNumArgs <$> cs
+          go [] = []
+          go (x : xs) = (:) <$> x <*> xs
+       in Vector.fromList <$> go cs'
 
-    ctorArgShrink :: Constructor AbstractTy -> [Constructor AbstractTy]
-    ctorArgShrink (Constructor ctorNm args) = Constructor ctorNm <$> concreteShrink' args
+-- Helper, should probably exist in Data.Vector but doesn't
+subVectors :: forall (a :: Type). Vector a -> Vector (Vector a)
+subVectors xs = Vector.cons Vector.empty (nonEmptySubVectors xs)
+
+nonEmptySubVectors :: forall (a :: Type). Vector a -> Vector (Vector a)
+nonEmptySubVectors v = case Vector.uncons v of
+  Nothing -> Vector.empty
+  Just (x, xs) ->
+    let f :: Vector a -> Vector (Vector a) -> Vector (Vector a)
+        f ys r = ys `Vector.cons` ((x `Vector.cons` ys) `Vector.cons` r)
+     in Vector.singleton x `Vector.cons` foldr f Vector.empty (nonEmptySubVectors xs)
 
 shrinkDataDecls :: [DataDeclaration AbstractTy] -> [[DataDeclaration AbstractTy]]
 shrinkDataDecls decls = liftShrink shrinkDataDecl decls <|> (shrinkDataDecl <$> decls)
@@ -662,15 +684,12 @@ instance Arbitrary (DataDeclSet 'Poly1PolyThunks) where
     -- I *think* we're very unlikely to get 10 unsuitable decls out of this
     void $ GT.vectorOf 10 genPolymorphic1Decl
     void $ GT.listOf genNonConcreteDecl
-    M.elems <$> gets (view #decls) -- simpler to just pluck them from the monadic context
-
+    decls <- M.elems <$> gets (view #decls) -- simpler to just pluck them from the monadic context
+    pure $ filter noPhantomTyVars decls -- TODO/FIXME: We shouldn't have to filter here, better to catch things earlier
   shrink = coerce . shrinkDataDecls . coerce
 
 prettyDeclSet :: forall (a :: DataDeclFlavor). DataDeclSet a -> String
 prettyDeclSet (DataDeclSet decls) = concatMap (\x -> (prettyStr . unsafeRename . renameDataDecl $ x) <> "\n\n") decls
-  where
-    prettyStr :: forall (b :: Type). (Pretty b) => b -> String
-    prettyStr = T.unpack . renderStrict . layoutPretty defaultLayoutOptions . pretty
 
 {- Misc Repl testing utilities. I'd like to leave these here because I can't exactly have a test suite
    to validate test generators, so inspection may be necessary if something goes wrong.

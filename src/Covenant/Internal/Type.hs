@@ -15,6 +15,8 @@ module Covenant.Internal.Type
     thunkT,
     builtinFlat,
     datatype,
+    -- generic utility for debugging/testing
+    prettyStr,
   )
 where
 
@@ -37,6 +39,7 @@ import Data.Map.Strict (Map)
 import Data.Map.Strict qualified as Map
 import Data.String (IsString)
 import Data.Text (Text)
+import Data.Text qualified as T
 import Data.Vector (Vector)
 import Data.Vector qualified as Vector
 import Data.Vector.NonEmpty (NonEmptyVector)
@@ -61,13 +64,16 @@ import Optics.Core
 import Prettyprinter
   ( Doc,
     Pretty (pretty),
+    defaultLayoutOptions,
     hsep,
     indent,
+    layoutPretty,
     parens,
     vcat,
     viaShow,
     (<+>),
   )
+import Prettyprinter.Render.Text (renderStrict)
 import Test.QuickCheck.Instances.Text ()
 
 -- need the arbitary instance for TyName
@@ -251,6 +257,9 @@ data BuiltinFlatT
 
 -- Helpers
 
+prettyStr :: forall (b :: Type). (Pretty b) => b -> String
+prettyStr = T.unpack . renderStrict . layoutPretty defaultLayoutOptions . pretty
+
 newtype ScopeBoundary = ScopeBoundary Int
   deriving (Show, Eq, Ord, Num, Real, Enum, Integral) via Int
 
@@ -321,7 +330,6 @@ prettyCompTWithContext (CompT count (CompTBody funArgs))
       funTy <- prettyFunTy' funArgs
       pure $ mkForall newVars funTy
 
--- NOTE: Don't change this. It's annoying to get right.
 prettyFunTy' ::
   forall (ann :: Type).
   NonEmptyVector (ValT Renamed) ->
@@ -335,13 +343,6 @@ prettyFunTy' args = case NonEmpty.unsnoc args of
         prettyArg1 <- prettyValTWithContext firstArg
         argsWithoutResult <- Vector.foldM (\acc x -> (\z -> acc <+> "->" <+> z) <$> prettyValTWithContext x) prettyArg1 otherArgs
         pure . parens $ argsWithoutResult <+> "->" <+> resTy'
-  where
-    prettyArg :: ValT Renamed -> PrettyM ann (Doc ann)
-    prettyArg vt = do
-      prettyVT <- prettyValTWithContext vt
-      if isSimpleValT vt
-        then pure prettyVT
-        else pure (parens prettyVT)
 
 bindVars ::
   forall (ann :: Type) (a :: Type).
@@ -370,16 +371,6 @@ mkForall tvars funTyBody =
   if Vector.null tvars
     then funTyBody
     else "forall" <+> hsep (Vector.toList tvars) <> "." <+> funTyBody
-
--- I.e. can we omit parens and get something unambiguous? This might be overly aggressive w/ parens but that's OK
-isSimpleValT :: forall (a :: Type). ValT a -> Bool
-isSimpleValT = \case
-  ThunkT thunk -> isSimpleCompT thunk
-  _ -> True
-  where
-    isSimpleCompT :: CompT a -> Bool
-    isSimpleCompT (CompT count (CompTBody args)) =
-      review intCount count == 0 && NonEmpty.length args == 1
 
 -- | DO NOT USE THIS TO WRITE OTHER INSTANCES
 --   It exists soley to make readable tests easier to write w/o having to export a bunch of internal printing stuff

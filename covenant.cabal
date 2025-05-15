@@ -30,9 +30,9 @@ common lang
     -Woperator-whitespace
     -Wambiguous-fields
     -Wmisplaced-pragmas
+    -Wmissing-export-lists
+    -Wmissing-import-lists
 
-  -- -Wmissing-export-lists
-  -- -Wmissing-import-lists
   default-extensions:
     BangPatterns
     BinaryLiterals
@@ -170,5 +170,11 @@ test-suite asg
     vector,
 
   hs-source-dirs: test/asg
+
+test-suite bb
+  import: test-lang
+  type: exitcode-stdio-1.0
+  main-is: Main.hs
+  hs-source-dirs: test/bb
 
 -- Benchmarks

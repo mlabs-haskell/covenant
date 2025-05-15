@@ -1,8 +1,8 @@
 {-# LANGUAGE ViewPatterns #-}
 
-module Covenant.Data (mkBaseFunctor, isRecursiveChildOf, allComponentTypes, hasRecursive, mkBBF) where
+module Covenant.Data (mkBaseFunctor, isRecursiveChildOf, allComponentTypes, hasRecursive, mkBBF, noPhantomTyVars) where
 
-import Control.Monad.Reader (MonadReader (ask, local), Reader)
+import Control.Monad.Reader (MonadReader (ask, local), Reader, runReader)
 import Covenant.DeBruijn (DeBruijn (S, Z), asInt)
 import Covenant.Index (Count, Index, count0, intCount, intIndex)
 import Covenant.Internal.Type
@@ -18,6 +18,8 @@ import Covenant.Internal.Type
   )
 import Data.Kind (Type)
 import Data.Maybe (fromJust)
+import Data.Set (Set)
+import Data.Set qualified as Set
 import Data.Vector qualified as V
 import Data.Vector.NonEmpty qualified as NEV
 import Optics.Core (folded, preview, review, toListOf, view, (%))
@@ -48,8 +50,40 @@ mapValT f = \case
   absr@(Abstraction {}) -> f absr
   bif@BuiltinFlat {} -> f bif
   -- For CompT and Datatype we apply the function to the components and then to the top level
-  ThunkT (CompT cnt (CompTBody compTargs)) -> f (ThunkT $ CompT cnt (CompTBody (f <$> compTargs)))
+  ThunkT (CompT cnt (CompTBody compTargs)) -> f (ThunkT $ CompT cnt (CompTBody (mapValT f <$> compTargs)))
   Datatype tn args -> f $ Datatype tn (mapValT f <$> args)
+
+-- think I'll need this sooner or later
+_foldValT :: forall (a :: Type) (b :: Type). (b -> ValT a -> b) -> b -> ValT a -> b
+_foldValT f e = \case
+  absr@(Abstraction {}) -> f e absr
+  bif@(BuiltinFlat {}) -> f e bif
+  thk@(ThunkT (CompT _ (CompTBody compTArgs))) ->
+    let e' = NEV.foldl' f e compTArgs
+     in f e' thk
+  dt@(Datatype _ args) ->
+    let e' = V.foldl' f e args
+     in f e' dt
+
+noPhantomTyVars :: DataDeclaration AbstractTy -> Bool
+noPhantomTyVars decl@(DataDeclaration _ numVars _) =
+  let allChildren = allComponentTypes decl
+      allResolved = Set.unions $ runReader (traverse allResolvedTyVars' allChildren) 0
+      indices :: [Index "tyvar"]
+      indices = fromJust . preview intIndex <$> [0 .. (review intCount numVars - 1)]
+      declaredTyVars = BoundAt Z <$> indices
+   in all (`Set.member` allResolved) declaredTyVars
+
+allResolvedTyVars' :: ValT AbstractTy -> Reader Int (Set AbstractTy)
+allResolvedTyVars' = \case
+  Abstraction (BoundAt db argpos) -> do
+    here <- ask
+    let db' = fromJust . preview asInt $ review asInt db - here
+    pure . Set.singleton $ BoundAt db' argpos
+  ThunkT (CompT _ (CompTBody nev)) -> local (+ 1) $ do
+    Set.unions <$> traverse allResolvedTyVars' nev
+  BuiltinFlat {} -> pure Set.empty
+  Datatype _ args -> Set.unions <$> traverse allResolvedTyVars' args
 
 -- This tells us whether the ValT *is* a recursive child of the parent type
 isRecursiveChildOf :: TyName -> ValT AbstractTy -> Reader ScopeBoundary Bool
@@ -175,7 +209,7 @@ mkBBF (DataDeclaration _ numVars ctors)
     outIx :: Index "tyvar"
     outIx = fromJust . preview intIndex $ review intCount numVars
 
-{- Note (largely to self) on DeBruijn indices:
+{- Note (Sean, 14/05/25): Re  DeBruijn indices:
 
      - None of the existing variable DeBruijn or position indices change at all b/c the binding context of the
        `forall` we're introducing replaces the binding context of the datatype declaration and only extends it.
@@ -184,4 +218,7 @@ mkBBF (DataDeclaration _ numVars ctors)
        any fancy scope tracking: It will always be Z for the top-level result and `S Z` wherever it occurs in a
        transformed constructor. It won't ever occur any "deeper" than that (because we don't nest these, and a constructor gets exactly one
        `out`)
+
+     - Actually this is slightly false, we need to "bump" all of the indices inside constructor arms by one (because
+       they now occur within a Thunk), but after that bump everything is stable as indicated above.
 -}
