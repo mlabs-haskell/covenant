@@ -103,7 +103,7 @@ import Covenant.Internal.Type
     CompTBody (CompTBody),
     Constructor (Constructor),
     ConstructorName,
-    DataDeclaration (DataDeclaration,OpaqueData),
+    DataDeclaration (DataDeclaration, OpaqueData),
     DataEncoding (PlutusData, SOP),
     PlutusDataConstructor (PD_B, PD_Constructor, PD_I, PD_List),
     PlutusDataStrategy (BuiltinStrategy, ConstrData, EnumData, NewtypeData, ProductListData),
