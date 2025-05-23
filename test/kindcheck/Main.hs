@@ -9,7 +9,6 @@ import Covenant.Type
     ValT (Abstraction, BuiltinFlat, Datatype),
     cycleCheck,
   )
-import Data.List (foldl')
 import Data.Map qualified as M
 import Data.Vector qualified as V
 import Test.Tasty (defaultMain, testGroup)
@@ -30,8 +29,8 @@ runCycleCheck decls = case cycleCheck declMap of
   Just err -> assertFailure $ show err
   where
     declMap =
-      foldl'
-        ( \acc dd -> case dd of
+      foldr
+        ( \dd acc -> case dd of
             OpaqueData {} -> acc
             DataDeclaration tn _ _ _ -> M.insert tn dd acc
         )
