@@ -43,7 +43,8 @@ import Covenant.Internal.Type
     CompTBody (CompTBody),
     Constructor (Constructor),
     ConstructorName (ConstructorName),
-    DataDeclaration (DataDeclaration),
+    DataDeclaration (DataDeclaration, OpaqueData),
+    DataEncoding (SOP),
     ScopeBoundary,
     TyName (TyName),
     ValT (Abstraction, BuiltinFlat, Datatype, ThunkT),
@@ -268,10 +269,9 @@ chooseInt bounds = GT.liftGen $ QC.chooseInt bounds
 
 -- Stupid helper, saves us from forgetting to update part of the state
 returnDecl :: DataDeclaration AbstractTy -> DataGenM (DataDeclaration AbstractTy)
-returnDecl decl = do
-  let tyNm = view #datatypeName decl
+returnDecl od@(OpaqueData tn _) = modify (over #decls (M.insert tn od)) >> pure od
+returnDecl decl@(DataDeclaration tyNm arity _ _) = do
   modify $ over #decls (M.insert tyNm decl)
-  let arity = view #datatypeBinders decl
   logArity tyNm arity
   pure decl
 
@@ -341,7 +341,7 @@ genConcreteDataDecl =
     tyNm <- freshTyName
     numArgs <- chooseInt (0, 5)
     ctors <- coerce <$> Vector.replicateM numArgs genConcreteConstructor
-    let decl = DataDeclaration tyNm count0 ctors
+    let decl = DataDeclaration tyNm count0 ctors SOP
     returnDecl decl
 
 {- Concrete datatypes which may contain other concrete datatypes as constructor args. (Still no TyVars)
@@ -375,19 +375,19 @@ genNestedConcrete =
     nullary :: TyName -> DataGenM (DataDeclaration AbstractTy)
     nullary tyNm = do
       ctorNm <- freshConstructorName
-      pure $ DataDeclaration tyNm count0 (Vector.singleton (Constructor ctorNm Vector.empty))
+      pure $ DataDeclaration tyNm count0 (Vector.singleton (Constructor ctorNm Vector.empty)) SOP
 
     nonNestedConcrete :: TyName -> DataGenM (DataDeclaration AbstractTy)
     nonNestedConcrete tyNm = do
       numCtors <- chooseInt (0, 5)
       ctors <- fmap coerce <$> Vector.replicateM numCtors genConcreteConstructor
-      pure $ DataDeclaration tyNm count0 ctors
+      pure $ DataDeclaration tyNm count0 ctors SOP
 
     nested :: TyName -> DataGenM (DataDeclaration AbstractTy)
     nested tyNm = do
       numCtors <- chooseInt (0, 5)
       ctors <- Vector.replicateM numCtors nestedCtor
-      pure $ DataDeclaration tyNm count0 (coerce <$> ctors)
+      pure $ DataDeclaration tyNm count0 (coerce <$> ctors) SOP
 
 {- It's useful to have access to these outside of the above function because sometimes we want to mix and match
    "simpler" constructors like this with the more complex sorts we generate below.
@@ -428,7 +428,7 @@ genArbitraryRecursive =
     baseCtor <- coerce <$> genConcreteConstructor -- any concrete ctor - or any ctor that doesn't contain the parent type - will suffice as a base case
     numRecCtors <- chooseInt (1, 5)
     recCtor <- GT.vectorOf numRecCtors $ genRecCtor tyNm
-    returnDecl $ DataDeclaration tyNm count0 (Vector.fromList (baseCtor : recCtor))
+    returnDecl $ DataDeclaration tyNm count0 (Vector.fromList (baseCtor : recCtor)) SOP
   where
     genRecCtor :: TyName -> DataGenM (Constructor AbstractTy)
     genRecCtor tyNm = do
@@ -465,7 +465,7 @@ genPolymorphic1Decl =
           logArity tyNm count1
           numCtors <- chooseInt (1, 5)
           polyCtors <- concat <$> GT.vectorOf numCtors (genPolyCtor tyNm)
-          let result = DataDeclaration tyNm count1 (Vector.fromList polyCtors)
+          let result = DataDeclaration tyNm count1 (Vector.fromList polyCtors) SOP
           returnDecl result
       )
       noPhantomTyVars
@@ -572,7 +572,7 @@ genNonConcreteDecl = flip GT.suchThat noPhantomTyVars . withBoundVars count1 $ d
   tyNm <- freshTyName
   numArgs <- chooseInt (1, 5)
   ctors <- Vector.replicateM numArgs genNonConcreteCtor
-  let decl = DataDeclaration tyNm count1 ctors
+  let decl = DataDeclaration tyNm count1 ctors SOP
   returnDecl decl
   where
     genNonConcreteCtor :: DataGenM (Constructor AbstractTy)
@@ -609,13 +609,14 @@ newtype DataDeclSet (flavor :: DataDeclFlavor) = DataDeclSet [DataDeclaration Ab
               simplest solution.
 -}
 shrinkDataDecl :: DataDeclaration AbstractTy -> [DataDeclaration AbstractTy]
-shrinkDataDecl (DataDeclaration nm cnt ctors)
+shrinkDataDecl OpaqueData {} = []
+shrinkDataDecl (DataDeclaration nm cnt ctors strat)
   | Vector.null ctors = []
   | otherwise = filter noPhantomTyVars $ smallerNumCtors <|> smallerCtorArgs
   where
     smallerNumCtors :: [DataDeclaration AbstractTy]
-    smallerNumCtors = Vector.toList $ DataDeclaration nm cnt <$> Vector.init (subVectors ctors)
-    smallerCtorArgs = DataDeclaration nm cnt <$> shrinkCtorsNumArgs ctors
+    smallerNumCtors = Vector.toList $ (\cs -> DataDeclaration nm cnt cs strat) <$> Vector.init (subVectors ctors)
+    smallerCtorArgs = (\cs -> DataDeclaration nm cnt cs strat) <$> shrinkCtorsNumArgs ctors
 
     -- need a fn which takes a single ctor and just shrinks the args
     -- this is difficult to keep track of: THIS ONE GIVES US IDENTICALLY NAMED CTORS WITH DIFFERENT ARG LISTS
