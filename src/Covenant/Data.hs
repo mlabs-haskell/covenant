@@ -65,11 +65,11 @@ foldValT f e = \case
     let e' = V.foldl' f e args
      in f e' dt
 
-everythingOf :: forall (a :: Type). Ord a => ValT a -> Set (ValT a)
+everythingOf :: forall (a :: Type). (Ord a) => ValT a -> Set (ValT a)
 everythingOf = foldValT (flip Set.insert) Set.empty
 
 noPhantomTyVars :: DataDeclaration AbstractTy -> Bool
-noPhantomTyVars OpaqueData{} = True 
+noPhantomTyVars OpaqueData {} = True
 noPhantomTyVars decl@(DataDeclaration _ numVars _ _) =
   let allChildren = allComponentTypes decl
       allResolved = Set.unions $ runReader (traverse allResolvedTyVars' allChildren) 0
@@ -127,7 +127,7 @@ hasRecursive tn = \case
 
 -- | Constructs a base functor from a suitable data declaration, returning 'Nothing' if the input is not a recursive type
 mkBaseFunctor :: DataDeclaration AbstractTy -> Reader ScopeBoundary (Maybe (DataDeclaration AbstractTy))
-mkBaseFunctor OpaqueData{} = pure Nothing
+mkBaseFunctor OpaqueData {} = pure Nothing
 mkBaseFunctor (DataDeclaration tn numVars ctors strat) = do
   anyRecComponents <- or <$> traverse (hasRecursive tn) allCtorArgs
   if null ctors || not anyRecComponents
@@ -187,7 +187,7 @@ mkBaseFunctor (DataDeclaration tn numVars ctors strat) = do
 
 -- Only returns `Nothing` if there are no Constructors
 mkBBF :: DataDeclaration AbstractTy -> Maybe (ValT AbstractTy)
-mkBBF OpaqueData{} = Nothing
+mkBBF OpaqueData {} = Nothing
 mkBBF (DataDeclaration _ numVars ctors _)
   | V.null ctors = Nothing
   | otherwise = ThunkT . CompT bbfCount . CompTBody . flip NEV.snoc topLevelOut <$> (NEV.fromVector =<< traverse mkEliminator ctors)

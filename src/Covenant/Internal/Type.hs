@@ -1,4 +1,5 @@
 {-# OPTIONS_GHC -Wno-unrecognised-pragmas #-}
+
 {-# HLINT ignore "Use camelCase" #-}
 module Covenant.Internal.Type
   ( AbstractTy (..),
@@ -12,10 +13,10 @@ module Covenant.Internal.Type
     BuiltinFlatT (..),
     TyName (..),
     ScopeBoundary (..), -- used in the generators
-    DataEncoding(..),
-    PlutusDataConstructor(..),
-    PlutusDataStrategy(..),
-    InternalStrategy(..),
+    DataEncoding (..),
+    PlutusDataConstructor (..),
+    PlutusDataStrategy (..),
+    InternalStrategy (..),
     runConstructorName,
     abstraction,
     thunkT,
@@ -23,7 +24,7 @@ module Covenant.Internal.Type
     datatype,
     -- generic utility for debugging/testing
     prettyStr,
-    checkStrategy 
+    checkStrategy,
   )
 where
 
@@ -44,6 +45,7 @@ import Data.Functor.Classes (Eq1 (liftEq))
 import Data.Kind (Type)
 import Data.Map.Strict (Map)
 import Data.Map.Strict qualified as Map
+import Data.Set (Set)
 import Data.String (IsString)
 import Data.Text (Text)
 import Data.Text qualified as T
@@ -55,9 +57,11 @@ import Data.Word (Word64)
 import GHC.Exts (fromListN)
 import Optics.At ()
 import Optics.Core
-  ( A_Lens,
+  ( A_Fold,
+    A_Lens,
     LabelOptic (labelOptic),
     Prism',
+    folding,
     ix,
     lens,
     over,
@@ -66,7 +70,7 @@ import Optics.Core
     review,
     set,
     view,
-    (%), A_Fold, folding,
+    (%),
   )
 import Prettyprinter
   ( Doc,
@@ -82,7 +86,6 @@ import Prettyprinter
   )
 import Prettyprinter.Render.Text (renderStrict)
 import Test.QuickCheck.Instances.Text ()
-import Data.Set (Set)
 
 -- need the arbitary instance for TyName
 -- largely for TyName
@@ -440,7 +443,7 @@ lookupAbstraction offset argIndex = do
     Just res' -> pure res'
 
 prettyDataDeclWithContext :: forall (ann :: Type). DataDeclaration Renamed -> PrettyM ann (Doc ann)
-prettyDataDeclWithContext (OpaqueData (TyName tn) _) = pure . pretty $  tn
+prettyDataDeclWithContext (OpaqueData (TyName tn) _) = pure . pretty $ tn
 prettyDataDeclWithContext (DataDeclaration (TyName tn) numVars ctors _) = bindVars numVars $ \boundVars -> do
   let tn' = pretty tn
   ctors' <- traverse prettyCtorWithContext ctors
@@ -494,11 +497,11 @@ data DataEncoding
 
 -- @since 1.1.1
 data PlutusDataConstructor
- = PD_I
- | PD_B
- | PD_Constructor
- | PD_List
- deriving stock (Show, Eq, Ord)
+  = PD_I
+  | PD_B
+  | PD_Constructor
+  | PD_List
+  deriving stock (Show, Eq, Ord)
 
 -- @since 1.1.1
 -- NOTE: Wrapped data-primitive (Integer + ByteString) require a special case for their encoders, which was originally
@@ -522,14 +525,14 @@ data DataDeclaration a
   deriving stock (Show, Eq)
 
 checkStrategy :: forall (a :: Type). DataDeclaration a -> Bool
-checkStrategy OpaqueData{} = True
-checkStrategy (DataDeclaration _ _  _ SOP) = True
+checkStrategy OpaqueData {} = True
+checkStrategy (DataDeclaration _ _ _ SOP) = True
 checkStrategy (DataDeclaration tn _ ctors (PlutusData strat)) = case strat of
   ConstrData -> True
   EnumData -> all (\(Constructor _ args) -> Vector.null args) ctors
   ProductListData -> Vector.length ctors == 1
   BuiltinStrategy internalStrat -> case internalStrat of
-    -- TODO: Maybe we want something better than a match on the ty name? 
+    -- TODO: Maybe we want something better than a match on the ty name?
     InternalListStrat -> tn == TyName "List"
     InternalPairStrat -> tn == TyName "Pair"
     InternalDataStrat -> tn == TyName "Data"
@@ -546,7 +549,7 @@ instance (k ~ A_Lens, a ~ TyName, b ~ TyName) => LabelOptic "datatypeName" k (Da
   {-# INLINEABLE labelOptic #-}
   labelOptic =
     lens
-      (\case OpaqueData tn _ -> tn ; DataDeclaration tn _ _ _ -> tn)
+      (\case OpaqueData tn _ -> tn; DataDeclaration tn _ _ _ -> tn)
       (\decl tn -> case decl of OpaqueData _ x -> OpaqueData tn x; DataDeclaration _ x y z -> DataDeclaration tn x y z)
 
 instance (k ~ A_Fold, a ~ Count "tyvar", b ~ Count "tyvar") => LabelOptic "datatypeBinders" k (DataDeclaration c) (DataDeclaration c) a b where
@@ -561,4 +564,4 @@ instance (k ~ A_Fold, a ~ Vector (Constructor c), b ~ Vector (Constructor c)) =>
   labelOptic =
     folding $ \case
       DataDeclaration _ _ ctors _ -> Just ctors
-      _ -> Nothing 
+      _ -> Nothing

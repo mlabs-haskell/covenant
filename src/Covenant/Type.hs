@@ -49,15 +49,14 @@ module Covenant.Type
     -- * Type application
     TypeAppError (..),
     checkApp,
-
     -- Data declarations & friends
-    DataDeclaration(DataDeclaration),
-    Constructor(Constructor),
+    DataDeclaration (DataDeclaration),
+    Constructor (Constructor),
     TyName,
     ConstructorName,
-    DataEncoding(SOP,PlutusData),
-    PlutusDataConstructor(PD_I,PD_B,PD_Constructor,PD_List),
-    PlutusDataStrategy(EnumData,ProductListData,ConstrData,BuiltinStrategy,NewtypeData),
+    DataEncoding (SOP, PlutusData),
+    PlutusDataConstructor (PD_I, PD_B, PD_Constructor, PD_List),
+    PlutusDataStrategy (EnumData, ProductListData, ConstrData, BuiltinStrategy, NewtypeData),
 
     -- * Datatype sanity checking
     cycleCheck,
@@ -75,6 +74,8 @@ import Covenant.Index
     count3,
     intCount,
   )
+-- re-export for tests
+import Covenant.Internal.KindCheck (cycleCheck)
 import Covenant.Internal.Rename
   ( RenameError
       ( InvalidAbstractionReference,
@@ -100,15 +101,15 @@ import Covenant.Internal.Type
       ),
     CompT (CompT),
     CompTBody (CompTBody),
-    Renamed (Rigid, Unifiable, Wildcard),
-    ValT (Abstraction, BuiltinFlat, ThunkT, Datatype),
-    DataDeclaration(DataDeclaration),
-    Constructor(Constructor),
+    Constructor (Constructor),
     ConstructorName,
+    DataDeclaration (DataDeclaration),
+    DataEncoding (PlutusData, SOP),
+    PlutusDataConstructor (PD_B, PD_Constructor, PD_I, PD_List),
+    PlutusDataStrategy (BuiltinStrategy, ConstrData, EnumData, NewtypeData, ProductListData),
+    Renamed (Rigid, Unifiable, Wildcard),
     TyName,
-    DataEncoding(SOP,PlutusData),
-    PlutusDataConstructor(PD_I,PD_B,PD_Constructor,PD_List),
-    PlutusDataStrategy(EnumData,ProductListData,ConstrData,BuiltinStrategy,NewtypeData)
+    ValT (Abstraction, BuiltinFlat, Datatype, ThunkT),
   )
 import Covenant.Internal.Unification
   ( TypeAppError
@@ -127,8 +128,6 @@ import Data.Vector qualified as Vector
 import Data.Vector.NonEmpty (NonEmptyVector)
 import Data.Vector.NonEmpty qualified as NonEmpty
 import Optics.Core (preview)
---re-export for tests
-import Covenant.Internal.KindCheck (cycleCheck) 
 
 -- | The body of a computation type that doesn't take any arguments and produces
 -- the a result of the given value type. Use this just as you would a

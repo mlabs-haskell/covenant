@@ -44,11 +44,12 @@ import Covenant.Internal.Type
     Constructor (Constructor),
     ConstructorName (ConstructorName),
     DataDeclaration (DataDeclaration, OpaqueData),
+    DataEncoding (SOP),
     ScopeBoundary,
     TyName (TyName),
     ValT (Abstraction, BuiltinFlat, Datatype, ThunkT),
     prettyStr,
-    runConstructorName, DataEncoding (SOP),
+    runConstructorName,
   )
 import Covenant.Type
   ( AbstractTy (BoundAt),
@@ -571,7 +572,7 @@ genNonConcreteDecl = flip GT.suchThat noPhantomTyVars . withBoundVars count1 $ d
   tyNm <- freshTyName
   numArgs <- chooseInt (1, 5)
   ctors <- Vector.replicateM numArgs genNonConcreteCtor
-  let decl = DataDeclaration tyNm count1 ctors SOP 
+  let decl = DataDeclaration tyNm count1 ctors SOP
   returnDecl decl
   where
     genNonConcreteCtor :: DataGenM (Constructor AbstractTy)
@@ -608,7 +609,7 @@ newtype DataDeclSet (flavor :: DataDeclFlavor) = DataDeclSet [DataDeclaration Ab
               simplest solution.
 -}
 shrinkDataDecl :: DataDeclaration AbstractTy -> [DataDeclaration AbstractTy]
-shrinkDataDecl OpaqueData{} = []
+shrinkDataDecl OpaqueData {} = []
 shrinkDataDecl (DataDeclaration nm cnt ctors strat)
   | Vector.null ctors = []
   | otherwise = filter noPhantomTyVars $ smallerNumCtors <|> smallerCtorArgs
