@@ -34,7 +34,7 @@ import Covenant.Internal.Type
     CompT (CompT),
     CompTBody (CompTBody),
     Constructor (Constructor),
-    DataDeclaration (DataDeclaration),
+    DataDeclaration (DataDeclaration, OpaqueData),
     Renamed (Rigid, Unifiable, Wildcard),
     ValT (Abstraction, BuiltinFlat, Datatype, ThunkT),
   )
@@ -213,11 +213,12 @@ renameValT = \case
 
 -- @since 1.1.0
 renameDataDecl :: DataDeclaration AbstractTy -> RenameM (DataDeclaration Renamed)
-renameDataDecl (DataDeclaration tn cnt ctors) = RenameM $ do
+renameDataDecl (OpaqueData tn manual) = pure $ OpaqueData tn manual
+renameDataDecl (DataDeclaration tn cnt ctors strat) = RenameM $ do
   modify (stepUpScope cnt)
   renamedCtors <- Vector.mapM (coerce . renameCtor) ctors
   modify dropDownScope
-  pure $ DataDeclaration tn cnt renamedCtors
+  pure $ DataDeclaration tn cnt renamedCtors strat
   where
     renameCtor :: Constructor AbstractTy -> RenameM (Constructor Renamed)
     renameCtor (Constructor cn args) = Constructor cn <$> traverse renameValT args

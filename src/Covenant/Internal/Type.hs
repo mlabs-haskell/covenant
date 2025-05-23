@@ -1,3 +1,5 @@
+{-# OPTIONS_GHC -Wno-unrecognised-pragmas #-}
+{-# HLINT ignore "Use camelCase" #-}
 module Covenant.Internal.Type
   ( AbstractTy (..),
     Renamed (..),
@@ -10,6 +12,10 @@ module Covenant.Internal.Type
     BuiltinFlatT (..),
     TyName (..),
     ScopeBoundary (..), -- used in the generators
+    DataEncoding(..),
+    PlutusDataConstructor(..),
+    PlutusDataStrategy(..),
+    InternalStrategy(..),
     runConstructorName,
     abstraction,
     thunkT,
@@ -17,6 +23,7 @@ module Covenant.Internal.Type
     datatype,
     -- generic utility for debugging/testing
     prettyStr,
+    checkStrategy 
   )
 where
 
@@ -59,7 +66,7 @@ import Optics.Core
     review,
     set,
     view,
-    (%),
+    (%), A_Fold, folding,
   )
 import Prettyprinter
   ( Doc,
@@ -75,6 +82,7 @@ import Prettyprinter
   )
 import Prettyprinter.Render.Text (renderStrict)
 import Test.QuickCheck.Instances.Text ()
+import Data.Set (Set)
 
 -- need the arbitary instance for TyName
 -- largely for TyName
@@ -432,7 +440,8 @@ lookupAbstraction offset argIndex = do
     Just res' -> pure res'
 
 prettyDataDeclWithContext :: forall (ann :: Type). DataDeclaration Renamed -> PrettyM ann (Doc ann)
-prettyDataDeclWithContext (DataDeclaration (TyName tn) numVars ctors) = bindVars numVars $ \boundVars -> do
+prettyDataDeclWithContext (OpaqueData (TyName tn) _) = pure . pretty $  tn
+prettyDataDeclWithContext (DataDeclaration (TyName tn) numVars ctors _) = bindVars numVars $ \boundVars -> do
   let tn' = pretty tn
   ctors' <- traverse prettyCtorWithContext ctors
   let prettyCtors = indent 2 . vcat . prefix "| " . Vector.toList $ ctors'
@@ -476,60 +485,80 @@ instance (k ~ A_Lens, a ~ Vector (ValT c), b ~ Vector (ValT c)) => LabelOptic "c
   {-# INLINEABLE labelOptic #-}
   labelOptic = lens (\(Constructor _ args) -> args) (\(Constructor n _) args -> Constructor n args)
 
-data DataEncoding a
+-- @since 1.1.1
+data DataEncoding
   = SOP
-  | PlutusData (PlutusDataStrategy a)
+  | PlutusData PlutusDataStrategy
+  -- TODO: Internal/Builtin Strategy at top level
   deriving stock (Show, Eq, Ord)
 
-data PlutusDataStrategy a
-  = ManualData a
-  | WrapperData
-  | EnumData
+-- @since 1.1.1
+data PlutusDataConstructor
+ = PD_I
+ | PD_B
+ | PD_Constructor
+ | PD_List
+ deriving stock (Show, Eq, Ord)
+
+-- @since 1.1.1
+-- NOTE: Wrapped data-primitive (Integer + ByteString) require a special case for their encoders, which was originally
+--       part of a "WrapperData" strategy here which we generalized to the NewtypeData strategy.
+data PlutusDataStrategy
+  = EnumData
   | ProductListData
   | ConstrData
+  | BuiltinStrategy InternalStrategy
+  | NewtypeData
   deriving stock (Show, Eq, Ord)
 
+-- TxID encoding changes from v2 to v3 (so make sure to use the v3) / MLResult has a weird broken instance
+data InternalStrategy = InternalListStrat | InternalPairStrat | InternalDataStrat
+  deriving stock (Show, Eq, Ord)
+
+-- @since 1.1.1
 data DataDeclaration a
-  = DataDeclaration TyName (Count "tyvar") (Vector (Constructor a)) -- Allows for representations of "empty" types in case we want to represent Void like that
+  = DataDeclaration TyName (Count "tyvar") (Vector (Constructor a)) DataEncoding -- Allows for representations of "empty" types in case we want to represent Void like that
+  | OpaqueData TyName (Set PlutusDataConstructor)
   deriving stock (Show, Eq)
 
-checkStrategy :: forall term a. DataDeclaration a -> PlutusDataStrategy term -> Bool
-checkStrategy (DataDeclaration _ _ ctors) = \case
-  ManualData _ -> True
+checkStrategy :: forall (a :: Type). DataDeclaration a -> Bool
+checkStrategy OpaqueData{} = True
+checkStrategy (DataDeclaration _ _  _ SOP) = True
+checkStrategy (DataDeclaration tn _ ctors (PlutusData strat)) = case strat of
   ConstrData -> True
-  WrapperData -> case Vector.toList ctors of
-    [Constructor _ ctorArgs] -> case Vector.toList ctorArgs of
-      [bsOrInt] -> case bsOrInt of
-        BuiltinFlat IntegerT -> True
-        BuiltinFlat ByteStringT -> True
-        _ -> False
-      _ -> False
-    _ -> False
   EnumData -> all (\(Constructor _ args) -> Vector.null args) ctors
   ProductListData -> Vector.length ctors == 1
+  BuiltinStrategy internalStrat -> case internalStrat of
+    -- TODO: Maybe we want something better than a match on the ty name? 
+    InternalListStrat -> tn == TyName "List"
+    InternalPairStrat -> tn == TyName "Pair"
+    InternalDataStrat -> tn == TyName "Data"
+  NewtypeData
+    | Vector.length ctors == 1 -> case Vector.toList <$> preview #constructorArgs (ctors Vector.! 0) of
+        Just [_] -> True -- pushing the cycle check to the "kind checker"
+        _ -> False
+    | otherwise -> False
 
 instance Pretty (DataDeclaration Renamed) where
   pretty = runPrettyM . prettyDataDeclWithContext
-
--- TODO: field label classes
 
 instance (k ~ A_Lens, a ~ TyName, b ~ TyName) => LabelOptic "datatypeName" k (DataDeclaration c) (DataDeclaration c) a b where
   {-# INLINEABLE labelOptic #-}
   labelOptic =
     lens
-      (\(DataDeclaration tn _ _) -> tn)
-      (\(DataDeclaration _ cnt ctors) tn -> DataDeclaration tn cnt ctors)
+      (\case OpaqueData tn _ -> tn ; DataDeclaration tn _ _ _ -> tn)
+      (\decl tn -> case decl of OpaqueData _ x -> OpaqueData tn x; DataDeclaration _ x y z -> DataDeclaration tn x y z)
 
-instance (k ~ A_Lens, a ~ Count "tyvar", b ~ Count "tyvar") => LabelOptic "datatypeBinders" k (DataDeclaration c) (DataDeclaration c) a b where
+instance (k ~ A_Fold, a ~ Count "tyvar", b ~ Count "tyvar") => LabelOptic "datatypeBinders" k (DataDeclaration c) (DataDeclaration c) a b where
   {-# INLINEABLE labelOptic #-}
   labelOptic =
-    lens
-      (\(DataDeclaration _ cnt _) -> cnt)
-      (\(DataDeclaration tn _ ctors) cnt -> DataDeclaration tn cnt ctors)
+    folding $ \case
+      DataDeclaration _ cnt _ _ -> Just cnt
+      _ -> Nothing
 
-instance (k ~ A_Lens, a ~ Vector (Constructor c), b ~ Vector (Constructor c)) => LabelOptic "datatypeConstructors" k (DataDeclaration c) (DataDeclaration c) a b where
+instance (k ~ A_Fold, a ~ Vector (Constructor c), b ~ Vector (Constructor c)) => LabelOptic "datatypeConstructors" k (DataDeclaration c) (DataDeclaration c) a b where
   {-# INLINEABLE labelOptic #-}
   labelOptic =
-    lens
-      (\(DataDeclaration _ _ ctors) -> ctors)
-      (\(DataDeclaration tn cnt _) ctors -> DataDeclaration tn cnt ctors)
+    folding $ \case
+      DataDeclaration _ _ ctors _ -> Just ctors
+      _ -> Nothing 

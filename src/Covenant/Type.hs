@@ -49,6 +49,18 @@ module Covenant.Type
     -- * Type application
     TypeAppError (..),
     checkApp,
+
+    -- Data declarations & friends
+    DataDeclaration(DataDeclaration),
+    Constructor(Constructor),
+    TyName,
+    ConstructorName,
+    DataEncoding(SOP,PlutusData),
+    PlutusDataConstructor(PD_I,PD_B,PD_Constructor,PD_List),
+    PlutusDataStrategy(EnumData,ProductListData,ConstrData,BuiltinStrategy,NewtypeData),
+
+    -- * Datatype sanity checking
+    cycleCheck,
   )
 where
 
@@ -89,7 +101,14 @@ import Covenant.Internal.Type
     CompT (CompT),
     CompTBody (CompTBody),
     Renamed (Rigid, Unifiable, Wildcard),
-    ValT (Abstraction, BuiltinFlat, ThunkT),
+    ValT (Abstraction, BuiltinFlat, ThunkT, Datatype),
+    DataDeclaration(DataDeclaration),
+    Constructor(Constructor),
+    ConstructorName,
+    TyName,
+    DataEncoding(SOP,PlutusData),
+    PlutusDataConstructor(PD_I,PD_B,PD_Constructor,PD_List),
+    PlutusDataStrategy(EnumData,ProductListData,ConstrData,BuiltinStrategy,NewtypeData)
   )
 import Covenant.Internal.Unification
   ( TypeAppError
@@ -108,6 +127,8 @@ import Data.Vector qualified as Vector
 import Data.Vector.NonEmpty (NonEmptyVector)
 import Data.Vector.NonEmpty qualified as NonEmpty
 import Optics.Core (preview)
+--re-export for tests
+import Covenant.Internal.KindCheck (cycleCheck) 
 
 -- | The body of a computation type that doesn't take any arguments and produces
 -- the a result of the given value type. Use this just as you would a

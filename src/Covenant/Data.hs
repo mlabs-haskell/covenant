@@ -1,6 +1,6 @@
 {-# LANGUAGE ViewPatterns #-}
 
-module Covenant.Data (mkBaseFunctor, isRecursiveChildOf, allComponentTypes, hasRecursive, mkBBF, noPhantomTyVars) where
+module Covenant.Data (mkBaseFunctor, isRecursiveChildOf, allComponentTypes, hasRecursive, mkBBF, noPhantomTyVars, everythingOf) where
 
 import Control.Monad.Reader (MonadReader (ask, local), Reader, runReader)
 import Covenant.DeBruijn (DeBruijn (S, Z), asInt)
@@ -11,7 +11,7 @@ import Covenant.Internal.Type
     CompTBody (CompTBody),
     Constructor (Constructor),
     ConstructorName (ConstructorName),
-    DataDeclaration (DataDeclaration),
+    DataDeclaration (DataDeclaration, OpaqueData),
     ScopeBoundary (ScopeBoundary),
     TyName (TyName),
     ValT (Abstraction, BuiltinFlat, Datatype, ThunkT),
@@ -53,9 +53,9 @@ mapValT f = \case
   ThunkT (CompT cnt (CompTBody compTargs)) -> f (ThunkT $ CompT cnt (CompTBody (mapValT f <$> compTargs)))
   Datatype tn args -> f $ Datatype tn (mapValT f <$> args)
 
--- think I'll need this sooner or later
-_foldValT :: forall (a :: Type) (b :: Type). (b -> ValT a -> b) -> b -> ValT a -> b
-_foldValT f e = \case
+-- Did in fact need it
+foldValT :: forall (a :: Type) (b :: Type). (b -> ValT a -> b) -> b -> ValT a -> b
+foldValT f e = \case
   absr@(Abstraction {}) -> f e absr
   bif@(BuiltinFlat {}) -> f e bif
   thk@(ThunkT (CompT _ (CompTBody compTArgs))) ->
@@ -65,8 +65,12 @@ _foldValT f e = \case
     let e' = V.foldl' f e args
      in f e' dt
 
+everythingOf :: forall (a :: Type). Ord a => ValT a -> Set (ValT a)
+everythingOf = foldValT (flip Set.insert) Set.empty
+
 noPhantomTyVars :: DataDeclaration AbstractTy -> Bool
-noPhantomTyVars decl@(DataDeclaration _ numVars _) =
+noPhantomTyVars OpaqueData{} = True 
+noPhantomTyVars decl@(DataDeclaration _ numVars _ _) =
   let allChildren = allComponentTypes decl
       allResolved = Set.unions $ runReader (traverse allResolvedTyVars' allChildren) 0
       indices :: [Index "tyvar"]
@@ -123,13 +127,14 @@ hasRecursive tn = \case
 
 -- | Constructs a base functor from a suitable data declaration, returning 'Nothing' if the input is not a recursive type
 mkBaseFunctor :: DataDeclaration AbstractTy -> Reader ScopeBoundary (Maybe (DataDeclaration AbstractTy))
-mkBaseFunctor (DataDeclaration tn numVars ctors) = do
+mkBaseFunctor OpaqueData{} = pure Nothing
+mkBaseFunctor (DataDeclaration tn numVars ctors strat) = do
   anyRecComponents <- or <$> traverse (hasRecursive tn) allCtorArgs
   if null ctors || not anyRecComponents
     then pure Nothing
     else do
       baseCtors <- traverse mkBaseCtor ctors
-      pure . Just $ DataDeclaration baseFName baseFNumVars baseCtors
+      pure . Just $ DataDeclaration baseFName baseFNumVars baseCtors strat
   where
     -- TODO: I think we were going to make this "illegal" so users can't use it directly but I forget the legality rules
     baseFName = case tn of
@@ -182,7 +187,8 @@ mkBaseFunctor (DataDeclaration tn numVars ctors) = do
 
 -- Only returns `Nothing` if there are no Constructors
 mkBBF :: DataDeclaration AbstractTy -> Maybe (ValT AbstractTy)
-mkBBF (DataDeclaration _ numVars ctors)
+mkBBF OpaqueData{} = Nothing
+mkBBF (DataDeclaration _ numVars ctors _)
   | V.null ctors = Nothing
   | otherwise = ThunkT . CompT bbfCount . CompTBody . flip NEV.snoc topLevelOut <$> (NEV.fromVector =<< traverse mkEliminator ctors)
   where
