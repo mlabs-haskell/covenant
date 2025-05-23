@@ -50,7 +50,7 @@ module Covenant.Type
     TypeAppError (..),
     checkApp,
     -- Data declarations & friends
-    DataDeclaration (DataDeclaration),
+    DataDeclaration (DataDeclaration, OpaqueData),
     Constructor (Constructor),
     TyName,
     ConstructorName,
@@ -103,7 +103,7 @@ import Covenant.Internal.Type
     CompTBody (CompTBody),
     Constructor (Constructor),
     ConstructorName,
-    DataDeclaration (DataDeclaration),
+    DataDeclaration (DataDeclaration,OpaqueData),
     DataEncoding (PlutusData, SOP),
     PlutusDataConstructor (PD_B, PD_Constructor, PD_I, PD_List),
     PlutusDataStrategy (BuiltinStrategy, ConstrData, EnumData, NewtypeData, ProductListData),

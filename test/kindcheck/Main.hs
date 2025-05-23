@@ -1,16 +1,19 @@
 module Main (main) where
 
-import Control.Exception (throwIO)
-import Covenant.DeBruijn
-import Covenant.Index
-import Covenant.Type
+import Covenant.Index (count1,count0)
+import Covenant.Type (
+  DataDeclaration(DataDeclaration,OpaqueData),
+  Constructor(Constructor),
+  ValT(Abstraction,BuiltinFlat,Datatype),
+  DataEncoding(SOP),
+  BuiltinFlatT(IntegerT),
+  cycleCheck)
 import Data.List (foldl')
 import Data.Map qualified as M
-import Data.Vector (Vector)
 import Data.Vector qualified as V
-import Test.Tasty
-import Test.Tasty.ExpectedFailure
-import Test.Tasty.HUnit
+import Test.Tasty (defaultMain, testGroup)
+import Test.Tasty.ExpectedFailure (expectFail)
+import Test.Tasty.HUnit (testCase,assertFailure)
 
 main :: IO ()
 main =
@@ -25,7 +28,9 @@ runCycleCheck decls = case cycleCheck declMap of
   Nothing -> pure ()
   Just err -> assertFailure $ show err
   where
-    declMap = foldl' (\acc dd@(DataDeclaration tn _ _ _) -> M.insert tn dd acc) M.empty decls
+    declMap = foldl' (\acc dd -> case dd of
+                         OpaqueData{} -> acc
+                         DataDeclaration tn _ _ _ -> M.insert tn dd acc) M.empty decls
 
 maybee :: DataDeclaration ()
 maybee = DataDeclaration "Maybe" count1 (V.fromList ctors) SOP
