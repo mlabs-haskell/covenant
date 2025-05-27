@@ -54,9 +54,9 @@ module Covenant.Type
     Constructor (Constructor),
     TyName,
     ConstructorName,
-    DataEncoding (SOP, PlutusData),
+    DataEncoding (SOP, PlutusData, BuiltinStrategy),
     PlutusDataConstructor (PD_I, PD_B, PD_Constructor, PD_List),
-    PlutusDataStrategy (EnumData, ProductListData, ConstrData, BuiltinStrategy, NewtypeData),
+    PlutusDataStrategy (EnumData, ProductListData, ConstrData, NewtypeData),
 
     -- * Datatype sanity checking
     cycleCheck,
@@ -104,9 +104,9 @@ import Covenant.Internal.Type
     Constructor (Constructor),
     ConstructorName,
     DataDeclaration (DataDeclaration, OpaqueData),
-    DataEncoding (PlutusData, SOP),
+    DataEncoding (PlutusData, SOP, BuiltinStrategy),
     PlutusDataConstructor (PD_B, PD_Constructor, PD_I, PD_List),
-    PlutusDataStrategy (BuiltinStrategy, ConstrData, EnumData, NewtypeData, ProductListData),
+    PlutusDataStrategy (ConstrData, EnumData, NewtypeData, ProductListData),
     Renamed (Rigid, Unifiable, Wildcard),
     TyName,
     ValT (Abstraction, BuiltinFlat, Datatype, ThunkT),

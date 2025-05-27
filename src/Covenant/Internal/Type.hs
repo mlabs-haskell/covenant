@@ -488,54 +488,75 @@ instance (k ~ A_Lens, a ~ Vector (ValT c), b ~ Vector (ValT c)) => LabelOptic "c
   {-# INLINEABLE labelOptic #-}
   labelOptic = lens (\(Constructor _ args) -> args) (\(Constructor n _) args -> Constructor n args)
 
--- @since 1.1.1
+-- | @since 1.1.0
 data DataEncoding
   = SOP
   | PlutusData PlutusDataStrategy
-  -- TODO: Internal/Builtin Strategy at top level
-  deriving stock (Show, Eq, Ord)
+  | BuiltinStrategy InternalStrategy
+  deriving stock (
+   -- | @since 1.1.0
+   Show,
+   -- | @since 1.1.0
+   Eq,
+   -- | @since 1.1.0
+   Ord)
 
--- @since 1.1.1
+-- | @since 1.1.0
 data PlutusDataConstructor
   = PD_I
   | PD_B
   | PD_Constructor
   | PD_List
-  deriving stock (Show, Eq, Ord)
+  deriving stock (
+    -- | @since 1.1.0
+    Show,
+    -- | @since 1.1.0
+    Eq,
+    -- | @since 1.1.0
+    Ord)
 
--- @since 1.1.1
+-- | @since 1.1.0
 -- NOTE: Wrapped data-primitive (Integer + ByteString) require a special case for their encoders, which was originally
 --       part of a "WrapperData" strategy here which we generalized to the NewtypeData strategy.
 data PlutusDataStrategy
   = EnumData
   | ProductListData
   | ConstrData
-  | BuiltinStrategy InternalStrategy
   | NewtypeData
-  deriving stock (Show, Eq, Ord)
+  deriving stock (
+    -- | @since 1.1.0
+    Show,
+    -- | @since 1.1.0
+    Eq,
+    -- | @since 1.1.0
+    Ord)
 
 -- TxID encoding changes from v2 to v3 (so make sure to use the v3) / MLResult has a weird broken instance
 data InternalStrategy = InternalListStrat | InternalPairStrat | InternalDataStrat
   deriving stock (Show, Eq, Ord)
 
--- @since 1.1.1
+-- | @since 1.1.0
 data DataDeclaration a
   = DataDeclaration TyName (Count "tyvar") (Vector (Constructor a)) DataEncoding -- Allows for representations of "empty" types in case we want to represent Void like that
   | OpaqueData TyName (Set PlutusDataConstructor)
-  deriving stock (Show, Eq)
+  deriving stock (
+   -- | @since 1.1.0
+   Show,
+   -- | @since 1.1.0
+   Eq)
 
 checkStrategy :: forall (a :: Type). DataDeclaration a -> Bool
 checkStrategy OpaqueData {} = True
 checkStrategy (DataDeclaration _ _ _ SOP) = True
-checkStrategy (DataDeclaration tn _ ctors (PlutusData strat)) = case strat of
-  ConstrData -> True
-  EnumData -> all (\(Constructor _ args) -> Vector.null args) ctors
-  ProductListData -> Vector.length ctors == 1
-  BuiltinStrategy internalStrat -> case internalStrat of
-    -- TODO: Maybe we want something better than a match on the ty name?
+{- This isn't *ideal* -}
+checkStrategy (DataDeclaration tn _ _ (BuiltinStrategy internalStrat)) = case internalStrat of
     InternalListStrat -> tn == TyName "List"
     InternalPairStrat -> tn == TyName "Pair"
     InternalDataStrat -> tn == TyName "Data"
+checkStrategy (DataDeclaration _ _ ctors (PlutusData strat)) = case strat of
+  ConstrData -> True
+  EnumData -> all (\(Constructor _ args) -> Vector.null args) ctors
+  ProductListData -> Vector.length ctors == 1
   NewtypeData
     | Vector.length ctors == 1 -> case Vector.toList <$> preview #constructorArgs (ctors Vector.! 0) of
         Just [_] -> True -- pushing the cycle check to the "kind checker"
