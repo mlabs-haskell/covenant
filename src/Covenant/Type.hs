@@ -49,6 +49,17 @@ module Covenant.Type
     -- * Type application
     TypeAppError (..),
     checkApp,
+    -- Data declarations & friends
+    DataDeclaration (DataDeclaration, OpaqueData),
+    Constructor (Constructor),
+    TyName,
+    ConstructorName,
+    DataEncoding (SOP, PlutusData, BuiltinStrategy),
+    PlutusDataConstructor (PD_I, PD_B, PD_Constructor, PD_List),
+    PlutusDataStrategy (EnumData, ProductListData, ConstrData, NewtypeData),
+
+    -- * Datatype sanity checking
+    cycleCheck,
   )
 where
 
@@ -63,6 +74,8 @@ import Covenant.Index
     count3,
     intCount,
   )
+-- re-export for tests
+import Covenant.Internal.KindCheck (cycleCheck)
 import Covenant.Internal.Rename
   ( RenameError
       ( InvalidAbstractionReference,
@@ -88,8 +101,15 @@ import Covenant.Internal.Type
       ),
     CompT (CompT),
     CompTBody (CompTBody),
+    Constructor (Constructor),
+    ConstructorName,
+    DataDeclaration (DataDeclaration, OpaqueData),
+    DataEncoding (BuiltinStrategy, PlutusData, SOP),
+    PlutusDataConstructor (PD_B, PD_Constructor, PD_I, PD_List),
+    PlutusDataStrategy (ConstrData, EnumData, NewtypeData, ProductListData),
     Renamed (Rigid, Unifiable, Wildcard),
-    ValT (Abstraction, BuiltinFlat, ThunkT),
+    TyName,
+    ValT (Abstraction, BuiltinFlat, Datatype, ThunkT),
   )
 import Covenant.Internal.Unification
   ( TypeAppError

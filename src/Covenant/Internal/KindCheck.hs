@@ -8,33 +8,40 @@
 --       - The "count" - the number of bound tyvars in the `ValT.Datatype` representation - may be incorrect (i.e. inconsistent with the count in the declaration)
 --
 --     The checks to detect these errors are entirely independent from the checks performed during typechecking or renaming, so we do them in a separate pass.
-module Covenant.Internal.KindCheck (checkKinds, KindCheckError (..)) where
+module Covenant.Internal.KindCheck (checkKinds, KindCheckError (..), cycleCheck) where
 
 import Control.Monad (unless)
 import Control.Monad.Except (ExceptT, MonadError (throwError), runExceptT)
-import Control.Monad.Reader (MonadReader, ReaderT (ReaderT), asks, runReaderT)
+import Control.Monad.Reader (MonadReader (local), ReaderT (ReaderT), asks, runReaderT)
+import Covenant.Data (everythingOf)
 import Covenant.Index (Count, intCount)
 import Covenant.Internal.Type
   ( AbstractTy,
     CompT (CompT),
     CompTBody (CompTBody),
-    DataDeclaration (DataDeclaration),
+    Constructor (Constructor),
+    DataDeclaration (DataDeclaration, OpaqueData),
     TyName,
     ValT (Abstraction, BuiltinFlat, Datatype, ThunkT),
+    datatype,
   )
 import Data.Foldable (traverse_)
 import Data.Functor.Identity (Identity, runIdentity)
 import Data.Kind (Type)
 import Data.Map.Strict (Map)
 import Data.Map.Strict qualified as M
+import Data.Maybe (mapMaybe)
+import Data.Set (Set)
+import Data.Set qualified as Set
 import Data.Vector (Vector)
 import Data.Vector qualified as V
-import Optics.Core (A_Lens, LabelOptic (labelOptic), lens, review, view)
+import Optics.Core (A_Lens, LabelOptic (labelOptic), lens, preview, review, to, view, (%))
 
 data KindCheckError
   = UnknownType TyName
   | IncorrectNumArgs TyName (Count "tyvar") (Vector (ValT AbstractTy)) -- first is expected (from the decl), second is actual
   | HigherOrderConstructorArg (CompT AbstractTy) -- no polymorphic function args to ctors
+  | MutualRecursionDetected (Set TyName)
   deriving stock (Show, Eq)
 
 newtype KindCheckContext a = KindCheckContext (Map TyName (DataDeclaration a))
@@ -72,12 +79,42 @@ checkKinds' = \case
     0 -> traverse_ checkKinds' nev
     _ -> throwError $ HigherOrderConstructorArg compT -- no higher order arguments to ctors (makes life much easier, not that useful)
   BuiltinFlat {} -> pure ()
-  Datatype tn args -> do
-    DataDeclaration _ numVars _ <- lookupDeclaration tn
-    let numArgsActual = V.length args
-        numArgsExpected = review intCount numVars
-    unless (numArgsActual == numArgsExpected) $ throwError (IncorrectNumArgs tn numVars args)
-    traverse_ checkKinds' args
+  Datatype tn args ->
+    lookupDeclaration tn >>= \case
+      OpaqueData {} -> pure ()
+      DataDeclaration _ numVars _ _ -> do
+        let numArgsActual = V.length args
+            numArgsExpected = review intCount numVars
+        unless (numArgsActual == numArgsExpected) $ throwError (IncorrectNumArgs tn numVars args)
+        traverse_ checkKinds' args
 
 checkKinds :: ValT AbstractTy -> Maybe KindCheckError
 checkKinds = either Just (const Nothing) . runKindCheckM . checkKinds'
+
+-- Ensures that we don't have any *mutually* recursive datatypes (which we don't want b/c they mess with data encoding strategies)
+cycleCheck :: forall (a :: Type). (Ord a) => Map TyName (DataDeclaration a) -> Maybe KindCheckError
+cycleCheck decls = either Just (const Nothing) $ runKindCheckM go
+  where
+    go =
+      local (\_ -> KindCheckContext decls) $
+        traverse_ (cycleCheck' Set.empty) =<< asks (view (#kindCheckContext % to M.elems))
+
+{- This is a bit odd b/c we don't want to fail for auto-recursive types, so we need to be careful
+   *not* to mark the current decl being examined as "visited" until we've "descended" into the dependencies
+   (I think?)
+-}
+cycleCheck' :: forall (a :: Type). (Ord a) => Set TyName -> DataDeclaration a -> KindCheckM a ()
+cycleCheck' _ OpaqueData {} = pure ()
+cycleCheck' visited (DataDeclaration tn _ ctors _) = traverse_ (checkCtor visited tn) ctors
+  where
+    checkCtor :: Set TyName -> TyName -> Constructor a -> KindCheckM a ()
+    checkCtor vs tn' (Constructor _ args) = do
+      let allComponents = Set.toList . Set.unions $ everythingOf <$> V.toList args
+          -- every type constructor in any part of a constructor arg, *except* the tycon of the decl
+          -- we're examining, since autorecursion is fine/necessary
+          allTyCons = Set.filter (/= tn') . Set.fromList . mapMaybe (fmap fst . preview datatype) $ allComponents
+          alreadyVisitedArgTys = Set.intersection allTyCons vs
+      unless (null alreadyVisitedArgTys) $ throwError (MutualRecursionDetected alreadyVisitedArgTys)
+      let newVisited = Set.insert tn' vs
+      nextRound <- traverse lookupDeclaration (Set.toList allTyCons)
+      traverse_ (cycleCheck' newVisited) nextRound
