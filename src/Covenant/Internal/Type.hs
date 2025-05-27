@@ -493,13 +493,14 @@ data DataEncoding
   = SOP
   | PlutusData PlutusDataStrategy
   | BuiltinStrategy InternalStrategy
-  deriving stock (
-   -- | @since 1.1.0
-   Show,
-   -- | @since 1.1.0
-   Eq,
-   -- | @since 1.1.0
-   Ord)
+  deriving stock
+    ( -- | @since 1.1.0
+      Show,
+      -- | @since 1.1.0
+      Eq,
+      -- | @since 1.1.0
+      Ord
+    )
 
 -- | @since 1.1.0
 data PlutusDataConstructor
@@ -507,13 +508,14 @@ data PlutusDataConstructor
   | PD_B
   | PD_Constructor
   | PD_List
-  deriving stock (
-    -- | @since 1.1.0
-    Show,
-    -- | @since 1.1.0
-    Eq,
-    -- | @since 1.1.0
-    Ord)
+  deriving stock
+    ( -- | @since 1.1.0
+      Show,
+      -- | @since 1.1.0
+      Eq,
+      -- | @since 1.1.0
+      Ord
+    )
 
 -- | @since 1.1.0
 -- NOTE: Wrapped data-primitive (Integer + ByteString) require a special case for their encoders, which was originally
@@ -523,13 +525,14 @@ data PlutusDataStrategy
   | ProductListData
   | ConstrData
   | NewtypeData
-  deriving stock (
-    -- | @since 1.1.0
-    Show,
-    -- | @since 1.1.0
-    Eq,
-    -- | @since 1.1.0
-    Ord)
+  deriving stock
+    ( -- | @since 1.1.0
+      Show,
+      -- | @since 1.1.0
+      Eq,
+      -- | @since 1.1.0
+      Ord
+    )
 
 -- TxID encoding changes from v2 to v3 (so make sure to use the v3) / MLResult has a weird broken instance
 data InternalStrategy = InternalListStrat | InternalPairStrat | InternalDataStrat
@@ -539,20 +542,21 @@ data InternalStrategy = InternalListStrat | InternalPairStrat | InternalDataStra
 data DataDeclaration a
   = DataDeclaration TyName (Count "tyvar") (Vector (Constructor a)) DataEncoding -- Allows for representations of "empty" types in case we want to represent Void like that
   | OpaqueData TyName (Set PlutusDataConstructor)
-  deriving stock (
-   -- | @since 1.1.0
-   Show,
-   -- | @since 1.1.0
-   Eq)
+  deriving stock
+    ( -- | @since 1.1.0
+      Show,
+      -- | @since 1.1.0
+      Eq
+    )
 
 checkStrategy :: forall (a :: Type). DataDeclaration a -> Bool
 checkStrategy OpaqueData {} = True
 checkStrategy (DataDeclaration _ _ _ SOP) = True
 {- This isn't *ideal* -}
 checkStrategy (DataDeclaration tn _ _ (BuiltinStrategy internalStrat)) = case internalStrat of
-    InternalListStrat -> tn == TyName "List"
-    InternalPairStrat -> tn == TyName "Pair"
-    InternalDataStrat -> tn == TyName "Data"
+  InternalListStrat -> tn == TyName "List"
+  InternalPairStrat -> tn == TyName "Pair"
+  InternalDataStrat -> tn == TyName "Data"
 checkStrategy (DataDeclaration _ _ ctors (PlutusData strat)) = case strat of
   ConstrData -> True
   EnumData -> all (\(Constructor _ args) -> Vector.null args) ctors

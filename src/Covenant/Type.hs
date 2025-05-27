@@ -104,7 +104,7 @@ import Covenant.Internal.Type
     Constructor (Constructor),
     ConstructorName,
     DataDeclaration (DataDeclaration, OpaqueData),
-    DataEncoding (PlutusData, SOP, BuiltinStrategy),
+    DataEncoding (BuiltinStrategy, PlutusData, SOP),
     PlutusDataConstructor (PD_B, PD_Constructor, PD_I, PD_List),
     PlutusDataStrategy (ConstrData, EnumData, NewtypeData, ProductListData),
     Renamed (Rigid, Unifiable, Wildcard),
