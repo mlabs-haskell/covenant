@@ -1,5 +1,5 @@
 module Covenant.Internal.Ledger
-  ( ledgerTypes
+  ( ledgerTypes,
   )
 where
 
@@ -23,7 +23,8 @@ import Data.Vector qualified as Vector
 
 -- All the ledger types. Just putting them in a list for now but they'll probably end up in some other kind of container eventually
 ledgerTypes :: [DataDeclaration AbstractTy]
-ledgerTypes = [list,
+ledgerTypes =
+  [ list,
     pair,
     plutusData,
     datum,
@@ -72,8 +73,8 @@ ledgerTypes = [list,
     scriptPurpose,
     scriptInfo,
     txInfo,
-    scriptContext]
-
+    scriptContext
+  ]
 
 -- Builtins. These aren't "real" ADTs and their unique encoding strategies indicate special handling
 

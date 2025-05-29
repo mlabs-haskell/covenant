@@ -109,8 +109,8 @@ library
     Covenant.Util
 
   other-modules:
-    Covenant.Internal.Ledger
     Covenant.Internal.KindCheck
+    Covenant.Internal.Ledger
     Covenant.Internal.Rename
     Covenant.Internal.Term
     Covenant.Internal.Type
