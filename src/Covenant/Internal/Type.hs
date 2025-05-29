@@ -536,7 +536,7 @@ data PlutusDataStrategy
     )
 
 -- TxID encoding changes from v2 to v3 (so make sure to use the v3) / MLResult has a weird broken instance
-data InternalStrategy = InternalListStrat | InternalPairStrat | InternalDataStrat | InternalAssocMapStrat 
+data InternalStrategy = InternalListStrat | InternalPairStrat | InternalDataStrat | InternalAssocMapStrat
   deriving stock (Show, Eq, Ord)
 
 -- | @since 1.1.0
