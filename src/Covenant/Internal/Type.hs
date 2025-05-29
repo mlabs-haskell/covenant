@@ -508,6 +508,7 @@ data PlutusDataConstructor
   | PD_B
   | PD_Constructor
   | PD_List
+  | PD_Map
   deriving stock
     ( -- | @since 1.1.0
       Show,
@@ -535,7 +536,7 @@ data PlutusDataStrategy
     )
 
 -- TxID encoding changes from v2 to v3 (so make sure to use the v3) / MLResult has a weird broken instance
-data InternalStrategy = InternalListStrat | InternalPairStrat | InternalDataStrat
+data InternalStrategy = InternalListStrat | InternalPairStrat | InternalDataStrat | InternalAssocMapStrat
   deriving stock (Show, Eq, Ord)
 
 -- | @since 1.1.0

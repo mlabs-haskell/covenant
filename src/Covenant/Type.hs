@@ -17,7 +17,7 @@ module Covenant.Type
 
     -- * Computation types
     CompT (Comp0, Comp1, Comp2, Comp3, CompN),
-    CompTBody (ReturnT, (:--:>), ArgsAndResult),
+    CompTBody (ReturnT, (:--:>), ArgsAndResult, CompTBody),
     arity,
 
     -- * Value types
@@ -52,11 +52,12 @@ module Covenant.Type
     -- Data declarations & friends
     DataDeclaration (DataDeclaration, OpaqueData),
     Constructor (Constructor),
-    TyName,
-    ConstructorName,
+    TyName(TyName),
+    ConstructorName(ConstructorName),
     DataEncoding (SOP, PlutusData, BuiltinStrategy),
     PlutusDataConstructor (PD_I, PD_B, PD_Constructor, PD_List),
     PlutusDataStrategy (EnumData, ProductListData, ConstrData, NewtypeData),
+    InternalStrategy (InternalListStrat,InternalPairStrat,InternalDataStrat,InternalAssocMapStrat),
 
     -- * Datatype sanity checking
     cycleCheck,
@@ -102,13 +103,14 @@ import Covenant.Internal.Type
     CompT (CompT),
     CompTBody (CompTBody),
     Constructor (Constructor),
-    ConstructorName,
+    ConstructorName(ConstructorName),
     DataDeclaration (DataDeclaration, OpaqueData),
     DataEncoding (BuiltinStrategy, PlutusData, SOP),
     PlutusDataConstructor (PD_B, PD_Constructor, PD_I, PD_List),
     PlutusDataStrategy (ConstrData, EnumData, NewtypeData, ProductListData),
+    InternalStrategy (InternalListStrat,InternalPairStrat,InternalDataStrat,InternalAssocMapStrat),
     Renamed (Rigid, Unifiable, Wildcard),
-    TyName,
+    TyName(TyName),
     ValT (Abstraction, BuiltinFlat, Datatype, ThunkT),
   )
 import Covenant.Internal.Unification
