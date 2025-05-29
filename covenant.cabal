@@ -103,13 +103,13 @@ library
     Covenant.Data
     Covenant.DeBruijn
     Covenant.Index
-    Covenant.Ledger
     Covenant.Prim
     Covenant.Test
     Covenant.Type
     Covenant.Util
 
   other-modules:
+    Covenant.Internal.Ledger
     Covenant.Internal.KindCheck
     Covenant.Internal.Rename
     Covenant.Internal.Term

@@ -1,5 +1,29 @@
-module Covenant.Ledger
-  ( list,
+module Covenant.Internal.Ledger
+  ( ledgerTypes
+  )
+where
+
+import Covenant.DeBruijn (DeBruijn (Z))
+import Covenant.Index (Count, count0, count1, count2, ix0, ix1)
+import Covenant.Type
+  ( -- weirdly, can't coerece w/o importing the constructor?
+    AbstractTy (BoundAt),
+    BuiltinFlatT (BoolT, ByteStringT, IntegerT),
+    Constructor (Constructor),
+    ConstructorName (ConstructorName),
+    DataDeclaration (DataDeclaration),
+    DataEncoding (BuiltinStrategy, PlutusData),
+    InternalStrategy (InternalAssocMapStrat, InternalDataStrat, InternalListStrat, InternalPairStrat),
+    PlutusDataStrategy (ConstrData, NewtypeData),
+    TyName (TyName),
+    ValT (Abstraction, BuiltinFlat, Datatype),
+  )
+import Data.Coerce (coerce)
+import Data.Vector qualified as Vector
+
+-- All the ledger types. Just putting them in a list for now but they'll probably end up in some other kind of container eventually
+ledgerTypes :: [DataDeclaration AbstractTy]
+ledgerTypes = [list,
     pair,
     plutusData,
     datum,
@@ -12,8 +36,6 @@ module Covenant.Ledger
     pubKeyHash,
     address,
     maybeT,
-    eitherT,
-    diffMilliSeconds,
     posixTime,
     interval,
     upperBound,
@@ -23,7 +45,6 @@ module Covenant.Ledger
     assocMap,
     currencySymbol,
     tokenName,
-    assetClass,
     value,
     lovelace,
     rational,
@@ -51,72 +72,8 @@ module Covenant.Ledger
     scriptPurpose,
     scriptInfo,
     txInfo,
-    scriptContext,
-  )
-where
+    scriptContext]
 
-import Covenant.DeBruijn (DeBruijn (Z))
-import Covenant.Index (Count, count0, count1, count2, ix0, ix1)
-import Covenant.Type
-  ( -- weirdly, can't coerece w/o importing the constructor?
-    AbstractTy (BoundAt),
-    BuiltinFlatT (BoolT, ByteStringT, IntegerT),
-    CompT (CompN),
-    CompTBody (CompTBody),
-    Constructor (Constructor),
-    ConstructorName (ConstructorName),
-    DataDeclaration (DataDeclaration),
-    DataEncoding (BuiltinStrategy, PlutusData),
-    InternalStrategy (InternalAssocMapStrat, InternalDataStrat, InternalListStrat, InternalPairStrat),
-    PlutusDataStrategy (ConstrData, NewtypeData),
-    TyName (TyName),
-    ValT (Abstraction, BuiltinFlat, Datatype, ThunkT),
-  )
-import Data.Coerce (coerce)
-import Data.Maybe (fromJust)
-import Data.Vector qualified as Vector
-import Data.Vector.NonEmpty qualified as NEV
-
--- Helpers. Solely to reduce syntactic noise/clutter, which will only make it more difficult to detect minor mistakes
--- (need all the help we can get, no real way to test these ATM)
-
-data DeclBuilder = Decl TyName (Count "tyvar") [CtorBuilder] DataEncoding
-
-data CtorBuilder = Ctor ConstructorName [ValT AbstractTy]
-
-mkDecl :: DeclBuilder -> DataDeclaration AbstractTy
-mkDecl (Decl tn cnt ctors enc) = DataDeclaration tn cnt (Vector.fromList . fmap mkCtor $ ctors) enc
-  where
-    mkCtor :: CtorBuilder -> Constructor AbstractTy
-    mkCtor (Ctor cnm fields) = Constructor cnm (Vector.fromList fields)
-
-tycon :: TyName -> [ValT AbstractTy] -> ValT AbstractTy
-tycon tn vals = Datatype tn (Vector.fromList vals)
-
--- We have patterns for this, but they all work w/ Vectors, which is adds syntactic noise that is unnecessary
--- when we're typing out declarations as constants in a source file
-_thunk :: Count "tyvar" -> [ValT AbstractTy] -> ValT AbstractTy
-_thunk _ [] = error "You tried to construct an empty thunk. Don't do that."
-_thunk cnt args = ThunkT (CompN cnt (CompTBody $ fromJust (NEV.fromList args)))
-
-{- This is shorthand for a non-polymorphic newtype (i.e. a single ctor / arg type with a newtype strategy) where
-   the name of the constructor is the same as the name of the type.
-
-   This is a *very* common case and this seems useful to save extra typing.
-
--}
-mkSimpleNewtype :: TyName -> ValT AbstractTy -> DataDeclaration AbstractTy
-mkSimpleNewtype tn val = mkDecl $ Decl tn count0 [Ctor (coerce tn) [val]] (PlutusData NewtypeData)
-
--- obviously should not export these, solely exist to improve readability of declarations.
--- Since everything here is data-encodeable the DB index *should* always be Z & I don't think anything uses more than
--- 2 tyvars
-
-a :: ValT AbstractTy
-a = Abstraction (BoundAt Z ix0)
-
-b :: ValT AbstractTy
-b = Abstraction (BoundAt Z ix1)
 
 -- Builtins. These aren't "real" ADTs and their unique encoding strategies indicate special handling
 
@@ -142,10 +99,10 @@ plutusData =
       "Data"
       count0
       [ Ctor "Constr" [BuiltinFlat IntegerT, tycon "List" [tycon "Data" []]],
+        Ctor "Map" [tycon "List" [tycon "Pair" [tycon "Data" [], tycon "Data" []]]],
         Ctor "List" [tycon "List" [tycon "Data" []]],
         Ctor "I" [BuiltinFlat IntegerT],
-        Ctor "B" [BuiltinFlat ByteStringT],
-        Ctor "Map" [tycon "List" [tycon "Pair" [tycon "Data" [], tycon "Data" []]]]
+        Ctor "B" [BuiltinFlat ByteStringT]
       ]
       (BuiltinStrategy InternalDataStrat)
 
@@ -216,21 +173,7 @@ maybeT =
       ]
       (PlutusData ConstrData)
 
-eitherT :: DataDeclaration AbstractTy
-eitherT =
-  mkDecl $
-    Decl
-      "Either"
-      count2
-      [ Ctor "Left" [a],
-        Ctor "Right" [b]
-      ]
-      (PlutusData ConstrData)
-
 -- Time & Intervals (V1)
-
-diffMilliSeconds :: DataDeclaration AbstractTy
-diffMilliSeconds = mkSimpleNewtype "DiffMilliSeconds" (BuiltinFlat IntegerT)
 
 posixTime :: DataDeclaration AbstractTy
 posixTime = mkSimpleNewtype "POSIXTime" (BuiltinFlat IntegerT)
@@ -305,9 +248,6 @@ currencySymbol = mkSimpleNewtype "CurrencySymbol" (BuiltinFlat ByteStringT)
 tokenName :: DataDeclaration AbstractTy
 tokenName = mkSimpleNewtype "TokenName" (BuiltinFlat ByteStringT)
 
-assetClass :: DataDeclaration AbstractTy
-assetClass = mkSimpleNewtype "AssetClass" (tycon "Pair" [tycon "CurrencySymbol" [], tycon "TokenName" []])
-
 value :: DataDeclaration AbstractTy
 value =
   mkSimpleNewtype
@@ -322,8 +262,6 @@ value =
 lovelace :: DataDeclaration AbstractTy
 lovelace = mkSimpleNewtype "LoveLance" (BuiltinFlat IntegerT)
 
--- Rational (plutusTX)
--- NOTE Sean 5/28: This is correct (or should be?) w/r/t the underlying encoding but the API is different from the PlutusTx type
 rational :: DataDeclaration AbstractTy
 rational =
   mkDecl $
@@ -677,3 +615,39 @@ scriptContext =
           ]
       ]
       (PlutusData ConstrData)
+
+-- Helpers
+
+-- Variants of DataDeclaration and Constructor that use Lists to avoid a slew of Vector.fromList cluttering up the module
+
+data DeclBuilder = Decl TyName (Count "tyvar") [CtorBuilder] DataEncoding
+
+data CtorBuilder = Ctor ConstructorName [ValT AbstractTy]
+
+mkDecl :: DeclBuilder -> DataDeclaration AbstractTy
+mkDecl (Decl tn cnt ctors enc) = DataDeclaration tn cnt (Vector.fromList . fmap mkCtor $ ctors) enc
+  where
+    mkCtor :: CtorBuilder -> Constructor AbstractTy
+    mkCtor (Ctor cnm fields) = Constructor cnm (Vector.fromList fields)
+
+tycon :: TyName -> [ValT AbstractTy] -> ValT AbstractTy
+tycon tn vals = Datatype tn (Vector.fromList vals)
+
+{- This is shorthand for a non-polymorphic newtype (i.e. a single ctor / arg type with a newtype strategy) where
+   the name of the constructor is the same as the name of the type.
+
+   This is a *very* common case and this seems useful to save extra typing.
+
+-}
+mkSimpleNewtype :: TyName -> ValT AbstractTy -> DataDeclaration AbstractTy
+mkSimpleNewtype tn val = mkDecl $ Decl tn count0 [Ctor (coerce tn) [val]] (PlutusData NewtypeData)
+
+-- obviously should not export these, solely exist to improve readability of declarations.
+-- Since everything here is data-encodeable the DB index *should* always be Z & I don't think anything uses more than
+-- 2 tyvars
+
+a :: ValT AbstractTy
+a = Abstraction (BoundAt Z ix0)
+
+b :: ValT AbstractTy
+b = Abstraction (BoundAt Z ix1)
