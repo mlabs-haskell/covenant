@@ -536,7 +536,7 @@ data PlutusDataStrategy
     )
 
 -- TxID encoding changes from v2 to v3 (so make sure to use the v3) / MLResult has a weird broken instance
-data InternalStrategy = InternalListStrat | InternalPairStrat | InternalDataStrat | InternalAssocMapStrat
+data InternalStrategy = InternalListStrat | InternalPairStrat | InternalDataStrat | InternalAssocMapStrat 
   deriving stock (Show, Eq, Ord)
 
 -- | @since 1.1.0
@@ -558,6 +558,7 @@ checkStrategy (DataDeclaration tn _ _ (BuiltinStrategy internalStrat)) = case in
   InternalListStrat -> tn == TyName "List"
   InternalPairStrat -> tn == TyName "Pair"
   InternalDataStrat -> tn == TyName "Data"
+  InternalAssocMapStrat -> tn == TyName "Map"
 checkStrategy (DataDeclaration _ _ ctors (PlutusData strat)) = case strat of
   ConstrData -> True
   EnumData -> all (\(Constructor _ args) -> Vector.null args) ctors

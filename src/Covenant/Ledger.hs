@@ -1,13 +1,64 @@
-module Covenant.Ledger where
+module Covenant.Ledger (
 
-import Covenant.DeBruijn
-import Covenant.Index
-import Covenant.Type
+                       list, pair, plutusData, datum, redeemer,
+                       scriptHash, datumHash, redeemerHash,
+                       credential, stakingCredential, pubKeyHash,
+                       address, maybeT,
+                       eitherT,
+                       diffMilliSeconds,
+                       posixTime,
+                       interval,
+                       upperBound,
+                       lowerBound,
+                       extended,
+                       ledgerBytes,
+                       assocMap,
+                       currencySymbol,
+                       tokenName,
+                       assetClass,
+                       value,
+                       lovelace,
+                       rational,
+                       mintValue,
+                       txId,
+                       txOutRef,
+                       txOut,
+                       outputDatum,
+                       txInInfo,
+                       dRepCredential,
+                       dRep,
+                       delegatee,
+                       coldCommitteeCredential,
+                       hotCommitteeCredential,
+                       txCert,
+                       voter,
+                       vote,
+                       governanceActionId,
+                       committee,
+                       constitution,
+                       changedParameters,
+                       protocolVersion,
+                       governanceAction,
+                       proposalProcedure,
+                       scriptPurpose,
+                       scriptInfo,
+                       txInfo,
+                       scriptContext
+                       )where
+
+import Covenant.DeBruijn (DeBruijn(Z))
+import Covenant.Index (Count,count0,count1,count2,ix0,ix1,)
+import Covenant.Type (DataEncoding (PlutusData, BuiltinStrategy),
+                      CompT(CompN),
+                      CompTBody(CompTBody),
+                      TyName(TyName), ValT(Datatype, ThunkT, Abstraction, BuiltinFlat),
+                      ConstructorName(ConstructorName), -- weirdly, can't coerece w/o importing the constructor?
+                      AbstractTy (BoundAt), DataDeclaration(DataDeclaration), Constructor(Constructor), InternalStrategy (InternalListStrat, InternalPairStrat, InternalDataStrat, InternalAssocMapStrat), BuiltinFlatT (IntegerT, ByteStringT, BoolT), PlutusDataStrategy (NewtypeData, ConstrData),
+                      )
 import Data.Coerce (coerce)
 import Data.Maybe (fromJust)
 import Data.Vector qualified as Vector
 import Data.Vector.NonEmpty qualified as NEV
-import GHC.RTS.Flags (ProfFlags (heapProfileIntervalTicks))
 
 -- Helpers. Solely to reduce syntactic noise/clutter, which will only make it more difficult to detect minor mistakes
 -- (need all the help we can get, no real way to test these ATM)
@@ -27,9 +78,9 @@ tycon tn vals = Datatype tn (Vector.fromList vals)
 
 -- We have patterns for this, but they all work w/ Vectors, which is adds syntactic noise that is unnecessary
 -- when we're typing out declarations as constants in a source file
-thunk :: Count "tyvar" -> [ValT AbstractTy] -> ValT AbstractTy
-thunk cnt [] = error "You tried to construct an empty thunk. Don't do that."
-thunk cnt args = ThunkT (CompN cnt (CompTBody $ fromJust (NEV.fromList args)))
+_thunk :: Count "tyvar" -> [ValT AbstractTy] -> ValT AbstractTy
+_thunk _ [] = error "You tried to construct an empty thunk. Don't do that."
+_thunk cnt args = ThunkT (CompN cnt (CompTBody $ fromJust (NEV.fromList args)))
 
 {- This is shorthand for a non-polymorphic newtype (i.e. a single ctor / arg type with a newtype strategy) where
    the name of the constructor is the same as the name of the type.
@@ -38,7 +89,7 @@ thunk cnt args = ThunkT (CompN cnt (CompTBody $ fromJust (NEV.fromList args)))
 
 -}
 mkSimpleNewtype :: TyName -> ValT AbstractTy -> DataDeclaration AbstractTy
-mkSimpleNewtype tn@(TyName tn') val = mkDecl $ Decl tn count0 [Ctor (coerce tn) [val]] (PlutusData NewtypeData)
+mkSimpleNewtype tn val = mkDecl $ Decl tn count0 [Ctor (coerce tn) [val]] (PlutusData NewtypeData)
 
 -- obviously should not export these, solely exist to improve readability of declarations.
 -- Since everything here is data-encodeable the DB index *should* always be Z & I don't think anything uses more than
@@ -137,8 +188,8 @@ address =
       (PlutusData ConstrData)
 
 -- PlutusTX types, from https://github.com/IntersectMBO/plutus/blob/master/plutus-tx/src/PlutusTx/IsData/Instances.hs
-maybe :: DataDeclaration AbstractTy
-maybe =
+maybeT :: DataDeclaration AbstractTy
+maybeT =
   mkDecl $
     Decl
       "Maybe"
@@ -148,8 +199,8 @@ maybe =
       ]
       (PlutusData ConstrData)
 
-either :: DataDeclaration AbstractTy
-either =
+eitherT :: DataDeclaration AbstractTy
+eitherT =
   mkDecl $
     Decl
       "Either"
