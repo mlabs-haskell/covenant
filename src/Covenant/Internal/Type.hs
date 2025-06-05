@@ -12,15 +12,12 @@ module Covenant.Internal.Type
     ValT (..),
     BuiltinFlatT (..),
     TyName (..),
-    ScopeBoundary (..), -- used in the generators
     DataEncoding (..),
     runConstructorName,
     abstraction,
     thunkT,
     builtinFlat,
     datatype,
-    -- generic utility for debugging/testing
-    prettyStr,
     checkStrategy,
     naturalBaseFunctor,
     negativeBaseFunctor,
@@ -28,12 +25,6 @@ module Covenant.Internal.Type
   )
 where
 
-import Control.Monad.Reader
-  ( MonadReader (local),
-    Reader,
-    asks,
-    runReader,
-  )
 import Covenant.DeBruijn (DeBruijn (Z))
 import Covenant.Index
   ( Count,
@@ -42,6 +33,13 @@ import Covenant.Index
     intCount,
     intIndex,
     ix0,
+  )
+import Covenant.Internal.PrettyPrint
+  ( PrettyM,
+    bindVars,
+    lookupAbstraction,
+    mkForall,
+    runPrettyM,
   )
 import Covenant.Internal.Strategy
   ( DataEncoding
@@ -66,48 +64,35 @@ import Covenant.Internal.Strategy
 import Covenant.Util (pattern ConsV, pattern NilV)
 import Data.Functor.Classes (Eq1 (liftEq))
 import Data.Kind (Type)
-import Data.Map.Strict (Map)
-import Data.Map.Strict qualified as Map
 import Data.Set (Set)
 import Data.String (IsString)
 import Data.Text (Text)
-import Data.Text qualified as T
 import Data.Vector (Vector)
 import Data.Vector qualified as Vector
 import Data.Vector.NonEmpty (NonEmptyVector)
 import Data.Vector.NonEmpty qualified as NonEmpty
 import Data.Word (Word64)
-import GHC.Exts (fromListN)
-import Optics.At ()
 import Optics.Core
   ( A_Fold,
     A_Lens,
     LabelOptic (labelOptic),
     Prism',
     folding,
-    ix,
     lens,
-    over,
     preview,
     prism,
     review,
-    set,
-    view,
-    (%),
   )
 import Prettyprinter
   ( Doc,
     Pretty (pretty),
-    defaultLayoutOptions,
     hsep,
     indent,
-    layoutPretty,
     parens,
     vcat,
     viaShow,
     (<+>),
   )
-import Prettyprinter.Render.Text (renderStrict)
 import Test.QuickCheck.Instances.Text ()
 
 -- | A type abstraction, using a combination of a DeBruijn index (to indicate
@@ -264,6 +249,13 @@ instance Eq1 ValT where
     Datatype tn1 args1 -> \case
       Datatype tn2 args2 -> tn1 == tn2 && liftEq (liftEq f) args1 args2
       _ -> False
+
+-- | /Do not/ use this instance to write other 'Pretty' instances. It exists to
+-- ensure readable tests without having to expose a lot of internals.
+--
+-- @since 1.0.0
+instance Pretty (ValT Renamed) where
+  pretty = runPrettyM . prettyValTWithContext
 
 abstraction :: forall (a :: Type). Prism' (ValT a) a
 abstraction = prism Abstraction (\case (Abstraction a) -> Right a; other -> Left other)
@@ -454,72 +446,6 @@ byteStringBaseFunctor = DataDeclaration "ByteString_F" count1 constrs SOP
 
 -- Helpers
 
-prettyStr :: forall (b :: Type). (Pretty b) => b -> String
-prettyStr = T.unpack . renderStrict . layoutPretty defaultLayoutOptions . pretty
-
-newtype ScopeBoundary = ScopeBoundary Int
-  deriving (Show, Eq, Ord, Num, Real, Enum, Integral) via Int
-
--- Keeping the field names for clarity even if we don't use them
-data PrettyContext (ann :: Type)
-  = PrettyContext
-  { _boundIdents :: Map ScopeBoundary (Vector (Doc ann)),
-    _currentScope :: ScopeBoundary,
-    _varStream :: [Doc ann]
-  }
-
-instance
-  (k ~ A_Lens, a ~ Map ScopeBoundary (Vector (Doc ann)), b ~ Map ScopeBoundary (Vector (Doc ann))) =>
-  LabelOptic "boundIdents" k (PrettyContext ann) (PrettyContext ann) a b
-  where
-  {-# INLINEABLE labelOptic #-}
-  labelOptic =
-    lens
-      (\(PrettyContext x _ _) -> x)
-      (\(PrettyContext _ y z) x -> PrettyContext x y z)
-
-instance
-  (k ~ A_Lens, a ~ ScopeBoundary, b ~ ScopeBoundary) =>
-  LabelOptic "currentScope" k (PrettyContext ann) (PrettyContext ann) a b
-  where
-  {-# INLINEABLE labelOptic #-}
-  labelOptic =
-    lens
-      (\(PrettyContext _ x _) -> x)
-      (\(PrettyContext x _ z) y -> PrettyContext x y z)
-
-instance
-  (k ~ A_Lens, a ~ [Doc ann], b ~ [Doc ann]) =>
-  LabelOptic "varStream" k (PrettyContext ann) (PrettyContext ann) a b
-  where
-  {-# INLINEABLE labelOptic #-}
-  labelOptic =
-    lens
-      (\(PrettyContext _ _ x) -> x)
-      (\(PrettyContext x y _) z -> PrettyContext x y z)
-
--- Maybe make a newtype with error reporting since this can fail, but do later since *should't* fail
-newtype PrettyM (ann :: Type) (a :: Type) = PrettyM (Reader (PrettyContext ann) a)
-  deriving
-    ( Functor,
-      Applicative,
-      Monad,
-      MonadReader (PrettyContext ann)
-    )
-    via (Reader (PrettyContext ann))
-
-runPrettyM :: forall (ann :: Type) (a :: Type). PrettyM ann a -> a
-runPrettyM (PrettyM ma) = runReader ma (PrettyContext mempty 0 infiniteVars)
-  where
-    -- Lazily generated infinite list of variables. Will start with a, b, c...
-    -- and cycle around to a1, b2, c3 etc.
-    -- We could do something more sophisticated but this should work.
-    infiniteVars :: [Doc ann]
-    infiniteVars =
-      let aToZ = ['a' .. 'z']
-          intStrings = ("" <$ aToZ) <> map (show @Integer) [0 ..]
-       in zipWith (\x xs -> pretty (x : xs)) aToZ intStrings
-
 prettyCompTWithContext :: forall (ann :: Type). CompT Renamed -> PrettyM ann (Doc ann)
 prettyCompTWithContext (CompT count (CompTBody funArgs))
   | review intCount count == 0 = prettyFunTy' funArgs
@@ -541,39 +467,6 @@ prettyFunTy' args = case NonEmpty.unsnoc args of
         argsWithoutResult <- Vector.foldM (\acc x -> (\z -> acc <+> "->" <+> z) <$> prettyValTWithContext x) prettyArg1 otherArgs
         pure . parens $ argsWithoutResult <+> "->" <+> resTy'
 
-bindVars ::
-  forall (ann :: Type) (a :: Type).
-  Count "tyvar" ->
-  (Vector (Doc ann) -> PrettyM ann a) ->
-  PrettyM ann a
-bindVars count' act
-  | count == 0 = crossBoundary (act Vector.empty)
-  | otherwise = crossBoundary $ do
-      here <- asks (view #currentScope)
-      withFreshVarNames count $ \newBoundVars ->
-        local (over #boundIdents (Map.insert here newBoundVars)) (act newBoundVars)
-  where
-    -- Increment the current scope
-    crossBoundary :: PrettyM ann a -> PrettyM ann a
-    crossBoundary = local (over #currentScope (+ 1))
-    count :: Int
-    count = review intCount count'
-
-mkForall ::
-  forall (ann :: Type).
-  Vector (Doc ann) ->
-  Doc ann ->
-  Doc ann
-mkForall tvars funTyBody =
-  if Vector.null tvars
-    then funTyBody
-    else "forall" <+> hsep (Vector.toList tvars) <> "." <+> funTyBody
-
--- | DO NOT USE THIS TO WRITE OTHER INSTANCES
---   It exists soley to make readable tests easier to write w/o having to export a bunch of internal printing stuff
-instance Pretty (ValT Renamed) where
-  pretty = runPrettyM . prettyValTWithContext
-
 prettyValTWithContext :: forall (ann :: Type). ValT Renamed -> PrettyM ann (Doc ann)
 prettyValTWithContext = \case
   Abstraction abstr -> prettyRenamedWithContext abstr
@@ -594,39 +487,11 @@ prettyCtorWithContext (Constructor ctorNm ctorArgs)
       args' <- Vector.toList <$> traverse prettyValTWithContext ctorArgs
       pure $ ctorNm' <+> hsep args'
 
--- Generate N fresh var names and use the supplied monadic function to do something with them.
-withFreshVarNames ::
-  forall (ann :: Type) (a :: Type).
-  Int ->
-  (Vector (Doc ann) -> PrettyM ann a) ->
-  PrettyM ann a
-withFreshVarNames n act = do
-  stream <- asks (view #varStream)
-  let (used, rest) = splitAt n stream
-  local (set #varStream rest) . act . fromListN n $ used
-
 prettyRenamedWithContext :: forall (ann :: Type). Renamed -> PrettyM ann (Doc ann)
 prettyRenamedWithContext = \case
   Rigid offset index -> lookupAbstraction offset index
   Unifiable i -> lookupAbstraction 0 i
   Wildcard w64 offset i -> pure $ pretty offset <> "_" <> viaShow w64 <> "#" <> pretty (review intIndex i)
-
-lookupAbstraction :: forall (ann :: Type). Int -> Index "tyvar" -> PrettyM ann (Doc ann)
-lookupAbstraction offset argIndex = do
-  let scopeOffset = ScopeBoundary offset
-  let argIndex' = review intIndex argIndex
-  here <- asks (view #currentScope)
-  asks (preview (#boundIdents % ix (here + scopeOffset) % ix argIndex')) >>= \case
-    Nothing ->
-      -- TODO: actual error reporting
-      error $
-        "Internal error: The encountered a variable at arg index "
-          <> show argIndex'
-          <> " with true level "
-          <> show scopeOffset
-          <> " but could not locate the corresponding pretty form at scope level "
-          <> show here
-    Just res' -> pure res'
 
 prettyDataDeclWithContext :: forall (ann :: Type). DataDeclaration Renamed -> PrettyM ann (Doc ann)
 prettyDataDeclWithContext (OpaqueData (TyName tn) _) = pure . pretty $ tn

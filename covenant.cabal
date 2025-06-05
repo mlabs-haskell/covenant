@@ -110,6 +110,7 @@ library
   other-modules:
     Covenant.Internal.KindCheck
     Covenant.Internal.Ledger
+    Covenant.Internal.PrettyPrint
     Covenant.Internal.Rename
     Covenant.Internal.Strategy
     Covenant.Internal.Term

@@ -15,6 +15,7 @@ where
 import Control.Monad.Reader (MonadReader (ask, local), Reader, runReader)
 import Covenant.DeBruijn (DeBruijn (S, Z), asInt)
 import Covenant.Index (Count, Index, count0, intCount, intIndex)
+import Covenant.Internal.PrettyPrint (ScopeBoundary (ScopeBoundary))
 import Covenant.Internal.Type
   ( AbstractTy (BoundAt),
     CompT (CompT),
@@ -22,7 +23,6 @@ import Covenant.Internal.Type
     Constructor (Constructor),
     ConstructorName (ConstructorName),
     DataDeclaration (DataDeclaration, OpaqueData),
-    ScopeBoundary (ScopeBoundary),
     TyName (TyName),
     ValT (Abstraction, BuiltinFlat, Datatype, ThunkT),
   )
