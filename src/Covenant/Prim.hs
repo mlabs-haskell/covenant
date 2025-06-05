@@ -26,13 +26,13 @@ module Covenant.Prim
   )
 where
 
-import Covenant.DeBruijn (DeBruijn (Z))
+import Covenant.DeBruijn (DeBruijn (S, Z))
 import Covenant.Index (ix0, ix1)
 import Covenant.Type
   ( AbstractTy,
     CompT (Comp0, Comp1, Comp2),
     CompTBody (ReturnT, (:--:>)),
-    ValT,
+    ValT (ThunkT),
     boolT,
     byteStringT,
     dataType1T,
@@ -354,14 +354,14 @@ data ThreeArgFunc
   | VerifyEcdsaSecp256k1Signature
   | VerifySchnorrSecp256k1Signature
   | IfThenElse
-  | -- | ChooseList
-    -- | CaseList
-    IntegerToByteString
+  | ChooseList
+  | CaseList
+  | IntegerToByteString
   | AndByteString
   | OrByteString
   | XorByteString
-  | -- | WriteBits
-    ExpModInteger
+  | WriteBits
+  | ExpModInteger
   deriving stock
     ( -- | @since 1.0.0
       Eq,
@@ -382,13 +382,13 @@ instance Arbitrary ThreeArgFunc where
         VerifyEcdsaSecp256k1Signature,
         VerifySchnorrSecp256k1Signature,
         IfThenElse,
-        -- ChooseList,
-        -- CaseList,
+        ChooseList,
+        CaseList,
         IntegerToByteString,
         AndByteString,
         OrByteString,
         XorByteString,
-        -- WriteBits,
+        WriteBits,
         ExpModInteger
       ]
 
@@ -400,18 +400,23 @@ typeThreeArgFunc = \case
   VerifyEd25519Signature -> signatureT
   VerifyEcdsaSecp256k1Signature -> signatureT
   VerifySchnorrSecp256k1Signature -> signatureT
-  IfThenElse ->
-    Comp1 $
-      boolT
-        :--:> tyvar Z ix0
-        :--:> tyvar Z ix0
-        :--:> ReturnT (tyvar Z ix0)
+  IfThenElse -> Comp1 $ boolT :--:> aT :--:> aT :--:> ReturnT aT
+  ChooseList -> Comp2 $ listT aT :--:> bT :--:> bT :--:> ReturnT bT
+  CaseList ->
+    Comp2 $
+      bT
+        :--:> ThunkT (Comp0 $ aTOuter :--:> listT aTOuter :--:> ReturnT bTOuter)
+        :--:> listT aT
+        :--:> ReturnT bT
   IntegerToByteString ->
     Comp0 $
       boolT :--:> integerT :--:> integerT :--:> ReturnT byteStringT
   AndByteString -> bitwiseT
   OrByteString -> bitwiseT
   XorByteString -> bitwiseT
+  WriteBits ->
+    Comp0 $
+      byteStringT :--:> listT integerT :--:> boolT :--:> ReturnT byteStringT
   ExpModInteger ->
     Comp0 $
       integerT
@@ -472,5 +477,11 @@ pairT = dataType2T "Pair"
 aT :: ValT AbstractTy
 aT = tyvar Z ix0
 
+aTOuter :: ValT AbstractTy
+aTOuter = tyvar (S Z) ix0
+
 bT :: ValT AbstractTy
 bT = tyvar Z ix1
+
+bTOuter :: ValT AbstractTy
+bTOuter = tyvar (S Z) ix1
