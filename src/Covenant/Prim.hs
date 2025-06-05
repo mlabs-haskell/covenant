@@ -21,8 +21,8 @@ module Covenant.Prim
     typeTwoArgFunc,
     ThreeArgFunc (..),
     typeThreeArgFunc,
-    -- SixArgFunc (..),
-    -- typeSixArgFunc,
+    SixArgFunc (..),
+    typeSixArgFunc,
   )
 where
 
@@ -439,10 +439,9 @@ typeThreeArgFunc = \case
           :--:> byteStringT
           :--:> ReturnT byteStringT
 
-{-
 -- | All six-argument primitives provided by Plutus.
 --
--- @since 1.0.0
+-- @since 1.1.0
 data SixArgFunc
   = ChooseData
   | CaseData
@@ -457,11 +456,34 @@ data SixArgFunc
 
 -- | Does not shrink.
 --
--- @since 1.0.0
+-- @since 1.1.0
 instance Arbitrary SixArgFunc where
   {-# INLINEABLE arbitrary #-}
   arbitrary = elements [ChooseData, CaseData]
--}
+
+-- | Produce the type of a six-argument primop.
+--
+-- @since 1.1.0
+typeSixArgFunc :: SixArgFunc -> CompT AbstractTy
+typeSixArgFunc = \case
+  ChooseData ->
+    Comp1 $
+      dataT
+        :--:> aT
+        :--:> aT
+        :--:> aT
+        :--:> aT
+        :--:> aT
+        :--:> ReturnT aT
+  CaseData ->
+    Comp1 $
+      ThunkT (Comp0 $ integerT :--:> listT dataT :--:> ReturnT aTOuter)
+        :--:> ThunkT (Comp0 $ listT (pairT dataT dataT) :--:> ReturnT aTOuter)
+        :--:> ThunkT (Comp0 $ listT dataT :--:> ReturnT aTOuter)
+        :--:> ThunkT (Comp0 $ integerT :--:> ReturnT aTOuter)
+        :--:> ThunkT (Comp0 $ byteStringT :--:> ReturnT aTOuter)
+        :--:> dataT
+        :--:> ReturnT aT
 
 -- Helpers
 
