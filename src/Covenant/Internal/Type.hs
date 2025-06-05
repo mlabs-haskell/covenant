@@ -19,8 +19,6 @@ module Covenant.Internal.Type
     thunkT,
     builtinFlat,
     datatype,
-    -- generic utility for debugging/testing
-    prettyStr,
     checkStrategy,
     naturalBaseFunctor,
     negativeBaseFunctor,
@@ -71,7 +69,6 @@ import Data.Map.Strict qualified as Map
 import Data.Set (Set)
 import Data.String (IsString)
 import Data.Text (Text)
-import Data.Text qualified as T
 import Data.Vector (Vector)
 import Data.Vector qualified as Vector
 import Data.Vector.NonEmpty (NonEmptyVector)
@@ -98,16 +95,13 @@ import Optics.Core
 import Prettyprinter
   ( Doc,
     Pretty (pretty),
-    defaultLayoutOptions,
     hsep,
     indent,
-    layoutPretty,
     parens,
     vcat,
     viaShow,
     (<+>),
   )
-import Prettyprinter.Render.Text (renderStrict)
 import Test.QuickCheck.Instances.Text ()
 
 -- | A type abstraction, using a combination of a DeBruijn index (to indicate
@@ -453,9 +447,6 @@ byteStringBaseFunctor = DataDeclaration "ByteString_F" count1 constrs SOP
       ]
 
 -- Helpers
-
-prettyStr :: forall (b :: Type). (Pretty b) => b -> String
-prettyStr = T.unpack . renderStrict . layoutPretty defaultLayoutOptions . pretty
 
 newtype ScopeBoundary = ScopeBoundary Int
   deriving (Show, Eq, Ord, Num, Real, Enum, Integral) via Int
