@@ -32,7 +32,8 @@ import Data.Set (Set)
 import Data.Set qualified as Set
 import Data.Vector qualified as V
 import Data.Vector.NonEmpty qualified as NEV
-import Optics.Core (A_Lens, LabelOptic (labelOptic), folded, lens, preview, review, toListOf, view, (%))
+import Optics.Core (A_Lens, LabelOptic (labelOptic), folded, lens, preview, review, toListOf, view, (%), _2)
+import Optics.Indexed.Core (A_Fold)
 
 {- NOTE: For the purposes of base functor transformation, we follow the pattern established by Edward Kmett's
          'recursion-schemes' library. That is, we regard a datatype as "recursive" if and only if at least one
@@ -248,9 +249,9 @@ mkBBF (DataDeclaration _ numVars ctors _)
 data DatatypeInfo
   = DatatypeInfo
   { _originalDecl :: DataDeclaration AbstractTy,
-    _baseFunctor :: Maybe (DataDeclaration AbstractTy),
-    _bbForm :: Maybe (ValT AbstractTy),
-    _bbBaseF :: Maybe (ValT AbstractTy)
+    _baseFunctorStuff:: Maybe (DataDeclaration AbstractTy,ValT AbstractTy),
+    -- NOTE: The ONLY type that won't have a BB form is `Void` (or something isomorphic to it)
+    _bbForm :: Maybe (ValT AbstractTy)
   }
   deriving stock
     ( -- | @since 1.1.0
@@ -266,18 +267,18 @@ instance
   {-# INLINEABLE labelOptic #-}
   labelOptic =
     lens
-      (\(DatatypeInfo ogDecl _ _ _) -> ogDecl)
-      (\(DatatypeInfo _ b c d) ogDecl -> DatatypeInfo ogDecl b c d)
+      (\(DatatypeInfo ogDecl _ _) -> ogDecl)
+      (\(DatatypeInfo _ b c) ogDecl -> DatatypeInfo ogDecl b c)
 
 instance
-  (k ~ A_Lens, a ~ Maybe (DataDeclaration AbstractTy), b ~ Maybe (DataDeclaration AbstractTy)) =>
+  (k ~ A_Lens, a ~ Maybe (DataDeclaration AbstractTy, ValT AbstractTy), b ~ Maybe (DataDeclaration AbstractTy, ValT AbstractTy)) =>
   LabelOptic "baseFunctor" k DatatypeInfo DatatypeInfo a b
   where
   {-# INLINEABLE labelOptic #-}
   labelOptic =
     lens
-      (\(DatatypeInfo _ baseF _ _) -> baseF)
-      (\(DatatypeInfo a _ c d) baseF -> DatatypeInfo a baseF c d)
+      (\(DatatypeInfo _ baseF _) -> baseF)
+      (\(DatatypeInfo a _ c) baseF -> DatatypeInfo a baseF c)
 
 instance
   (k ~ A_Lens, a ~ Maybe (ValT AbstractTy), b ~ Maybe (ValT AbstractTy)) =>
@@ -286,15 +287,12 @@ instance
   {-# INLINEABLE labelOptic #-}
   labelOptic =
     lens
-      (\(DatatypeInfo _ _ bb _) -> bb)
-      (\(DatatypeInfo a b _ d) bb -> DatatypeInfo a b bb d)
+      (\(DatatypeInfo _ _ bb ) -> bb)
+      (\(DatatypeInfo a b _) bb -> DatatypeInfo a b bb)
 
 instance
-  (k ~ A_Lens, a ~ Maybe (ValT AbstractTy), b ~ Maybe (ValT AbstractTy)) =>
+  (k ~ A_Fold, a ~ ValT AbstractTy, b ~ ValT AbstractTy) =>
   LabelOptic "bbBaseF" k DatatypeInfo DatatypeInfo a b
   where
   {-# INLINEABLE labelOptic #-}
-  labelOptic =
-    lens
-      (\(DatatypeInfo _ _ _ bbf) -> bbf)
-      (\(DatatypeInfo a b c _) bbf -> DatatypeInfo a b c bbf)
+  labelOptic = #baseFunctor % folded % _2
