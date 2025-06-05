@@ -1,3 +1,4 @@
+{-# LANGUAGE OverloadedLists #-}
 {-# LANGUAGE PatternSynonyms #-}
 
 module Covenant.Internal.Type
@@ -21,6 +22,9 @@ module Covenant.Internal.Type
     -- generic utility for debugging/testing
     prettyStr,
     checkStrategy,
+    naturalBaseFunctor,
+    negativeBaseFunctor,
+    byteStringBaseFunctor,
   )
 where
 
@@ -30,12 +34,14 @@ import Control.Monad.Reader
     asks,
     runReader,
   )
-import Covenant.DeBruijn (DeBruijn)
+import Covenant.DeBruijn (DeBruijn (Z))
 import Covenant.Index
   ( Count,
     Index,
+    count1,
     intCount,
     intIndex,
+    ix0,
   )
 import Covenant.Internal.Strategy
   ( DataEncoding
@@ -418,6 +424,33 @@ checkStrategy = \case
           Just (ConsV _ NilV) -> True
           _ -> False
         _ -> False
+
+naturalBaseFunctor :: DataDeclaration AbstractTy
+naturalBaseFunctor = DataDeclaration "Natural_F" count1 constrs SOP
+  where
+    constrs :: Vector (Constructor AbstractTy)
+    constrs =
+      [ Constructor "ZeroNat_F" [],
+        Constructor "SuccNat_F" [Abstraction . BoundAt Z $ ix0]
+      ]
+
+negativeBaseFunctor :: DataDeclaration AbstractTy
+negativeBaseFunctor = DataDeclaration "Negative_F" count1 constrs SOP
+  where
+    constrs :: Vector (Constructor AbstractTy)
+    constrs =
+      [ Constructor "ZeroNeg_F" [],
+        Constructor "PredNeg_F" [Abstraction . BoundAt Z $ ix0]
+      ]
+
+byteStringBaseFunctor :: DataDeclaration AbstractTy
+byteStringBaseFunctor = DataDeclaration "ByteString_F" count1 constrs SOP
+  where
+    constrs :: Vector (Constructor AbstractTy)
+    constrs =
+      [ Constructor "EmptyByteString_F" [],
+        Constructor "ConsByteString_F" [BuiltinFlat IntegerT, Abstraction . BoundAt Z $ ix0]
+      ]
 
 -- Helpers
 
