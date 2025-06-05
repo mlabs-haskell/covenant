@@ -22,7 +22,7 @@ import Covenant.Index (Index)
 import Covenant.Internal.Rename (RenameError)
 import Covenant.Internal.Type (AbstractTy, CompT, ValT)
 import Covenant.Internal.Unification (TypeAppError)
-import Covenant.Prim (OneArgFunc, ThreeArgFunc, TwoArgFunc)
+import Covenant.Prim (OneArgFunc, SixArgFunc, ThreeArgFunc, TwoArgFunc)
 import Data.Kind (Type)
 import Data.Vector (Vector)
 import Data.Word (Word64)
@@ -213,6 +213,8 @@ data CompNodeInfo
   = Builtin1Internal OneArgFunc
   | Builtin2Internal TwoArgFunc
   | Builtin3Internal ThreeArgFunc
+  | -- | @since 1.1.0
+    Builtin6Internal SixArgFunc
   | LamInternal Id
   | ForceInternal Ref
   | ReturnInternal Ref
