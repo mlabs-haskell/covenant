@@ -1,6 +1,16 @@
 {-# LANGUAGE ViewPatterns #-}
 
-module Covenant.Data (mkBaseFunctor, isRecursiveChildOf, allComponentTypes, hasRecursive, mkBBF, noPhantomTyVars, everythingOf) where
+module Covenant.Data
+  ( mkBaseFunctor,
+    isRecursiveChildOf,
+    allComponentTypes,
+    hasRecursive,
+    mkBBF,
+    noPhantomTyVars,
+    everythingOf,
+    DatatypeInfo (DatatypeInfo),
+  )
+where
 
 import Control.Monad.Reader (MonadReader (ask, local), Reader, runReader)
 import Covenant.DeBruijn (DeBruijn (S, Z), asInt)
@@ -22,7 +32,8 @@ import Data.Set (Set)
 import Data.Set qualified as Set
 import Data.Vector qualified as V
 import Data.Vector.NonEmpty qualified as NEV
-import Optics.Core (folded, preview, review, toListOf, view, (%))
+import Optics.Core (A_Lens, LabelOptic (labelOptic), folded, lens, preview, review, toListOf, view, (%), _2)
+import Optics.Indexed.Core (A_Fold)
 
 {- NOTE: For the purposes of base functor transformation, we follow the pattern established by Edward Kmett's
          'recursion-schemes' library. That is, we regard a datatype as "recursive" if and only if at least one
@@ -228,3 +239,60 @@ mkBBF (DataDeclaration _ numVars ctors _)
      - Actually this is slightly false, we need to "bump" all of the indices inside constructor arms by one (because
        they now occur within a Thunk), but after that bump everything is stable as indicated above.
 -}
+
+{- Here for lack of a better place to put it (has to be available to Unification and ASG)
+-}
+
+-- | Packages up all of the relevation datatype information needed
+-- for the ASGBuilder. Note that only certain datatypes have a BB or BB/BF form
+-- (we do not generate forms that are "useless")
+data DatatypeInfo
+  = DatatypeInfo
+  { _originalDecl :: DataDeclaration AbstractTy,
+    _baseFunctorStuff :: Maybe (DataDeclaration AbstractTy, ValT AbstractTy),
+    -- NOTE: The ONLY type that won't have a BB form is `Void` (or something isomorphic to it)
+    _bbForm :: Maybe (ValT AbstractTy)
+  }
+  deriving stock
+    ( -- | @since 1.1.0
+      Eq,
+      -- | @since 1.1.0
+      Show
+    )
+
+instance
+  (k ~ A_Lens, a ~ DataDeclaration AbstractTy, b ~ DataDeclaration AbstractTy) =>
+  LabelOptic "originalDecl" k DatatypeInfo DatatypeInfo a b
+  where
+  {-# INLINEABLE labelOptic #-}
+  labelOptic =
+    lens
+      (\(DatatypeInfo ogDecl _ _) -> ogDecl)
+      (\(DatatypeInfo _ b c) ogDecl -> DatatypeInfo ogDecl b c)
+
+instance
+  (k ~ A_Lens, a ~ Maybe (DataDeclaration AbstractTy, ValT AbstractTy), b ~ Maybe (DataDeclaration AbstractTy, ValT AbstractTy)) =>
+  LabelOptic "baseFunctor" k DatatypeInfo DatatypeInfo a b
+  where
+  {-# INLINEABLE labelOptic #-}
+  labelOptic =
+    lens
+      (\(DatatypeInfo _ baseF _) -> baseF)
+      (\(DatatypeInfo a _ c) baseF -> DatatypeInfo a baseF c)
+
+instance
+  (k ~ A_Lens, a ~ Maybe (ValT AbstractTy), b ~ Maybe (ValT AbstractTy)) =>
+  LabelOptic "bbForm" k DatatypeInfo DatatypeInfo a b
+  where
+  {-# INLINEABLE labelOptic #-}
+  labelOptic =
+    lens
+      (\(DatatypeInfo _ _ bb) -> bb)
+      (\(DatatypeInfo a b _) bb -> DatatypeInfo a b bb)
+
+instance
+  (k ~ A_Fold, a ~ ValT AbstractTy, b ~ ValT AbstractTy) =>
+  LabelOptic "bbBaseF" k DatatypeInfo DatatypeInfo a b
+  where
+  {-# INLINEABLE labelOptic #-}
+  labelOptic = #baseFunctor % folded % _2

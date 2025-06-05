@@ -58,9 +58,25 @@ module Covenant.Type
     TyName (TyName),
     ConstructorName (ConstructorName),
     DataEncoding (SOP, PlutusData, BuiltinStrategy),
-    PlutusDataConstructor (PD_I, PD_B, PD_Constructor, PD_List),
-    PlutusDataStrategy (EnumData, ProductListData, ConstrData, NewtypeData),
-    InternalStrategy (InternalListStrat, InternalPairStrat, InternalDataStrat, InternalAssocMapStrat),
+    PlutusDataConstructor
+      ( PlutusI,
+        PlutusB,
+        PlutusConstr,
+        PlutusList,
+        PlutusMap
+      ),
+    PlutusDataStrategy
+      ( EnumData,
+        ProductListData,
+        ConstrData,
+        NewtypeData
+      ),
+    InternalStrategy
+      ( InternalListStrat,
+        InternalPairStrat,
+        InternalDataStrat,
+        InternalAssocMapStrat
+      ),
 
     -- * Datatype sanity checking
     cycleCheck,
@@ -91,6 +107,27 @@ import Covenant.Internal.Rename
     renameValT,
     runRenameM,
   )
+import Covenant.Internal.Strategy
+  ( InternalStrategy
+      ( InternalAssocMapStrat,
+        InternalDataStrat,
+        InternalListStrat,
+        InternalPairStrat
+      ),
+    PlutusDataConstructor
+      ( PlutusB,
+        PlutusConstr,
+        PlutusI,
+        PlutusList,
+        PlutusMap
+      ),
+    PlutusDataStrategy
+      ( ConstrData,
+        EnumData,
+        NewtypeData,
+        ProductListData
+      ),
+  )
 import Covenant.Internal.Type
   ( AbstractTy (BoundAt),
     BuiltinFlatT
@@ -109,9 +146,6 @@ import Covenant.Internal.Type
     ConstructorName (ConstructorName),
     DataDeclaration (DataDeclaration, OpaqueData),
     DataEncoding (BuiltinStrategy, PlutusData, SOP),
-    InternalStrategy (InternalAssocMapStrat, InternalDataStrat, InternalListStrat, InternalPairStrat),
-    PlutusDataConstructor (PD_B, PD_Constructor, PD_I, PD_List),
-    PlutusDataStrategy (ConstrData, EnumData, NewtypeData, ProductListData),
     Renamed (Rigid, Unifiable, Wildcard),
     TyName (TyName),
     ValT (Abstraction, BuiltinFlat, Datatype, ThunkT),
