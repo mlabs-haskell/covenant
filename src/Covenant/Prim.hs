@@ -27,14 +27,17 @@ module Covenant.Prim
 where
 
 import Covenant.DeBruijn (DeBruijn (Z))
-import Covenant.Index (ix0)
+import Covenant.Index (ix0, ix1)
 import Covenant.Type
-  ( AbstractTy,
-    CompT (Comp0, Comp1),
+  ( AbstractTy (BoundAt),
+    CompT (Comp0, Comp1, Comp2),
     CompTBody (ReturnT, (:--:>)),
-    ValT,
+    ValT (Abstraction),
     boolT,
     byteStringT,
+    dataType1T,
+    dataType2T,
+    dataTypeT,
     g1T,
     g2T,
     integerT,
@@ -70,22 +73,22 @@ data OneArgFunc
   | Blake2b_256
   | EncodeUtf8
   | DecodeUtf8
-  | --  | FstPair
-    --  |  SndPair
-    --  | HeadList
-    --  | TailList
-    --  | NullList
-    --  | MapData
-    --  | ListData
-    --  | IData
-    --  | BData
-    --  | UnConstrData
-    --  | UnMapData
-    --  | UnListData
-    --  | UnIData
-    --  | UnBData
-    --  | SerialiseData
-    BLS12_381_G1_neg
+  | FstPair
+  | SndPair
+  | HeadList
+  | TailList
+  | NullList
+  | MapData
+  | ListData
+  | IData
+  | BData
+  | UnConstrData
+  | UnMapData
+  | UnListData
+  | UnIData
+  | UnBData
+  | SerialiseData
+  | BLS12_381_G1_neg
   | BLS12_381_G1_compress
   | BLS12_381_G1_uncompress
   | BLS12_381_G2_neg
@@ -119,21 +122,21 @@ instance Arbitrary OneArgFunc where
         Blake2b_256,
         EncodeUtf8,
         DecodeUtf8,
-        -- FstPair,
-        -- SndPair,
-        -- HeadList,
-        -- TailList,
-        -- NullList,
-        -- MapData,
-        -- ListData,
-        -- IData,
-        -- BData,
-        -- UnConstrData,
-        -- UnMapData,
-        -- UnListData,
-        -- UnIData,
-        -- UnBData,
-        -- SerialiseData,
+        FstPair,
+        SndPair,
+        HeadList,
+        TailList,
+        NullList,
+        MapData,
+        ListData,
+        IData,
+        BData,
+        UnConstrData,
+        UnMapData,
+        UnListData,
+        UnIData,
+        UnBData,
+        SerialiseData,
         BLS12_381_G1_neg,
         BLS12_381_G1_compress,
         BLS12_381_G1_uncompress,
@@ -159,6 +162,21 @@ typeOneArgFunc = \case
   Blake2b_256 -> hashingT
   EncodeUtf8 -> Comp0 $ stringT :--:> ReturnT byteStringT
   DecodeUtf8 -> Comp0 $ byteStringT :--:> ReturnT stringT
+  FstPair -> Comp2 $ pairT aT bT :--:> ReturnT aT
+  SndPair -> Comp2 $ pairT aT bT :--:> ReturnT bT
+  HeadList -> Comp1 $ listT aT :--:> ReturnT aT
+  TailList -> Comp1 $ listT aT :--:> ReturnT (listT aT)
+  NullList -> Comp1 $ listT aT :--:> ReturnT boolT
+  MapData -> Comp0 $ listT (pairT dataT dataT) :--:> ReturnT dataT
+  ListData -> Comp0 $ listT dataT :--:> ReturnT dataT
+  IData -> Comp0 $ integerT :--:> ReturnT dataT
+  BData -> Comp0 $ byteStringT :--:> ReturnT dataT
+  UnConstrData -> Comp0 $ dataT :--:> ReturnT (pairT integerT (listT dataT))
+  UnMapData -> Comp0 $ dataT :--:> ReturnT (listT (pairT dataT dataT))
+  UnListData -> Comp0 $ dataT :--:> ReturnT (listT dataT)
+  UnIData -> Comp0 $ dataT :--:> ReturnT integerT
+  UnBData -> Comp0 $ dataT :--:> ReturnT byteStringT
+  SerialiseData -> Comp0 $ dataT :--:> ReturnT byteStringT
   BLS12_381_G1_neg -> Comp0 $ g1T :--:> ReturnT g1T
   BLS12_381_G1_compress -> Comp0 $ g1T :--:> ReturnT byteStringT
   BLS12_381_G1_uncompress -> Comp0 $ byteStringT :--:> ReturnT g1T
@@ -174,6 +192,16 @@ typeOneArgFunc = \case
   where
     hashingT :: CompT AbstractTy
     hashingT = Comp0 $ byteStringT :--:> ReturnT byteStringT
+    dataT :: ValT AbstractTy
+    dataT = dataTypeT "Data"
+    aT :: ValT AbstractTy
+    aT = Abstraction . BoundAt Z $ ix0
+    bT :: ValT AbstractTy
+    bT = Abstraction . BoundAt Z $ ix1
+    listT :: ValT AbstractTy -> ValT AbstractTy
+    listT = dataType1T "List"
+    pairT :: ValT AbstractTy -> ValT AbstractTy -> ValT AbstractTy
+    pairT = dataType2T "Pair"
 
 -- | All two-argument primitives provided by Plutus.
 --
