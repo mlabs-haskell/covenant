@@ -3,29 +3,42 @@ module Covenant.Internal.PrettyPrint
     PrettyContext (..),
     PrettyM,
     runPrettyM,
+    bindVars,
+    mkForall,
     prettyStr,
   )
 where
 
 import Control.Monad.Reader
-  ( MonadReader,
+  ( MonadReader (local),
     Reader,
+    asks,
     runReader,
   )
+import Covenant.Index (Count, intCount)
 import Data.Kind (Type)
 import Data.Map.Strict (Map)
+import Data.Map.Strict qualified as Map
 import Data.Text qualified as T
 import Data.Vector (Vector)
+import Data.Vector qualified as Vector
+import GHC.Exts (fromListN)
 import Optics.Core
   ( A_Lens,
     LabelOptic (labelOptic),
     lens,
+    over,
+    review,
+    set,
+    view,
   )
 import Prettyprinter
   ( Doc,
     Pretty (pretty),
     defaultLayoutOptions,
+    hsep,
     layoutPretty,
+    (<+>),
   )
 import Prettyprinter.Render.Text (renderStrict)
 
@@ -94,3 +107,44 @@ runPrettyM (PrettyM ma) = runReader ma (PrettyContext mempty 0 infiniteVars)
       let aToZ = ['a' .. 'z']
           intStrings = ("" <$ aToZ) <> map (show @Integer) [0 ..]
        in zipWith (\x xs -> pretty (x : xs)) aToZ intStrings
+
+bindVars ::
+  forall (ann :: Type) (a :: Type).
+  Count "tyvar" ->
+  (Vector (Doc ann) -> PrettyM ann a) ->
+  PrettyM ann a
+bindVars count' act
+  | count == 0 = crossBoundary (act Vector.empty)
+  | otherwise = crossBoundary $ do
+      here <- asks (view #currentScope)
+      withFreshVarNames count $ \newBoundVars ->
+        local (over #boundIdents (Map.insert here newBoundVars)) (act newBoundVars)
+  where
+    -- Increment the current scope
+    crossBoundary :: PrettyM ann a -> PrettyM ann a
+    crossBoundary = local (over #currentScope (+ 1))
+    count :: Int
+    count = review intCount count'
+
+mkForall ::
+  forall (ann :: Type).
+  Vector (Doc ann) ->
+  Doc ann ->
+  Doc ann
+mkForall tvars funTyBody =
+  if Vector.null tvars
+    then funTyBody
+    else "forall" <+> hsep (Vector.toList tvars) <> "." <+> funTyBody
+
+-- Helpers
+
+-- Generate N fresh var names and use the supplied monadic function to do something with them.
+withFreshVarNames ::
+  forall (ann :: Type) (a :: Type).
+  Int ->
+  (Vector (Doc ann) -> PrettyM ann a) ->
+  PrettyM ann a
+withFreshVarNames n act = do
+  stream <- asks (view #varStream)
+  let (used, rest) = splitAt n stream
+  local (set #varStream rest) . act . fromListN n $ used

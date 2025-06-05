@@ -25,7 +25,7 @@ module Covenant.Internal.Type
   )
 where
 
-import Control.Monad.Reader (asks, local)
+import Control.Monad.Reader (asks)
 import Covenant.DeBruijn (DeBruijn (Z))
 import Covenant.Index
   ( Count,
@@ -38,6 +38,8 @@ import Covenant.Index
 import Covenant.Internal.PrettyPrint
   ( PrettyM,
     ScopeBoundary (ScopeBoundary),
+    bindVars,
+    mkForall,
     runPrettyM,
   )
 import Covenant.Internal.Strategy
@@ -63,7 +65,6 @@ import Covenant.Internal.Strategy
 import Covenant.Util (pattern ConsV, pattern NilV)
 import Data.Functor.Classes (Eq1 (liftEq))
 import Data.Kind (Type)
-import Data.Map.Strict qualified as Map
 import Data.Set (Set)
 import Data.String (IsString)
 import Data.Text (Text)
@@ -72,7 +73,6 @@ import Data.Vector qualified as Vector
 import Data.Vector.NonEmpty (NonEmptyVector)
 import Data.Vector.NonEmpty qualified as NonEmpty
 import Data.Word (Word64)
-import GHC.Exts (fromListN)
 import Optics.At ()
 import Optics.Core
   ( A_Fold,
@@ -82,11 +82,9 @@ import Optics.Core
     folding,
     ix,
     lens,
-    over,
     preview,
     prism,
     review,
-    set,
     view,
     (%),
   )
@@ -467,34 +465,6 @@ prettyFunTy' args = case NonEmpty.unsnoc args of
         argsWithoutResult <- Vector.foldM (\acc x -> (\z -> acc <+> "->" <+> z) <$> prettyValTWithContext x) prettyArg1 otherArgs
         pure . parens $ argsWithoutResult <+> "->" <+> resTy'
 
-bindVars ::
-  forall (ann :: Type) (a :: Type).
-  Count "tyvar" ->
-  (Vector (Doc ann) -> PrettyM ann a) ->
-  PrettyM ann a
-bindVars count' act
-  | count == 0 = crossBoundary (act Vector.empty)
-  | otherwise = crossBoundary $ do
-      here <- asks (view #currentScope)
-      withFreshVarNames count $ \newBoundVars ->
-        local (over #boundIdents (Map.insert here newBoundVars)) (act newBoundVars)
-  where
-    -- Increment the current scope
-    crossBoundary :: PrettyM ann a -> PrettyM ann a
-    crossBoundary = local (over #currentScope (+ 1))
-    count :: Int
-    count = review intCount count'
-
-mkForall ::
-  forall (ann :: Type).
-  Vector (Doc ann) ->
-  Doc ann ->
-  Doc ann
-mkForall tvars funTyBody =
-  if Vector.null tvars
-    then funTyBody
-    else "forall" <+> hsep (Vector.toList tvars) <> "." <+> funTyBody
-
 -- | DO NOT USE THIS TO WRITE OTHER INSTANCES
 --   It exists soley to make readable tests easier to write w/o having to export a bunch of internal printing stuff
 instance Pretty (ValT Renamed) where
@@ -519,17 +489,6 @@ prettyCtorWithContext (Constructor ctorNm ctorArgs)
       let ctorNm' = pretty (runConstructorName ctorNm)
       args' <- Vector.toList <$> traverse prettyValTWithContext ctorArgs
       pure $ ctorNm' <+> hsep args'
-
--- Generate N fresh var names and use the supplied monadic function to do something with them.
-withFreshVarNames ::
-  forall (ann :: Type) (a :: Type).
-  Int ->
-  (Vector (Doc ann) -> PrettyM ann a) ->
-  PrettyM ann a
-withFreshVarNames n act = do
-  stream <- asks (view #varStream)
-  let (used, rest) = splitAt n stream
-  local (set #varStream rest) . act . fromListN n $ used
 
 prettyRenamedWithContext :: forall (ann :: Type). Renamed -> PrettyM ann (Doc ann)
 prettyRenamedWithContext = \case
