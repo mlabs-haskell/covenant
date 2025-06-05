@@ -37,7 +37,7 @@ import Covenant.Index
     intIndex,
     ix0,
   )
-import Covenant.Internal.PrettyPrint (prettyStr)
+import Covenant.Internal.PrettyPrint (ScopeBoundary, prettyStr)
 import Covenant.Internal.Rename (renameDataDecl, renameValT)
 import Covenant.Internal.Type
   ( CompT (CompT),
@@ -46,7 +46,6 @@ import Covenant.Internal.Type
     ConstructorName (ConstructorName),
     DataDeclaration (DataDeclaration, OpaqueData),
     DataEncoding (SOP),
-    ScopeBoundary,
     TyName (TyName),
     ValT (Abstraction, BuiltinFlat, Datatype, ThunkT),
     runConstructorName,
