@@ -401,7 +401,7 @@ newtype ASGBuilder (a :: Type)
       Applicative,
       -- | @since 1.0.0
       Monad,
-      -- | @since 1.0.0
+      -- | @since 1.1.0
       MonadReader ASGEnv,
       -- | @since 1.0.0
       MonadError CovenantTypeError,
