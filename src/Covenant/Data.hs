@@ -249,7 +249,7 @@ mkBBF (DataDeclaration _ numVars ctors _)
 data DatatypeInfo
   = DatatypeInfo
   { _originalDecl :: DataDeclaration AbstractTy,
-    _baseFunctorStuff:: Maybe (DataDeclaration AbstractTy,ValT AbstractTy),
+    _baseFunctorStuff :: Maybe (DataDeclaration AbstractTy, ValT AbstractTy),
     -- NOTE: The ONLY type that won't have a BB form is `Void` (or something isomorphic to it)
     _bbForm :: Maybe (ValT AbstractTy)
   }
@@ -287,7 +287,7 @@ instance
   {-# INLINEABLE labelOptic #-}
   labelOptic =
     lens
-      (\(DatatypeInfo _ _ bb ) -> bb)
+      (\(DatatypeInfo _ _ bb) -> bb)
       (\(DatatypeInfo a b _) bb -> DatatypeInfo a b bb)
 
 instance
