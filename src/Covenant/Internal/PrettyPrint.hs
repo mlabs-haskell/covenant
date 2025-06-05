@@ -5,6 +5,7 @@ module Covenant.Internal.PrettyPrint
     runPrettyM,
     bindVars,
     mkForall,
+    lookupAbstraction,
     prettyStr,
   )
 where
@@ -15,7 +16,12 @@ import Control.Monad.Reader
     asks,
     runReader,
   )
-import Covenant.Index (Count, intCount)
+import Covenant.Index
+  ( Count,
+    Index,
+    intCount,
+    intIndex,
+  )
 import Data.Kind (Type)
 import Data.Map.Strict (Map)
 import Data.Map.Strict qualified as Map
@@ -23,14 +29,18 @@ import Data.Text qualified as T
 import Data.Vector (Vector)
 import Data.Vector qualified as Vector
 import GHC.Exts (fromListN)
+import Optics.At ()
 import Optics.Core
   ( A_Lens,
     LabelOptic (labelOptic),
+    ix,
     lens,
     over,
+    preview,
     review,
     set,
     view,
+    (%),
   )
 import Prettyprinter
   ( Doc,
@@ -135,6 +145,23 @@ mkForall tvars funTyBody =
   if Vector.null tvars
     then funTyBody
     else "forall" <+> hsep (Vector.toList tvars) <> "." <+> funTyBody
+
+lookupAbstraction :: forall (ann :: Type). Int -> Index "tyvar" -> PrettyM ann (Doc ann)
+lookupAbstraction offset argIndex = do
+  let scopeOffset = ScopeBoundary offset
+  let argIndex' = review intIndex argIndex
+  here <- asks (view #currentScope)
+  asks (preview (#boundIdents % ix (here + scopeOffset) % ix argIndex')) >>= \case
+    Nothing ->
+      -- TODO: actual error reporting
+      error $
+        "Internal error: The encountered a variable at arg index "
+          <> show argIndex'
+          <> " with true level "
+          <> show scopeOffset
+          <> " but could not locate the corresponding pretty form at scope level "
+          <> show here
+    Just res' -> pure res'
 
 -- Helpers
 

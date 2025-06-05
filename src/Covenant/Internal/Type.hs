@@ -25,7 +25,6 @@ module Covenant.Internal.Type
   )
 where
 
-import Control.Monad.Reader (asks)
 import Covenant.DeBruijn (DeBruijn (Z))
 import Covenant.Index
   ( Count,
@@ -37,8 +36,8 @@ import Covenant.Index
   )
 import Covenant.Internal.PrettyPrint
   ( PrettyM,
-    ScopeBoundary (ScopeBoundary),
     bindVars,
+    lookupAbstraction,
     mkForall,
     runPrettyM,
   )
@@ -73,20 +72,16 @@ import Data.Vector qualified as Vector
 import Data.Vector.NonEmpty (NonEmptyVector)
 import Data.Vector.NonEmpty qualified as NonEmpty
 import Data.Word (Word64)
-import Optics.At ()
 import Optics.Core
   ( A_Fold,
     A_Lens,
     LabelOptic (labelOptic),
     Prism',
     folding,
-    ix,
     lens,
     preview,
     prism,
     review,
-    view,
-    (%),
   )
 import Prettyprinter
   ( Doc,
@@ -254,6 +249,13 @@ instance Eq1 ValT where
     Datatype tn1 args1 -> \case
       Datatype tn2 args2 -> tn1 == tn2 && liftEq (liftEq f) args1 args2
       _ -> False
+
+-- | /Do not/ use this instance to write other 'Pretty' instances. It exists to
+-- ensure readable tests without having to expose a lot of internals.
+--
+-- @since 1.0.0
+instance Pretty (ValT Renamed) where
+  pretty = runPrettyM . prettyValTWithContext
 
 abstraction :: forall (a :: Type). Prism' (ValT a) a
 abstraction = prism Abstraction (\case (Abstraction a) -> Right a; other -> Left other)
@@ -465,11 +467,6 @@ prettyFunTy' args = case NonEmpty.unsnoc args of
         argsWithoutResult <- Vector.foldM (\acc x -> (\z -> acc <+> "->" <+> z) <$> prettyValTWithContext x) prettyArg1 otherArgs
         pure . parens $ argsWithoutResult <+> "->" <+> resTy'
 
--- | DO NOT USE THIS TO WRITE OTHER INSTANCES
---   It exists soley to make readable tests easier to write w/o having to export a bunch of internal printing stuff
-instance Pretty (ValT Renamed) where
-  pretty = runPrettyM . prettyValTWithContext
-
 prettyValTWithContext :: forall (ann :: Type). ValT Renamed -> PrettyM ann (Doc ann)
 prettyValTWithContext = \case
   Abstraction abstr -> prettyRenamedWithContext abstr
@@ -495,23 +492,6 @@ prettyRenamedWithContext = \case
   Rigid offset index -> lookupAbstraction offset index
   Unifiable i -> lookupAbstraction 0 i
   Wildcard w64 offset i -> pure $ pretty offset <> "_" <> viaShow w64 <> "#" <> pretty (review intIndex i)
-
-lookupAbstraction :: forall (ann :: Type). Int -> Index "tyvar" -> PrettyM ann (Doc ann)
-lookupAbstraction offset argIndex = do
-  let scopeOffset = ScopeBoundary offset
-  let argIndex' = review intIndex argIndex
-  here <- asks (view #currentScope)
-  asks (preview (#boundIdents % ix (here + scopeOffset) % ix argIndex')) >>= \case
-    Nothing ->
-      -- TODO: actual error reporting
-      error $
-        "Internal error: The encountered a variable at arg index "
-          <> show argIndex'
-          <> " with true level "
-          <> show scopeOffset
-          <> " but could not locate the corresponding pretty form at scope level "
-          <> show here
-    Just res' -> pure res'
 
 prettyDataDeclWithContext :: forall (ann :: Type). DataDeclaration Renamed -> PrettyM ann (Doc ann)
 prettyDataDeclWithContext (OpaqueData (TyName tn) _) = pure . pretty $ tn
