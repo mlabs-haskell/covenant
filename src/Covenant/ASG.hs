@@ -171,7 +171,7 @@ import Covenant.Internal.Type
     CompT (CompT),
     CompTBody (CompTBody),
     Renamed,
-    ValT (ThunkT),
+    ValT (ThunkT), TyName,
   )
 import Covenant.Internal.Unification (checkApp)
 import Covenant.Prim
@@ -203,6 +203,7 @@ import Optics.Core
     review,
     (%),
   )
+import Covenant.Data (DatatypeInfo)
 
 -- | A fully-assembled Covenant ASG.
 --
@@ -243,6 +244,23 @@ topLevelNode asg@(ASG (rootId, _)) = nodeAt rootId asg
 -- @since 1.0.0
 nodeAt :: Id -> ASG -> ASGNode
 nodeAt i (ASG (_, mappings)) = fromJust . Map.lookup i $ mappings
+
+
+data ASGEnv = ASGEnv ScopeInfo (Map TyName DatatypeInfo)
+
+instance (k ~ A_Lens, a ~ ScopeInfo, b ~ ScopeInfo) =>
+  LabelOptic "scopeInfo" k ASGEnv ASGEnv a b
+  where
+  {-# INLINEABLE labelOptic #-}
+  labelOptic = lens (\(ASGEnv si _) -> si)
+                    (\(ASGEnv _ dti) si -> ASGEnv si dti)
+
+instance (k ~ A_Lens, a ~ Map TyName DatatypeInfo, b ~ Map TyName DatatypeInfo) =>
+  LabelOptic "datatypeInfo" k ASGEnv ASGEnv a b
+  where
+  {-# INLINEABLE labelOptic #-}
+  labelOptic = lens (\(ASGEnv _ dti) -> dti)
+                    (\(ASGEnv si _) dti -> ASGEnv si dti)
 
 -- | A tracker for scope-related information while building an ASG
 -- programmatically. Currently only tracks available arguments.
@@ -369,7 +387,7 @@ data CovenantError
 --
 -- @since 1.0.0
 newtype ASGBuilder (a :: Type)
-  = ASGBuilder (ReaderT ScopeInfo (ExceptT CovenantTypeError (HashConsT Id ASGNode Identity)) a)
+  = ASGBuilder (ReaderT ASGEnv (ExceptT CovenantTypeError (HashConsT Id ASGNode Identity)) a)
   deriving
     ( -- | @since 1.0.0
       Functor,
@@ -378,23 +396,24 @@ newtype ASGBuilder (a :: Type)
       -- | @since 1.0.0
       Monad,
       -- | @since 1.0.0
-      MonadReader ScopeInfo,
+      MonadReader ASGEnv,
       -- | @since 1.0.0
       MonadError CovenantTypeError,
       -- | @since 1.0.0
       MonadHashCons Id ASGNode
     )
-    via ReaderT ScopeInfo (ExceptT CovenantTypeError (HashConsT Id ASGNode Identity))
+    via ReaderT ASGEnv (ExceptT CovenantTypeError (HashConsT Id ASGNode Identity))
 
 -- | Executes an 'ASGBuilder' to make a \'finished\' ASG.
 --
 -- @since 1.0.0
 runASGBuilder ::
   forall (a :: Type).
+  Map TyName DatatypeInfo ->
   ASGBuilder a ->
   Either CovenantError ASG
-runASGBuilder (ASGBuilder comp) =
-  case runIdentity . runHashConsT . runExceptT . runReaderT comp . ScopeInfo $ Vector.empty of
+runASGBuilder tyDict (ASGBuilder comp) =
+  case runIdentity . runHashConsT . runExceptT . runReaderT comp $  ASGEnv (ScopeInfo  Vector.empty) tyDict of
     (result, bm) -> case result of
       Left err' -> Left . TypeError bm $ err'
       Right _ -> case Bimap.size bm of
@@ -413,14 +432,14 @@ runASGBuilder (ASGBuilder comp) =
 -- @since 1.0.0
 arg ::
   forall (m :: Type -> Type).
-  (MonadError CovenantTypeError m, MonadReader ScopeInfo m) =>
+  (MonadError CovenantTypeError m, MonadReader ASGEnv m) =>
   DeBruijn ->
   Index "arg" ->
   m Arg
 arg scope index = do
-  let scopeAsInt = review asInt scope
+  let scopeAsInt = review asInt scope 
   let indexAsInt = review intIndex index
-  lookedUp <- asks (preview (#argumentInfo % ix scopeAsInt % ix indexAsInt))
+  lookedUp <- asks (preview (#scopeInfo % #argumentInfo % ix scopeAsInt % ix indexAsInt))
   case lookedUp of
     Nothing -> throwError . NoSuchArgument scope $ index
     Just t -> pure . Arg scope index $ t
@@ -513,13 +532,13 @@ ret r = do
 -- @since 1.0.0
 lam ::
   forall (m :: Type -> Type).
-  (MonadHashCons Id ASGNode m, MonadError CovenantTypeError m, MonadReader ScopeInfo m) =>
+  (MonadHashCons Id ASGNode m, MonadError CovenantTypeError m, MonadReader ASGEnv m) =>
   CompT AbstractTy ->
   m Id ->
   m Id
 lam expectedT@(CompT _ (CompTBody xs)) bodyComp = do
   let (args, resultT) = NonEmpty.unsnoc xs
-  bodyId <- local (over #argumentInfo (Vector.cons args)) bodyComp
+  bodyId <- local (over (#scopeInfo % #argumentInfo) (Vector.cons args)) bodyComp
   bodyNode <- lookupRef bodyId
   case bodyNode of
     Nothing -> throwError . BrokenIdReference $ bodyId
