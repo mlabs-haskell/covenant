@@ -29,10 +29,10 @@ where
 import Covenant.DeBruijn (DeBruijn (Z))
 import Covenant.Index (ix0, ix1)
 import Covenant.Type
-  ( AbstractTy (BoundAt),
+  ( AbstractTy,
     CompT (Comp0, Comp1, Comp2),
     CompTBody (ReturnT, (:--:>)),
-    ValT (Abstraction),
+    ValT,
     boolT,
     byteStringT,
     dataType1T,
@@ -192,16 +192,6 @@ typeOneArgFunc = \case
   where
     hashingT :: CompT AbstractTy
     hashingT = Comp0 $ byteStringT :--:> ReturnT byteStringT
-    dataT :: ValT AbstractTy
-    dataT = dataTypeT "Data"
-    aT :: ValT AbstractTy
-    aT = Abstraction . BoundAt Z $ ix0
-    bT :: ValT AbstractTy
-    bT = Abstraction . BoundAt Z $ ix1
-    listT :: ValT AbstractTy -> ValT AbstractTy
-    listT = dataType1T "List"
-    pairT :: ValT AbstractTy -> ValT AbstractTy -> ValT AbstractTy
-    pairT = dataType2T "Pair"
 
 -- | All two-argument primitives provided by Plutus.
 --
@@ -227,11 +217,11 @@ data TwoArgFunc
   | EqualsString
   | ChooseUnit
   | Trace
-  | -- | MkCons
-    -- | ConstrData
-    -- | EqualsData
-    -- | MkPairData
-    BLS12_381_G1_add
+  | MkCons
+  | ConstrData
+  | EqualsData
+  | MkPairData
+  | BLS12_381_G1_add
   | BLS12_381_G1_scalarMul
   | BLS12_381_G1_equal
   | BLS12_381_G1_hashToGroup
@@ -283,10 +273,10 @@ instance Arbitrary TwoArgFunc where
         EqualsString,
         ChooseUnit,
         Trace,
-        -- MkCons,
-        -- ConstrData,
-        -- EqualsData,
-        -- MkPairData,
+        MkCons,
+        ConstrData,
+        EqualsData,
+        MkPairData,
         BLS12_381_G1_add,
         BLS12_381_G1_scalarMul,
         BLS12_381_G1_equal,
@@ -328,8 +318,12 @@ typeTwoArgFunc = \case
   LessThanEqualsByteString -> compareT byteStringT
   AppendString -> combineT stringT
   EqualsString -> compareT stringT
-  ChooseUnit -> Comp1 $ unitT :--:> tyvar Z ix0 :--:> ReturnT (tyvar Z ix0)
-  Trace -> Comp1 $ stringT :--:> tyvar Z ix0 :--:> ReturnT (tyvar Z ix0)
+  ChooseUnit -> Comp1 $ unitT :--:> aT :--:> ReturnT aT
+  Trace -> Comp1 $ stringT :--:> aT :--:> ReturnT aT
+  MkCons -> Comp1 $ aT :--:> listT aT :--:> ReturnT (listT aT)
+  ConstrData -> Comp0 $ integerT :--:> listT dataT :--:> ReturnT dataT
+  EqualsData -> compareT dataT
+  MkPairData -> Comp0 $ dataT :--:> dataT :--:> ReturnT (pairT dataT dataT)
   BLS12_381_G1_add -> combineT g1T
   BLS12_381_G1_scalarMul -> Comp0 $ integerT :--:> g1T :--:> ReturnT g1T
   BLS12_381_G1_equal -> compareT g1T
@@ -463,3 +457,20 @@ instance Arbitrary SixArgFunc where
   {-# INLINEABLE arbitrary #-}
   arbitrary = elements [ChooseData, CaseData]
 -}
+
+-- Helpers
+
+dataT :: ValT AbstractTy
+dataT = dataTypeT "Data"
+
+listT :: ValT AbstractTy -> ValT AbstractTy
+listT = dataType1T "List"
+
+pairT :: ValT AbstractTy -> ValT AbstractTy -> ValT AbstractTy
+pairT = dataType2T "Pair"
+
+aT :: ValT AbstractTy
+aT = tyvar Z ix0
+
+bT :: ValT AbstractTy
+bT = tyvar Z ix1
