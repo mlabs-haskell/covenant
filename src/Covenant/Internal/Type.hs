@@ -1,6 +1,3 @@
-{-# OPTIONS_GHC -Wno-unrecognised-pragmas #-}
-
-{-# HLINT ignore "Use camelCase" #-}
 module Covenant.Internal.Type
   ( AbstractTy (..),
     Renamed (..),
@@ -14,9 +11,6 @@ module Covenant.Internal.Type
     TyName (..),
     ScopeBoundary (..), -- used in the generators
     DataEncoding (..),
-    PlutusDataConstructor (..),
-    PlutusDataStrategy (..),
-    InternalStrategy (..),
     runConstructorName,
     abstraction,
     thunkT,
@@ -40,6 +34,26 @@ import Covenant.Index
     Index,
     intCount,
     intIndex,
+  )
+import Covenant.Internal.Strategy
+  ( DataEncoding
+      ( BuiltinStrategy,
+        PlutusData,
+        SOP
+      ),
+    InternalStrategy
+      ( InternalAssocMapStrat,
+        InternalDataStrat,
+        InternalListStrat,
+        InternalPairStrat
+      ),
+    PlutusDataConstructor,
+    PlutusDataStrategy
+      ( ConstrData,
+        EnumData,
+        NewtypeData,
+        ProductListData
+      ),
   )
 import Data.Functor.Classes (Eq1 (liftEq))
 import Data.Kind (Type)
@@ -214,21 +228,6 @@ data ValT (a :: Type)
       Show
     )
 
-abstraction :: forall (a :: Type). Prism' (ValT a) a
-abstraction = prism Abstraction (\case (Abstraction a) -> Right a; other -> Left other)
-
-thunkT :: forall (a :: Type). Prism' (ValT a) (CompT a)
-thunkT = prism ThunkT (\case (ThunkT compT) -> Right compT; other -> Left other)
-
-builtinFlat :: forall (a :: Type). Prism' (ValT a) BuiltinFlatT
-builtinFlat = prism BuiltinFlat (\case (BuiltinFlat bi) -> Right bi; other -> Left other)
-
-datatype :: forall (a :: Type). Prism' (ValT a) (TyName, Vector (ValT a))
-datatype =
-  prism
-    (uncurry Datatype)
-    (\case (Datatype tn args) -> Right (tn, args); other -> Left other)
-
 -- | @since 1.0.0
 instance Eq1 ValT where
   {-# INLINEABLE liftEq #-}
@@ -245,6 +244,21 @@ instance Eq1 ValT where
     Datatype tn1 args1 -> \case
       Datatype tn2 args2 -> tn1 == tn2 && liftEq (liftEq f) args1 args2
       _ -> False
+
+abstraction :: forall (a :: Type). Prism' (ValT a) a
+abstraction = prism Abstraction (\case (Abstraction a) -> Right a; other -> Left other)
+
+thunkT :: forall (a :: Type). Prism' (ValT a) (CompT a)
+thunkT = prism ThunkT (\case (ThunkT compT) -> Right compT; other -> Left other)
+
+builtinFlat :: forall (a :: Type). Prism' (ValT a) BuiltinFlatT
+builtinFlat = prism BuiltinFlat (\case (BuiltinFlat bi) -> Right bi; other -> Left other)
+
+datatype :: forall (a :: Type). Prism' (ValT a) (TyName, Vector (ValT a))
+datatype =
+  prism
+    (uncurry Datatype)
+    (\case (Datatype tn args) -> Right (tn, args); other -> Left other)
 
 -- | All builtin types that are \'flat\': that is, do not have other types
 -- \'nested inside them\'.
@@ -487,57 +501,6 @@ instance (k ~ A_Lens, a ~ ConstructorName, b ~ ConstructorName) => LabelOptic "c
 instance (k ~ A_Lens, a ~ Vector (ValT c), b ~ Vector (ValT c)) => LabelOptic "constructorArgs" k (Constructor c) (Constructor c) a b where
   {-# INLINEABLE labelOptic #-}
   labelOptic = lens (\(Constructor _ args) -> args) (\(Constructor n _) args -> Constructor n args)
-
--- | @since 1.1.0
-data DataEncoding
-  = SOP
-  | PlutusData PlutusDataStrategy
-  | BuiltinStrategy InternalStrategy
-  deriving stock
-    ( -- | @since 1.1.0
-      Show,
-      -- | @since 1.1.0
-      Eq,
-      -- | @since 1.1.0
-      Ord
-    )
-
--- | @since 1.1.0
-data PlutusDataConstructor
-  = PD_I
-  | PD_B
-  | PD_Constructor
-  | PD_List
-  | PD_Map
-  deriving stock
-    ( -- | @since 1.1.0
-      Show,
-      -- | @since 1.1.0
-      Eq,
-      -- | @since 1.1.0
-      Ord
-    )
-
--- | @since 1.1.0
--- NOTE: Wrapped data-primitive (Integer + ByteString) require a special case for their encoders, which was originally
---       part of a "WrapperData" strategy here which we generalized to the NewtypeData strategy.
-data PlutusDataStrategy
-  = EnumData
-  | ProductListData
-  | ConstrData
-  | NewtypeData
-  deriving stock
-    ( -- | @since 1.1.0
-      Show,
-      -- | @since 1.1.0
-      Eq,
-      -- | @since 1.1.0
-      Ord
-    )
-
--- TxID encoding changes from v2 to v3 (so make sure to use the v3) / MLResult has a weird broken instance
-data InternalStrategy = InternalListStrat | InternalPairStrat | InternalDataStrat | InternalAssocMapStrat
-  deriving stock (Show, Eq, Ord)
 
 -- | @since 1.1.0
 data DataDeclaration a
