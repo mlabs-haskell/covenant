@@ -1,6 +1,6 @@
 cabal-version: 3.0
 name: covenant
-version: 1.1.0
+version: 1.0.0
 synopsis: Standalone IR for Cardano scripts.
 description:
   A library describing a call-by-push-value, Turner-total IR. Includes the ability to build up the IR programmatically.
@@ -11,9 +11,9 @@ license-file: LICENSE
 author: Koz Ross, Sean Hunter
 maintainer: koz@mlabs.city, sean@mlabs.city
 bug-reports: https://github.com/mlabs-haskell/covenant/issues
-copyright: (C) MLabs 2024
+copyright: (C) MLabs 2024-2025
 category: Covenant
-tested-with: ghc ==9.8.4 || ==9.10.1 || ==9.12.1
+tested-with: ghc ==9.8.4 || ==9.10.2 || ==9.12.2
 build-type: Simple
 extra-source-files:
   CHANGELOG.md
