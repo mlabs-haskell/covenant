@@ -95,7 +95,6 @@ common bench-lang
 library
   import: lang
   exposed-modules:
-    -- FIXME: Re-export the important bits from somewhere else or expose this module (ask Koz which is better)
     Control.Monad.Action
     Control.Monad.HashCons
     Covenant.ASG
@@ -112,6 +111,7 @@ library
     Covenant.Internal.KindCheck
     Covenant.Internal.Ledger
     Covenant.Internal.Rename
+    Covenant.Internal.Strategy
     Covenant.Internal.Term
     Covenant.Internal.Type
     Covenant.Internal.Unification
