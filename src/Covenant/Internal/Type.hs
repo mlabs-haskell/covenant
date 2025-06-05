@@ -277,8 +277,8 @@ naturalBaseFunctor = DataDeclaration "Natural_F" count1 constrs SOP
   where
     constrs :: Vector (Constructor AbstractTy)
     constrs =
-      [ Constructor "ZeroNatF" [],
-        Constructor "SuccNatF" [Abstraction . BoundAt Z $ ix0]
+      [ Constructor "ZeroNat_F" [],
+        Constructor "SuccNat_F" [Abstraction . BoundAt Z $ ix0]
       ]
 
 negativeBaseFunctor :: DataDeclaration AbstractTy
@@ -286,8 +286,8 @@ negativeBaseFunctor = DataDeclaration "Negative_F" count1 constrs SOP
   where
     constrs :: Vector (Constructor AbstractTy)
     constrs =
-      [ Constructor "ZeroNegF" [],
-        Constructor "PredNegF" [Abstraction . BoundAt Z $ ix0]
+      [ Constructor "ZeroNeg_F" [],
+        Constructor "PredNeg_F" [Abstraction . BoundAt Z $ ix0]
       ]
 
 byteStringBaseFunctor :: DataDeclaration AbstractTy
@@ -295,8 +295,8 @@ byteStringBaseFunctor = DataDeclaration "ByteString_F" count1 constrs SOP
   where
     constrs :: Vector (Constructor AbstractTy)
     constrs =
-      [ Constructor "EmptyByteStringF" [],
-        Constructor "ConsByteStringF" [BuiltinFlat IntegerT, Abstraction . BoundAt Z $ ix0]
+      [ Constructor "EmptyByteString_F" [],
+        Constructor "ConsByteString_F" [BuiltinFlat IntegerT, Abstraction . BoundAt Z $ ix0]
       ]
 
 -- Helpers
