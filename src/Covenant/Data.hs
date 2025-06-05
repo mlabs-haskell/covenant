@@ -1,14 +1,16 @@
 {-# LANGUAGE ViewPatterns #-}
 
-module Covenant.Data (mkBaseFunctor,
-                      isRecursiveChildOf,
-                      allComponentTypes,
-                      hasRecursive,
-                      mkBBF,
-                      noPhantomTyVars,
-                      everythingOf,
-                      DatatypeInfo(DatatypeInfo),
-                      ) where
+module Covenant.Data
+  ( mkBaseFunctor,
+    isRecursiveChildOf,
+    allComponentTypes,
+    hasRecursive,
+    mkBBF,
+    noPhantomTyVars,
+    everythingOf,
+    DatatypeInfo (DatatypeInfo),
+  )
+where
 
 import Control.Monad.Reader (MonadReader (ask, local), Reader, runReader)
 import Covenant.DeBruijn (DeBruijn (S, Z), asInt)
@@ -30,7 +32,7 @@ import Data.Set (Set)
 import Data.Set qualified as Set
 import Data.Vector qualified as V
 import Data.Vector.NonEmpty qualified as NEV
-import Optics.Core (folded, preview, review, toListOf, view, (%), A_Lens, LabelOptic (labelOptic), lens)
+import Optics.Core (A_Lens, LabelOptic (labelOptic), folded, lens, preview, review, toListOf, view, (%))
 
 {- NOTE: For the purposes of base functor transformation, we follow the pattern established by Edward Kmett's
          'recursion-schemes' library. That is, we regard a datatype as "recursive" if and only if at least one
@@ -237,50 +239,62 @@ mkBBF (DataDeclaration _ numVars ctors _)
        they now occur within a Thunk), but after that bump everything is stable as indicated above.
 -}
 
-
 {- Here for lack of a better place to put it (has to be available to Unification and ASG)
 -}
 
 -- | Packages up all of the relevation datatype information needed
 -- for the ASGBuilder. Note that only certain datatypes have a BB or BB/BF form
 -- (we do not generate forms that are "useless")
-data DatatypeInfo =
-  DatatypeInfo
-    { _originalDecl :: DataDeclaration AbstractTy
-    , _baseFunctor :: Maybe (DataDeclaration AbstractTy)
-    , _bbForm :: Maybe (ValT AbstractTy)
-    , _bbBaseF :: Maybe (ValT AbstractTy)}
-    deriving stock
+data DatatypeInfo
+  = DatatypeInfo
+  { _originalDecl :: DataDeclaration AbstractTy,
+    _baseFunctor :: Maybe (DataDeclaration AbstractTy),
+    _bbForm :: Maybe (ValT AbstractTy),
+    _bbBaseF :: Maybe (ValT AbstractTy)
+  }
+  deriving stock
     ( -- | @since 1.1.0
-     Eq,
+      Eq,
       -- | @since 1.1.0
-     Show
+      Show
     )
 
-instance (k ~ A_Lens, a ~ DataDeclaration AbstractTy, b ~ DataDeclaration AbstractTy) =>
+instance
+  (k ~ A_Lens, a ~ DataDeclaration AbstractTy, b ~ DataDeclaration AbstractTy) =>
   LabelOptic "originalDecl" k DatatypeInfo DatatypeInfo a b
   where
   {-# INLINEABLE labelOptic #-}
-  labelOptic = lens (\(DatatypeInfo ogDecl _ _ _) -> ogDecl)
-                    (\(DatatypeInfo _ b c d) ogDecl -> DatatypeInfo ogDecl b c d)
+  labelOptic =
+    lens
+      (\(DatatypeInfo ogDecl _ _ _) -> ogDecl)
+      (\(DatatypeInfo _ b c d) ogDecl -> DatatypeInfo ogDecl b c d)
 
-instance (k ~ A_Lens, a ~ Maybe (DataDeclaration AbstractTy), b ~ Maybe (DataDeclaration AbstractTy)) =>
+instance
+  (k ~ A_Lens, a ~ Maybe (DataDeclaration AbstractTy), b ~ Maybe (DataDeclaration AbstractTy)) =>
   LabelOptic "baseFunctor" k DatatypeInfo DatatypeInfo a b
   where
   {-# INLINEABLE labelOptic #-}
-  labelOptic = lens (\(DatatypeInfo _ baseF _ _) -> baseF)
-                    (\(DatatypeInfo a _ c d) baseF -> DatatypeInfo a baseF c d)
+  labelOptic =
+    lens
+      (\(DatatypeInfo _ baseF _ _) -> baseF)
+      (\(DatatypeInfo a _ c d) baseF -> DatatypeInfo a baseF c d)
 
-instance (k ~ A_Lens, a ~ Maybe (ValT AbstractTy), b ~ Maybe (ValT AbstractTy)) =>
+instance
+  (k ~ A_Lens, a ~ Maybe (ValT AbstractTy), b ~ Maybe (ValT AbstractTy)) =>
   LabelOptic "bbForm" k DatatypeInfo DatatypeInfo a b
   where
   {-# INLINEABLE labelOptic #-}
-  labelOptic = lens (\(DatatypeInfo _ _ bb _) -> bb)
-                    (\(DatatypeInfo a b _ d) bb -> DatatypeInfo a b bb d)
+  labelOptic =
+    lens
+      (\(DatatypeInfo _ _ bb _) -> bb)
+      (\(DatatypeInfo a b _ d) bb -> DatatypeInfo a b bb d)
 
-instance (k ~ A_Lens, a ~ Maybe (ValT AbstractTy), b ~ Maybe (ValT AbstractTy)) =>
+instance
+  (k ~ A_Lens, a ~ Maybe (ValT AbstractTy), b ~ Maybe (ValT AbstractTy)) =>
   LabelOptic "bbBaseF" k DatatypeInfo DatatypeInfo a b
   where
   {-# INLINEABLE labelOptic #-}
-  labelOptic = lens (\(DatatypeInfo _ _ _ bbf) -> bbf)
-                    (\(DatatypeInfo a b c _) bbf -> DatatypeInfo a b c bbf)
+  labelOptic =
+    lens
+      (\(DatatypeInfo _ _ _ bbf) -> bbf)
+      (\(DatatypeInfo a b c _) bbf -> DatatypeInfo a b c bbf)

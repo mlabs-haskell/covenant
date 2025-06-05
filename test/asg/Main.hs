@@ -65,8 +65,8 @@ import Covenant.Type
 import Covenant.Util (pattern ConsV, pattern NilV)
 import Data.Coerce (coerce)
 import Data.Kind (Type)
-import Data.Maybe (fromJust)
 import Data.Map qualified as M
+import Data.Maybe (fromJust)
 import Data.Vector qualified as Vector
 import Optics.Core (preview, review)
 import Test.QuickCheck

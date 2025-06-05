@@ -113,6 +113,7 @@ import Control.Monad.Reader
     runReaderT,
   )
 import Covenant.Constant (AConstant, typeConstant)
+import Covenant.Data (DatatypeInfo)
 import Covenant.DeBruijn (DeBruijn, asInt)
 import Covenant.Index (Index, count0, intIndex)
 import Covenant.Internal.Rename
@@ -171,7 +172,8 @@ import Covenant.Internal.Type
     CompT (CompT),
     CompTBody (CompTBody),
     Renamed,
-    ValT (ThunkT), TyName,
+    TyName,
+    ValT (ThunkT),
   )
 import Covenant.Internal.Unification (checkApp)
 import Covenant.Prim
@@ -203,7 +205,6 @@ import Optics.Core
     review,
     (%),
   )
-import Covenant.Data (DatatypeInfo)
 
 -- | A fully-assembled Covenant ASG.
 --
@@ -245,22 +246,27 @@ topLevelNode asg@(ASG (rootId, _)) = nodeAt rootId asg
 nodeAt :: Id -> ASG -> ASGNode
 nodeAt i (ASG (_, mappings)) = fromJust . Map.lookup i $ mappings
 
-
 data ASGEnv = ASGEnv ScopeInfo (Map TyName DatatypeInfo)
 
-instance (k ~ A_Lens, a ~ ScopeInfo, b ~ ScopeInfo) =>
+instance
+  (k ~ A_Lens, a ~ ScopeInfo, b ~ ScopeInfo) =>
   LabelOptic "scopeInfo" k ASGEnv ASGEnv a b
   where
   {-# INLINEABLE labelOptic #-}
-  labelOptic = lens (\(ASGEnv si _) -> si)
-                    (\(ASGEnv _ dti) si -> ASGEnv si dti)
+  labelOptic =
+    lens
+      (\(ASGEnv si _) -> si)
+      (\(ASGEnv _ dti) si -> ASGEnv si dti)
 
-instance (k ~ A_Lens, a ~ Map TyName DatatypeInfo, b ~ Map TyName DatatypeInfo) =>
+instance
+  (k ~ A_Lens, a ~ Map TyName DatatypeInfo, b ~ Map TyName DatatypeInfo) =>
   LabelOptic "datatypeInfo" k ASGEnv ASGEnv a b
   where
   {-# INLINEABLE labelOptic #-}
-  labelOptic = lens (\(ASGEnv _ dti) -> dti)
-                    (\(ASGEnv si _) dti -> ASGEnv si dti)
+  labelOptic =
+    lens
+      (\(ASGEnv _ dti) -> dti)
+      (\(ASGEnv si _) dti -> ASGEnv si dti)
 
 -- | A tracker for scope-related information while building an ASG
 -- programmatically. Currently only tracks available arguments.
@@ -413,7 +419,7 @@ runASGBuilder ::
   ASGBuilder a ->
   Either CovenantError ASG
 runASGBuilder tyDict (ASGBuilder comp) =
-  case runIdentity . runHashConsT . runExceptT . runReaderT comp $  ASGEnv (ScopeInfo  Vector.empty) tyDict of
+  case runIdentity . runHashConsT . runExceptT . runReaderT comp $ ASGEnv (ScopeInfo Vector.empty) tyDict of
     (result, bm) -> case result of
       Left err' -> Left . TypeError bm $ err'
       Right _ -> case Bimap.size bm of
@@ -437,7 +443,7 @@ arg ::
   Index "arg" ->
   m Arg
 arg scope index = do
-  let scopeAsInt = review asInt scope 
+  let scopeAsInt = review asInt scope
   let indexAsInt = review intIndex index
   lookedUp <- asks (preview (#scopeInfo % #argumentInfo % ix scopeAsInt % ix indexAsInt))
   case lookedUp of
