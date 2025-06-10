@@ -9,13 +9,14 @@ module Covenant.Data
     noPhantomTyVars,
     everythingOf,
     DatatypeInfo (DatatypeInfo),
-    renameDatatypeInfo
+    renameDatatypeInfo,
   )
 where
 
 import Control.Monad.Reader (MonadReader (ask, local), Reader, runReader)
 import Covenant.DeBruijn (DeBruijn (S, Z), asInt)
 import Covenant.Index (Count, Index, count0, intCount, intIndex)
+import Covenant.Internal.Rename (RenameError, renameDataDecl, renameValT, runRenameM)
 import Covenant.Internal.Type
   ( AbstractTy (BoundAt),
     CompT (CompT),
@@ -23,10 +24,12 @@ import Covenant.Internal.Type
     Constructor (Constructor),
     ConstructorName (ConstructorName),
     DataDeclaration (DataDeclaration, OpaqueData),
+    Renamed,
     ScopeBoundary (ScopeBoundary),
     TyName (TyName),
-    ValT (Abstraction, BuiltinFlat, Datatype, ThunkT), Renamed,
+    ValT (Abstraction, BuiltinFlat, Datatype, ThunkT),
   )
+import Data.Bitraversable (Bitraversable (bitraverse))
 import Data.Kind (Type)
 import Data.Maybe (fromJust)
 import Data.Set (Set)
@@ -35,8 +38,6 @@ import Data.Vector qualified as V
 import Data.Vector.NonEmpty qualified as NEV
 import Optics.Core (A_Lens, LabelOptic (labelOptic), folded, lens, preview, review, toListOf, view, (%), _2)
 import Optics.Indexed.Core (A_Fold)
-import Covenant.Internal.Rename (RenameError, renameDataDecl, runRenameM, renameValT)
-import Data.Bitraversable (Bitraversable(bitraverse))
 
 {- NOTE: For the purposes of base functor transformation, we follow the pattern established by Edward Kmett's
          'recursion-schemes' library. That is, we regard a datatype as "recursive" if and only if at least one
@@ -265,8 +266,8 @@ data DatatypeInfo (var :: Type)
 
 renameDatatypeInfo :: DatatypeInfo AbstractTy -> Either RenameError (DatatypeInfo Renamed)
 renameDatatypeInfo (DatatypeInfo ogDecl baseFStuff bb) = runRenameM $ do
-  ogDecl' <-  renameDataDecl ogDecl
-  baseFStuff' <-  traverse (bitraverse renameDataDecl renameValT) baseFStuff
+  ogDecl' <- renameDataDecl ogDecl
+  baseFStuff' <- traverse (bitraverse renameDataDecl renameValT) baseFStuff
   bb' <- traverse renameValT bb
   pure $ DatatypeInfo ogDecl' baseFStuff' bb'
 

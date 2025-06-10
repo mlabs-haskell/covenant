@@ -98,7 +98,7 @@ where
 
 import Control.Monad.Except
   ( ExceptT,
-    MonadError (throwError, catchError),
+    MonadError (catchError, throwError),
     runExceptT,
   )
 import Control.Monad.HashCons
@@ -175,7 +175,7 @@ import Covenant.Internal.Type
     TyName,
     ValT (ThunkT),
   )
-import Covenant.Internal.Unification (checkApp, MonadUnify (askDatatypes, throwTypeAppErr, catchTypeAppErr))
+import Covenant.Internal.Unification (MonadUnify (askDatatypes, catchTypeAppErr, throwTypeAppErr), checkApp)
 import Covenant.Prim
   ( OneArgFunc,
     ThreeArgFunc,
@@ -203,7 +203,8 @@ import Optics.Core
     over,
     preview,
     review,
-    (%), view,
+    view,
+    (%),
   )
 
 -- | A fully-assembled Covenant ASG.
@@ -410,7 +411,7 @@ newtype ASGBuilder (a :: Type)
     )
     via ReaderT ASGEnv (ExceptT CovenantTypeError (HashConsT Id ASGNode Identity))
 
-instance MonadUnify ASGBuilder  where
+instance MonadUnify ASGBuilder where
   askDatatypes = asks (view #datatypeInfo)
   throwTypeAppErr = throwError . UnificationError
   catchTypeAppErr act f = catchError act $ \case
@@ -650,4 +651,3 @@ renameArg r =
       Left err' -> throwError . RenameArgumentFailed t $ err'
       Right renamed -> pure . Just $ renamed
     ErrorNodeType -> pure Nothing
-

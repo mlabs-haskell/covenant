@@ -4,7 +4,7 @@ module Covenant.Internal.Unification
   ( TypeAppError (..),
     checkApp,
     runUnifyM,
-    MonadUnify (..)
+    MonadUnify (..),
   )
 where
 
@@ -13,14 +13,19 @@ import Data.Ord (comparing)
 #if __GLASGOW_HASKELL__==908
 import Data.Foldable (foldl')
 #endif
-import Control.Monad.Except (catchError, throwError, MonadError)
+import Control.Monad.Except (MonadError, catchError, throwError)
+import Control.Monad.Reader (MonadReader, ReaderT (runReaderT), ask)
+import Covenant.Data (DatatypeInfo, renameDatatypeInfo)
 import Covenant.Index (Index, intCount, intIndex)
+import Covenant.Internal.Rename (RenameError)
 import Covenant.Internal.Type
-  ( BuiltinFlatT,
+  ( AbstractTy,
+    BuiltinFlatT,
     CompT (CompT),
     CompTBody (CompTBody),
     Renamed (Rigid, Unifiable, Wildcard),
-    ValT (Abstraction, BuiltinFlat, Datatype, ThunkT), TyName, AbstractTy,
+    TyName,
+    ValT (Abstraction, BuiltinFlat, Datatype, ThunkT),
   )
 import Data.Kind (Type)
 import Data.Map (Map)
@@ -29,15 +34,12 @@ import Data.Map.Strict qualified as Map
 import Data.Maybe (fromJust, mapMaybe)
 import Data.Set (Set)
 import Data.Set qualified as Set
+import Data.Text (Text)
 import Data.Vector (Vector)
 import Data.Vector qualified as Vector
 import Data.Vector.NonEmpty qualified as NonEmpty
 import Data.Word (Word64)
-import Optics.Core (preview, ix, view)
-import Control.Monad.Reader (ReaderT (runReaderT), MonadReader, ask)
-import Covenant.Data (DatatypeInfo, renameDatatypeInfo)
-import Data.Text (Text)
-import Covenant.Internal.Rename (RenameError)
+import Optics.Core (ix, preview, view)
 
 -- | @since 1.0.0
 data TypeAppError
@@ -79,7 +81,8 @@ newtype UnifyM a = UnifyM (ReaderT (Map TyName (DatatypeInfo AbstractTy)) (Eithe
       Monad,
       MonadReader (Map TyName (DatatypeInfo AbstractTy)),
       MonadError TypeAppError
-    ) via (ReaderT (Map TyName (DatatypeInfo AbstractTy)) (Either TypeAppError))
+    )
+    via (ReaderT (Map TyName (DatatypeInfo AbstractTy)) (Either TypeAppError))
 
 runUnifyM :: Map TyName (DatatypeInfo AbstractTy) -> UnifyM a -> Either TypeAppError a
 runUnifyM tyDict (UnifyM act) = runReaderT act tyDict
@@ -88,21 +91,24 @@ runUnifyM tyDict (UnifyM act) = runReaderT act tyDict
 --         this really seems like the best way to make this play nice with ASGBuilder
 class (Monad m) => MonadUnify (m :: Type -> Type) where
   askDatatypes :: m (Map TyName (DatatypeInfo AbstractTy))
-  throwTypeAppErr :: forall (a :: Type).TypeAppError -> m a
+  throwTypeAppErr :: forall (a :: Type). TypeAppError -> m a
   catchTypeAppErr :: forall (a :: Type). m a -> (TypeAppError -> m a) -> m a
 
-lookupDatatypeInfo :: forall (m :: Type -> Type)
-                    . MonadUnify m
-                   => TyName
-                   -> m (DatatypeInfo Renamed)
-lookupDatatypeInfo tn = askDatatypes >>= \tyDict -> case preview (ix tn) tyDict of
-  Nothing -> throwTypeAppErr $ NoDatatypeInfo tn
-  Just dti -> either (throwTypeAppErr . DatatypeInfoRenameFailed tn) pure $ renameDatatypeInfo dti
+lookupDatatypeInfo ::
+  forall (m :: Type -> Type).
+  (MonadUnify m) =>
+  TyName ->
+  m (DatatypeInfo Renamed)
+lookupDatatypeInfo tn =
+  askDatatypes >>= \tyDict -> case preview (ix tn) tyDict of
+    Nothing -> throwTypeAppErr $ NoDatatypeInfo tn
+    Just dti -> either (throwTypeAppErr . DatatypeInfoRenameFailed tn) pure $ renameDatatypeInfo dti
 
-lookupBBForm :: forall (m :: Type -> Type). MonadUnify m => TyName -> m (ValT Renamed)
-lookupBBForm tn = lookupDatatypeInfo tn >>= \dti -> case view #bbForm dti of
-  Nothing -> throwTypeAppErr $ NoBBForm tn
-  Just bbForm -> pure bbForm
+lookupBBForm :: forall (m :: Type -> Type). (MonadUnify m) => TyName -> m (ValT Renamed)
+lookupBBForm tn =
+  lookupDatatypeInfo tn >>= \dti -> case view #bbForm dti of
+    Nothing -> throwTypeAppErr $ NoBBForm tn
+    Just bbForm -> pure bbForm
 
 instance MonadUnify UnifyM where
   askDatatypes = ask
@@ -110,11 +116,12 @@ instance MonadUnify UnifyM where
   catchTypeAppErr = catchError
 
 -- | @since 1.1.0
-checkApp :: forall (m :: Type -> Type)
-          . MonadUnify m
-         => CompT Renamed
-         -> [Maybe (ValT Renamed)]
-         -> m (ValT Renamed)
+checkApp ::
+  forall (m :: Type -> Type).
+  (MonadUnify m) =>
+  CompT Renamed ->
+  [Maybe (ValT Renamed)] ->
+  m (ValT Renamed)
 checkApp f@(CompT _ (CompTBody xs)) =
   let (curr, rest) = NonEmpty.uncons xs
    in go curr (Vector.toList rest)
@@ -131,7 +138,7 @@ checkApp f@(CompT _ (CompTBody xs)) =
         [] -> fixUp currParam
         _ -> throwTypeAppErr . ExcessArgs f . Vector.fromList $ args
       _ -> case args of
-        [] -> throwTypeAppErr  . InsufficientArgs $ f
+        [] -> throwTypeAppErr . InsufficientArgs $ f
         (currArg : restArgs) -> do
           newRestParams <- case currArg of
             -- An error argument unifies with anything, as it's effectively
@@ -179,7 +186,7 @@ substitute index toSub = \case
 -- unification errors to whatever types 'wrap' them.
 promoteUnificationError ::
   forall (a :: Type) (m :: Type -> Type).
-  MonadUnify m =>
+  (MonadUnify m) =>
   ValT Renamed ->
   ValT Renamed ->
   TypeAppError ->
@@ -189,7 +196,7 @@ promoteUnificationError topLevelExpected topLevelActual =
     DoesNotUnify _ _ -> DoesNotUnify topLevelExpected topLevelActual
     err -> err
 
-fixUp :: forall (m :: Type -> Type). MonadUnify m => ValT Renamed -> m (ValT Renamed)
+fixUp :: forall (m :: Type -> Type). (MonadUnify m) => ValT Renamed -> m (ValT Renamed)
 fixUp = \case
   -- We have a result that's effectively `forall a . a` but not an error
   Abstraction (Unifiable index) -> throwTypeAppErr . LeakingUnifiable $ index
@@ -228,7 +235,7 @@ collectUnifiables = \case
 
 unify ::
   forall (m :: Type -> Type).
-  MonadUnify m =>
+  (MonadUnify m) =>
   ValT Renamed ->
   ValT Renamed ->
   m (Map (Index "tyvar") (ValT Renamed))
@@ -308,17 +315,16 @@ unify expected actual =
         Abstraction (Rigid _ _) -> unificationError
         Abstraction _ -> noSubUnify
         Datatype tn' args'
-         | tn' /= tn -> unificationError
-         | otherwise -> do
-             bbFormConcreteA <- concretify bbForm args'
-             unify bbFormConcreteE bbFormConcreteA
+          | tn' /= tn -> unificationError
+          | otherwise -> do
+              bbFormConcreteA <- concretify bbForm args'
+              unify bbFormConcreteE bbFormConcreteA
         _ -> unificationError
 
     concretify :: ValT Renamed -> Vector (ValT Renamed) -> m (ValT Renamed)
     concretify (ThunkT compT) args = checkApp compT (pure <$> Vector.toList args)
     concretify _ _ = throwTypeAppErr $ ImpossibleHappened "BBForm not a Thunk"
 
-    
     reconcile ::
       Map (Index "tyvar") (ValT Renamed) ->
       Map (Index "tyvar") (ValT Renamed) ->
