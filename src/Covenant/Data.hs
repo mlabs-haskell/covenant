@@ -9,6 +9,7 @@ module Covenant.Data
     noPhantomTyVars,
     everythingOf,
     DatatypeInfo (DatatypeInfo),
+    renameDatatypeInfo
   )
 where
 
@@ -24,7 +25,7 @@ import Covenant.Internal.Type
     DataDeclaration (DataDeclaration, OpaqueData),
     ScopeBoundary (ScopeBoundary),
     TyName (TyName),
-    ValT (Abstraction, BuiltinFlat, Datatype, ThunkT),
+    ValT (Abstraction, BuiltinFlat, Datatype, ThunkT), Renamed,
   )
 import Data.Kind (Type)
 import Data.Maybe (fromJust)
@@ -34,6 +35,8 @@ import Data.Vector qualified as V
 import Data.Vector.NonEmpty qualified as NEV
 import Optics.Core (A_Lens, LabelOptic (labelOptic), folded, lens, preview, review, toListOf, view, (%), _2)
 import Optics.Indexed.Core (A_Fold)
+import Covenant.Internal.Rename (RenameError, renameDataDecl, runRenameM, renameValT)
+import Data.Bitraversable (Bitraversable(bitraverse))
 
 {- NOTE: For the purposes of base functor transformation, we follow the pattern established by Edward Kmett's
          'recursion-schemes' library. That is, we regard a datatype as "recursive" if and only if at least one
@@ -246,12 +249,12 @@ mkBBF (DataDeclaration _ numVars ctors _)
 -- | Packages up all of the relevation datatype information needed
 -- for the ASGBuilder. Note that only certain datatypes have a BB or BB/BF form
 -- (we do not generate forms that are "useless")
-data DatatypeInfo
+data DatatypeInfo (var :: Type)
   = DatatypeInfo
-  { _originalDecl :: DataDeclaration AbstractTy,
-    _baseFunctorStuff :: Maybe (DataDeclaration AbstractTy, ValT AbstractTy),
+  { _originalDecl :: DataDeclaration var,
+    _baseFunctorStuff :: Maybe (DataDeclaration var, ValT var),
     -- NOTE: The ONLY type that won't have a BB form is `Void` (or something isomorphic to it)
-    _bbForm :: Maybe (ValT AbstractTy)
+    _bbForm :: Maybe (ValT var)
   }
   deriving stock
     ( -- | @since 1.1.0
@@ -260,9 +263,16 @@ data DatatypeInfo
       Show
     )
 
+renameDatatypeInfo :: DatatypeInfo AbstractTy -> Either RenameError (DatatypeInfo Renamed)
+renameDatatypeInfo (DatatypeInfo ogDecl baseFStuff bb) = runRenameM $ do
+  ogDecl' <-  renameDataDecl ogDecl
+  baseFStuff' <-  traverse (bitraverse renameDataDecl renameValT) baseFStuff
+  bb' <- traverse renameValT bb
+  pure $ DatatypeInfo ogDecl' baseFStuff' bb'
+
 instance
-  (k ~ A_Lens, a ~ DataDeclaration AbstractTy, b ~ DataDeclaration AbstractTy) =>
-  LabelOptic "originalDecl" k DatatypeInfo DatatypeInfo a b
+  (k ~ A_Lens, a ~ DataDeclaration var, b ~ DataDeclaration var) =>
+  LabelOptic "originalDecl" k (DatatypeInfo var) (DatatypeInfo var) a b
   where
   {-# INLINEABLE labelOptic #-}
   labelOptic =
@@ -271,8 +281,8 @@ instance
       (\(DatatypeInfo _ b c) ogDecl -> DatatypeInfo ogDecl b c)
 
 instance
-  (k ~ A_Lens, a ~ Maybe (DataDeclaration AbstractTy, ValT AbstractTy), b ~ Maybe (DataDeclaration AbstractTy, ValT AbstractTy)) =>
-  LabelOptic "baseFunctor" k DatatypeInfo DatatypeInfo a b
+  (k ~ A_Lens, a ~ Maybe (DataDeclaration var, ValT var), b ~ Maybe (DataDeclaration var, ValT var)) =>
+  LabelOptic "baseFunctor" k (DatatypeInfo var) (DatatypeInfo var) a b
   where
   {-# INLINEABLE labelOptic #-}
   labelOptic =
@@ -281,8 +291,8 @@ instance
       (\(DatatypeInfo a _ c) baseF -> DatatypeInfo a baseF c)
 
 instance
-  (k ~ A_Lens, a ~ Maybe (ValT AbstractTy), b ~ Maybe (ValT AbstractTy)) =>
-  LabelOptic "bbForm" k DatatypeInfo DatatypeInfo a b
+  (k ~ A_Lens, a ~ Maybe (ValT var), b ~ Maybe (ValT var)) =>
+  LabelOptic "bbForm" k (DatatypeInfo var) (DatatypeInfo var) a b
   where
   {-# INLINEABLE labelOptic #-}
   labelOptic =
@@ -291,8 +301,8 @@ instance
       (\(DatatypeInfo a b _) bb -> DatatypeInfo a b bb)
 
 instance
-  (k ~ A_Fold, a ~ ValT AbstractTy, b ~ ValT AbstractTy) =>
-  LabelOptic "bbBaseF" k DatatypeInfo DatatypeInfo a b
+  (k ~ A_Fold, a ~ ValT var, b ~ ValT var) =>
+  LabelOptic "bbBaseF" k (DatatypeInfo var) (DatatypeInfo var) a b
   where
   {-# INLINEABLE labelOptic #-}
   labelOptic = #baseFunctor % folded % _2

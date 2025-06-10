@@ -98,7 +98,7 @@ where
 
 import Control.Monad.Except
   ( ExceptT,
-    MonadError (throwError),
+    MonadError (throwError, catchError),
     runExceptT,
   )
 import Control.Monad.HashCons
@@ -175,7 +175,7 @@ import Covenant.Internal.Type
     TyName,
     ValT (ThunkT),
   )
-import Covenant.Internal.Unification (checkApp)
+import Covenant.Internal.Unification (checkApp, MonadUnify (askDatatypes, throwTypeAppErr, catchTypeAppErr))
 import Covenant.Prim
   ( OneArgFunc,
     ThreeArgFunc,
@@ -203,7 +203,7 @@ import Optics.Core
     over,
     preview,
     review,
-    (%),
+    (%), view,
   )
 
 -- | A fully-assembled Covenant ASG.
@@ -246,7 +246,7 @@ topLevelNode asg@(ASG (rootId, _)) = nodeAt rootId asg
 nodeAt :: Id -> ASG -> ASGNode
 nodeAt i (ASG (_, mappings)) = fromJust . Map.lookup i $ mappings
 
-data ASGEnv = ASGEnv ScopeInfo (Map TyName DatatypeInfo)
+data ASGEnv = ASGEnv ScopeInfo (Map TyName (DatatypeInfo AbstractTy))
 
 instance
   (k ~ A_Lens, a ~ ScopeInfo, b ~ ScopeInfo) =>
@@ -259,7 +259,7 @@ instance
       (\(ASGEnv _ dti) si -> ASGEnv si dti)
 
 instance
-  (k ~ A_Lens, a ~ Map TyName DatatypeInfo, b ~ Map TyName DatatypeInfo) =>
+  (k ~ A_Lens, a ~ Map TyName (DatatypeInfo AbstractTy), b ~ Map TyName (DatatypeInfo AbstractTy)) =>
   LabelOptic "datatypeInfo" k ASGEnv ASGEnv a b
   where
   {-# INLINEABLE labelOptic #-}
@@ -410,12 +410,19 @@ newtype ASGBuilder (a :: Type)
     )
     via ReaderT ASGEnv (ExceptT CovenantTypeError (HashConsT Id ASGNode Identity))
 
+instance MonadUnify ASGBuilder  where
+  askDatatypes = asks (view #datatypeInfo)
+  throwTypeAppErr = throwError . UnificationError
+  catchTypeAppErr act f = catchError act $ \case
+    UnificationError e -> f e
+    otherError -> throwError otherError
+
 -- | Executes an 'ASGBuilder' to make a \'finished\' ASG.
 --
 -- @since 1.0.0
 runASGBuilder ::
   forall (a :: Type).
-  Map TyName DatatypeInfo ->
+  Map TyName (DatatypeInfo AbstractTy) ->
   ASGBuilder a ->
   Either CovenantError ASG
 runASGBuilder tyDict (ASGBuilder comp) =
@@ -586,7 +593,7 @@ err = refTo AnError
 -- @since 1.0.0
 app ::
   forall (m :: Type -> Type).
-  (MonadHashCons Id ASGNode m, MonadError CovenantTypeError m) =>
+  (MonadHashCons Id ASGNode m, MonadError CovenantTypeError m, MonadUnify m) =>
   Id ->
   Vector Ref ->
   m Id
@@ -597,11 +604,9 @@ app fId argRefs = do
       Left err' -> throwError . RenameFunctionFailed fT $ err'
       Right renamedFT -> do
         renamedArgs <- traverse renameArg argRefs
-        case checkApp renamedFT . Vector.toList $ renamedArgs of
-          Left err' -> throwError . UnificationError $ err'
-          Right result -> do
-            let restored = undoRename result
-            refTo . AValNode restored . AppInternal fId $ argRefs
+        result <- checkApp renamedFT . Vector.toList $ renamedArgs
+        let restored = undoRename result
+        refTo . AValNode restored . AppInternal fId $ argRefs
     ValNodeType t -> throwError . ApplyToValType $ t
     ErrorNodeType -> throwError ApplyToError
 
@@ -645,3 +650,4 @@ renameArg r =
       Left err' -> throwError . RenameArgumentFailed t $ err'
       Right renamed -> pure . Just $ renamed
     ErrorNodeType -> pure Nothing
+
