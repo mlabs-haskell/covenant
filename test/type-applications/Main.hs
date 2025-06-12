@@ -13,11 +13,31 @@ import Covenant.Index
     ix1,
   )
 import Covenant.Test (Concrete (Concrete), testDatatypes)
-import Covenant.Type (AbstractTy (BoundAt), CompT (Comp0, Comp1, Comp2), DataDeclaration, Renamed (Rigid, Wildcard), TyName, TypeAppError
-                                                                                                                               ( DoesNotUnify,
-                                                                                                                                 ExcessArgs,
-                                                                                                                                 InsufficientArgs
-                                                                                                                               ), ValT (Abstraction, Datatype, ThunkT), checkApp, integerT, prettyStr, renameCompT, renameDataDecl, renameValT, runRenameM, runUnifyM, tyvar, unify, pattern ReturnT, pattern (:--:>))
+import Covenant.Type
+  ( AbstractTy (BoundAt),
+    CompT (Comp0, Comp1, Comp2),
+    DataDeclaration,
+    Renamed (Rigid, Wildcard),
+    TyName,
+    TypeAppError
+      ( DoesNotUnify,
+        ExcessArgs,
+        InsufficientArgs
+      ),
+    ValT (Abstraction, Datatype, ThunkT),
+    checkApp,
+    integerT,
+    prettyStr,
+    renameCompT,
+    renameDataDecl,
+    renameValT,
+    runRenameM,
+    runUnifyM,
+    tyvar,
+    unify,
+    pattern ReturnT,
+    pattern (:--:>),
+  )
 import Data.Coerce (coerce)
 import Data.Foldable (Foldable (foldl'))
 import Data.Functor.Identity (Identity (Identity))
