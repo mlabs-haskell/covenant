@@ -42,6 +42,7 @@ module Covenant.Type
     -- ** Introduction
     renameValT,
     renameCompT,
+    renameDataDecl,
 
     -- ** Elimination
     runRenameM,
@@ -49,6 +50,8 @@ module Covenant.Type
     -- * Type application
     TypeAppError (..),
     checkApp,
+    unify,
+    runUnifyM,
     -- Data declarations & friends
     DataDeclaration (DataDeclaration, OpaqueData),
     Constructor (Constructor),
@@ -61,6 +64,9 @@ module Covenant.Type
 
     -- * Datatype sanity checking
     cycleCheck,
+
+    -- * for tests
+    prettyStr,
   )
 where
 
@@ -87,6 +93,7 @@ import Covenant.Internal.Rename
     renameCompT,
     renameValT,
     runRenameM,
+    renameDataDecl,
   )
 import Covenant.Internal.Type
   ( AbstractTy (BoundAt),
@@ -111,7 +118,7 @@ import Covenant.Internal.Type
     PlutusDataStrategy (ConstrData, EnumData, NewtypeData, ProductListData),
     Renamed (Rigid, Unifiable, Wildcard),
     TyName (TyName),
-    ValT (Abstraction, BuiltinFlat, Datatype, ThunkT),
+    ValT (Abstraction, BuiltinFlat, Datatype, ThunkT), prettyStr,
   )
 import Covenant.Internal.Unification
   ( TypeAppError
@@ -121,7 +128,7 @@ import Covenant.Internal.Unification
         LeakingUnifiable,
         LeakingWildcard
       ),
-    checkApp,
+    checkApp, unify, runUnifyM,
   )
 import Data.Coerce (coerce)
 import Data.Kind (Type)

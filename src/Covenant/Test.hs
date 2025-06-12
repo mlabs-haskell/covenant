@@ -14,6 +14,9 @@ module Covenant.Test
     testNonConcrete,
     prettyDeclSet,
     testBBF,
+    -- re-exports for tests (modules are internal so shouldn't be exposed to users but we need them)
+    testDatatypes,
+    ledgerTypes
   )
 where
 
@@ -68,6 +71,7 @@ import Covenant.Type
     RenameM,
     runRenameM,
   )
+import Covenant.Internal.Ledger (testDatatypes, ledgerTypes)
 import Data.Coerce (coerce)
 import Data.Foldable (forM_)
 import Data.Kind (Type)

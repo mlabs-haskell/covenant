@@ -1,5 +1,6 @@
 module Covenant.Internal.Ledger
   ( ledgerTypes,
+    testDatatypes,
   )
 where
 
@@ -652,3 +653,25 @@ a = Abstraction (BoundAt Z ix0)
 
 b :: ValT AbstractTy
 b = Abstraction (BoundAt Z ix1)
+
+
+-- Datatypes for testing, defined here to avoid having to export the helpers
+
+eitherT :: DataDeclaration AbstractTy
+eitherT = mkDecl $
+  Decl "Either"
+  count2
+  [Ctor "Left" [Abstraction (BoundAt Z ix0)],
+   Ctor "Right" [Abstraction (BoundAt Z ix1)]]
+  (PlutusData ConstrData)
+
+unitT :: DataDeclaration AbstractTy
+unitT = mkDecl $
+  Decl "Unit"
+  count0
+  [Ctor "Unit" []]
+  (PlutusData ConstrData)
+
+
+testDatatypes :: [DataDeclaration AbstractTy]
+testDatatypes = [maybeT,eitherT,unitT] 

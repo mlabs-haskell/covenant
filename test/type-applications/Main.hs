@@ -3,16 +3,16 @@
 module Main (main) where
 
 import Control.Applicative ((<|>))
-import Control.Monad (guard)
+import Control.Monad (guard, (<=<), void)
 import Covenant.DeBruijn (DeBruijn (S, Z), asInt)
 import Covenant.Index
   ( Index,
     ix0,
     ix1,
   )
-import Covenant.Test (Concrete (Concrete))
+import Covenant.Test (Concrete (Concrete), testDatatypes)
 import Covenant.Type
-  ( AbstractTy,
+  ( AbstractTy(BoundAt),
     CompT (Comp0, Comp1, Comp2),
     Renamed (Rigid, Wildcard),
     TypeAppError
@@ -31,13 +31,13 @@ import Covenant.Type
     runRenameM,
     tyvar,
     pattern ReturnT,
-    pattern (:--:>),
+    pattern (:--:>), TyName, DataDeclaration, renameDataDecl, runUnifyM, unify, prettyStr,
   )
 import Data.Coerce (coerce)
 import Data.Functor.Identity (Identity (Identity))
 import Data.Kind (Type)
 import Data.Vector qualified as Vector
-import Optics.Core (review)
+import Optics.Core (review, view)
 import Test.QuickCheck
   ( Gen,
     Property,
@@ -54,9 +54,16 @@ import Test.QuickCheck
     vectorOf,
     (===),
   )
-import Test.Tasty (adjustOption, defaultMain, testGroup)
+import Test.Tasty (adjustOption, defaultMain, testGroup, TestTree)
 import Test.Tasty.HUnit (assertEqual, assertFailure, testCase)
 import Test.Tasty.QuickCheck (QuickCheckTests, testProperty)
+import qualified Data.Map as M
+import Covenant.Data (DatatypeInfo, mkDatatypeInfo)
+import Data.Foldable (Foldable(foldl'))
+import Control.Exception.Base (throwIO)
+import Data.Maybe (fromJust)
+import Covenant.Type (ValT(Datatype))
+
 
 main :: IO ()
 main =
@@ -79,7 +86,11 @@ main =
           testProperty "unifiable expected, rigid actual" propUnifyUnifiableRigid,
           testProperty "rigid expected, rigid actual" propUnifyRigid,
           testProperty "wildcard expected, rigid actual" propUnifyWildcardRigid
-        ]
+        ],
+      testGroup "Datatypes" [
+        testMonotypeBB,
+        testPolyUnify
+                            ]
     ]
   where
     -- Note (Koz, 26/02/2025): By default, QuickCheck runs only 100 tests per
@@ -101,7 +112,7 @@ propTooManyArgs = forAllShrink gen shr $ \excessArgs ->
         [] -> discard -- should be impossible
         _ : extraArgs ->
           let expected = Left . ExcessArgs renamedIdT . Vector.fromList . fmap Just $ extraArgs
-              actual = checkApp renamedIdT (fmap Just renamedExcessArgs)
+              actual = checkApp M.empty renamedIdT (fmap Just renamedExcessArgs)
            in expected === actual
   where
     -- Note (Koz, 14/04/2025): The default size of 100 makes it rather painful
@@ -128,7 +139,7 @@ unitInsufficientArgs :: IO ()
 unitInsufficientArgs = do
   renamedIdT <- failLeft . runRenameM . renameCompT $ idT
   let expected = Left . InsufficientArgs $ renamedIdT
-  let actual = checkApp renamedIdT []
+  let actual = checkApp M.empty renamedIdT []
   assertEqual "" expected actual
 
 -- Try to apply `forall a . a -> !a` to a random concrete type. Result should be
@@ -138,7 +149,7 @@ propIdConcrete = forAllShrink arbitrary shrink $ \(Concrete t) ->
   withRenamedComp idT $ \renamedIdT ->
     withRenamedVals (Identity t) $ \(Identity t') ->
       let expected = Right t'
-          actual = checkApp renamedIdT [Just t']
+          actual = checkApp M.empty renamedIdT [Just t']
        in expected === actual
 
 -- Try to apply `forall a b . a -> b -> !a` to two identical concrete types.
@@ -148,7 +159,7 @@ propConst2Same = forAllShrink arbitrary shrink $ \(Concrete t) ->
   withRenamedComp const2T $ \renamedConst2T ->
     withRenamedVals (Identity t) $ \(Identity t') ->
       let expected = Right t'
-          actual = checkApp renamedConst2T [Just t', Just t']
+          actual = checkApp M.empty renamedConst2T [Just t', Just t']
        in expected === actual
 
 -- Try to apply `forall a b . a -> b -> !a` to two random _different_ concrete
@@ -161,7 +172,7 @@ propConst2Different = forAllShrink arbitrary shrink $ \(Concrete t1, Concrete t2
       withRenamedVals (Identity t1) $ \(Identity t1') ->
         withRenamedVals (Identity t2) $ \(Identity t2') ->
           let expected = Right t1'
-              actual = checkApp renamedConst2T [Just t1', Just t2']
+              actual = checkApp M.empty renamedConst2T [Just t1', Just t2']
            in expected === actual
 
 -- Randomly pick a concrete type `A`, then pick a type `b` which is either `A`
@@ -175,14 +186,14 @@ propUnifyConcrete = forAllShrink gen shr $ \(tA, mtB) ->
       case mtB of
         Nothing ->
           let expected = Right integerT
-              actual = checkApp f [Just tA']
+              actual = checkApp M.empty f [Just tA']
            in expected === actual
         Just tB ->
           if tA == tB
             then discard
             else withRenamedVals (Identity tB) $ \(Identity arg) ->
               let expected = Left . DoesNotUnify tA' $ arg
-                  actual = checkApp f [Just arg]
+                  actual = checkApp M.empty f [Just arg]
                in expected === actual
   where
     -- This ensures that our cases occur with equal frequency.
@@ -213,7 +224,7 @@ propUnifyRigidConcrete = forAllShrink arbitrary shrink $ \(Concrete t, scope, ix
       -- stepdown' for `f` even though we bind no variables.
       let trueLevel = negate . review asInt $ scope
           expected = Left . DoesNotUnify (Abstraction . Rigid trueLevel $ ix) $ t'
-          actual = checkApp f [Just t']
+          actual = checkApp M.empty f [Just t']
        in expected === actual
 
 -- Randomly pick a concrete type A, then try to apply `(forall a . a ->
@@ -226,7 +237,7 @@ propUnifyWildcardConcrete = forAllShrink arbitrary shrink $ \(Concrete t) ->
          in withRenamedVals (Identity argT) $ \(Identity argT') ->
               let lhs = ThunkT . Comp1 $ Abstraction (Wildcard 1 2 ix0) :--:> ReturnT integerT
                   expected = Left . DoesNotUnify lhs $ argT'
-                  actual = checkApp f [Just argT']
+                  actual = checkApp M.empty f [Just argT']
                in expected === actual
 
 -- Randomly generate a concrete type A, then try to apply
@@ -238,7 +249,7 @@ propUnifyWildcardUnifiable = forAllShrink arbitrary shrink $ \(Concrete t) ->
     withRenamedVals (Identity t) $ \(Identity t') ->
       withRenamedVals (Identity . ThunkT . Comp1 $ tyvar Z ix0 :--:> ReturnT t) $ \(Identity arg) ->
         let expected = Right t'
-            actual = checkApp f [Just arg]
+            actual = checkApp M.empty f [Just arg]
          in expected === actual
 
 -- Randomly generate a concrete type A, and a rigid type B, then try to apply `A
@@ -250,7 +261,7 @@ propUnifyConcreteRigid = forAllShrink arbitrary shrink $ \(Concrete aT, scope, i
       withRenamedVals (Identity aT) $ \(Identity aT') ->
         let level = negate . review asInt $ scope
             expected = Left . DoesNotUnify aT' . Abstraction . Rigid level $ index
-            actual = checkApp f [Just arg]
+            actual = checkApp M.empty f [Just arg]
          in expected === actual
 
 -- Randomly generate a rigid type A, then try to apply `forall a . a -> !a` to
@@ -260,7 +271,7 @@ propUnifyUnifiableRigid = forAllShrink arbitrary shrink $ \(scope, index) ->
   withRenamedComp idT $ \f ->
     withRenamedVals (Identity $ tyvar scope index) $ \(Identity arg) ->
       let expected = Right arg
-          actual = checkApp f [Just arg]
+          actual = checkApp M.empty f [Just arg]
        in expected === actual
 
 -- Randomly generate a scope S and an index I, then another scope S' and another
@@ -272,7 +283,7 @@ propUnifyUnifiableRigid = forAllShrink arbitrary shrink $ \(scope, index) ->
 propUnifyRigid :: Property
 propUnifyRigid = forAllShrink gen shr $ \testData ->
   withTestData testData $ \(f, arg, expected) ->
-    let actual = checkApp f [Just arg]
+    let actual = checkApp M.empty f [Just arg]
      in expected === actual
   where
     gen :: Gen (DeBruijn, Index "tyvar", Maybe (Either DeBruijn (Index "tyvar")))
@@ -331,8 +342,39 @@ propUnifyWildcardRigid = forAllShrink arbitrary shrink $ \(scope, index) ->
          in withRenamedVals (Identity argT) $ \(Identity argT') ->
               let lhs = ThunkT . Comp1 $ Abstraction (Wildcard 1 2 ix0) :--:> ReturnT integerT
                   expected = Left . DoesNotUnify lhs $ argT'
-                  actual = checkApp f [Just argT']
+                  actual = checkApp M.empty f [Just argT']
                in expected === actual
+
+
+-- Simple datatype unification unit test. Checks whether `data Unit = Unit` has the expected BB form
+testMonotypeBB :: TestTree
+testMonotypeBB = testCase "unitBbf" $ do
+  let expected =  Comp1 $ Abstraction (BoundAt Z ix0) :--:> ReturnT (Abstraction $ BoundAt Z ix0)
+  expected' <- failLeft  . runRenameM . renameCompT $ expected
+  actual <- case fromJust . (view #bbForm <=< M.lookup "Unit") $ tyAppTestDatatypes of
+                  ThunkT inner -> either (throwIO . userError . show) pure .  runRenameM $ renameCompT inner
+                  _ ->  assertFailure "BB form not a thunk!"
+  assertEqual "unit bbf" expected' actual
+
+-- checks whether `forall a. Maybe a` gives the expected BB form.
+-- This is a simple unit test that is meant to provide some evidence that
+-- the `forall a. (forall r. r -> (a -> r) -> r)` and `forall a r. r -> (a -> r) -> r` forms
+-- are compatible
+testPolyUnify :: TestTree
+testPolyUnify = testCase "appMaybe" $ do
+  let -- due to "datatypes don't have a binding context"
+      -- we need to "double thunk" this. That is, the
+      -- following expression should represent `forall a. (forall r. r -> (a -> r) -> r)`
+        expected = ThunkT . Comp1 $ ReturnT (ThunkT . Comp1 $
+                                    Abstraction (BoundAt Z ix0)
+                                    :--:> ThunkT (Comp0 $
+                                                   Abstraction (BoundAt (S (S Z)) ix0)
+                                                   :--:> ReturnT (Abstraction (BoundAt (S Z) ix0)))
+                                    :--:> ReturnT (Abstraction (BoundAt Z ix0)))
+        expected2 = ThunkT . Comp1 $ ReturnT (Datatype "Maybe" (Vector.fromList [Abstraction (BoundAt  Z ix0)]))
+  expected' <- failLeft . runRenameM . renameValT $ expected2
+  actual <- lookupRenamedBB "Maybe"
+  unifyTest expected' actual
 
 -- Helpers
 
@@ -368,3 +410,23 @@ withRenamedVals ::
 withRenamedVals vals f = case runRenameM . traverse renameValT $ vals of
   Left err -> counterexample (show err) False
   Right vals' -> f vals'
+
+_withRenamedDatadecl ::
+  DataDeclaration AbstractTy ->
+  (DataDeclaration Renamed -> Property) ->
+  Property
+_withRenamedDatadecl decl f = case runRenameM . renameDataDecl $ decl of
+  Left err -> counterexample (show err) False
+  Right decl' -> f decl'
+
+tyAppTestDatatypes :: M.Map TyName (DatatypeInfo AbstractTy)
+tyAppTestDatatypes = foldl' (\acc decl -> M.insert (view #datatypeName decl) (mkDatatypeInfo decl) acc) M.empty testDatatypes
+
+lookupRenamedBB :: TyName
+                -> IO (ValT Renamed)
+lookupRenamedBB tn  = case  (view #bbForm <=< M.lookup tn) $ tyAppTestDatatypes of
+  Nothing -> assertFailure $ "No datatypeinfo for " <> show tn
+  Just bb -> (failLeft . runRenameM . renameValT $ bb)
+
+unifyTest :: ValT Renamed -> ValT Renamed -> IO ()
+unifyTest e a = void . failLeft . runUnifyM tyAppTestDatatypes $ unify e a

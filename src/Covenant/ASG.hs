@@ -98,7 +98,7 @@ where
 
 import Control.Monad.Except
   ( ExceptT,
-    MonadError (catchError, throwError),
+    MonadError (throwError),
     runExceptT,
   )
 import Control.Monad.HashCons
@@ -175,7 +175,7 @@ import Covenant.Internal.Type
     TyName,
     ValT (ThunkT),
   )
-import Covenant.Internal.Unification (MonadUnify (askDatatypes, catchTypeAppErr, throwTypeAppErr), checkApp)
+import Covenant.Internal.Unification (checkApp)
 import Covenant.Prim
   ( OneArgFunc,
     ThreeArgFunc,
@@ -411,13 +411,6 @@ newtype ASGBuilder (a :: Type)
     )
     via ReaderT ASGEnv (ExceptT CovenantTypeError (HashConsT Id ASGNode Identity))
 
-instance MonadUnify ASGBuilder where
-  askDatatypes = asks (view #datatypeInfo)
-  throwTypeAppErr = throwError . UnificationError
-  catchTypeAppErr act f = catchError act $ \case
-    UnificationError e -> f e
-    otherError -> throwError otherError
-
 -- | Executes an 'ASGBuilder' to make a \'finished\' ASG.
 --
 -- @since 1.0.0
@@ -594,7 +587,7 @@ err = refTo AnError
 -- @since 1.0.0
 app ::
   forall (m :: Type -> Type).
-  (MonadHashCons Id ASGNode m, MonadError CovenantTypeError m, MonadUnify m) =>
+  (MonadHashCons Id ASGNode m, MonadError CovenantTypeError m, MonadReader ASGEnv m) =>
   Id ->
   Vector Ref ->
   m Id
@@ -605,7 +598,8 @@ app fId argRefs = do
       Left err' -> throwError . RenameFunctionFailed fT $ err'
       Right renamedFT -> do
         renamedArgs <- traverse renameArg argRefs
-        result <- checkApp renamedFT . Vector.toList $ renamedArgs
+        tyDict <- asks (view #datatypeInfo)
+        result <- either (throwError . UnificationError) pure $  checkApp tyDict renamedFT (Vector.toList renamedArgs)
         let restored = undoRename result
         refTo . AValNode restored . AppInternal fId $ argRefs
     ValNodeType t -> throwError . ApplyToValType $ t
