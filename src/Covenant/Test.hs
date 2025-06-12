@@ -16,7 +16,7 @@ module Covenant.Test
     testBBF,
     -- re-exports for tests (modules are internal so shouldn't be exposed to users but we need them)
     testDatatypes,
-    ledgerTypes
+    ledgerTypes,
   )
 where
 
@@ -40,6 +40,7 @@ import Covenant.Index
     intIndex,
     ix0,
   )
+import Covenant.Internal.Ledger (ledgerTypes, testDatatypes)
 import Covenant.Internal.Rename (renameDataDecl, renameValT)
 import Covenant.Internal.Type
   ( CompT (CompT),
@@ -71,7 +72,6 @@ import Covenant.Type
     RenameM,
     runRenameM,
   )
-import Covenant.Internal.Ledger (testDatatypes, ledgerTypes)
 import Data.Coerce (coerce)
 import Data.Foldable (forM_)
 import Data.Kind (Type)

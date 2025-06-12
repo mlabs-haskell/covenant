@@ -5,7 +5,7 @@ module Covenant.Internal.Unification
     checkApp,
     runUnifyM,
     UnifyM,
-    unify -- need for tests
+    unify, -- need for tests
   )
 where
 
@@ -88,7 +88,6 @@ newtype UnifyM a = UnifyM (ReaderT (Map TyName (DatatypeInfo AbstractTy)) (Eithe
 runUnifyM :: Map TyName (DatatypeInfo AbstractTy) -> UnifyM a -> Either TypeAppError a
 runUnifyM tyDict (UnifyM act) = runReaderT act tyDict
 
-
 lookupDatatypeInfo ::
   TyName ->
   UnifyM (DatatypeInfo Renamed)
@@ -97,17 +96,18 @@ lookupDatatypeInfo tn =
     Nothing -> throwError $ NoDatatypeInfo tn
     Just dti -> either (throwError . DatatypeInfoRenameFailed tn) pure $ renameDatatypeInfo dti
 
-lookupBBForm ::  TyName -> UnifyM (ValT Renamed)
+lookupBBForm :: TyName -> UnifyM (ValT Renamed)
 lookupBBForm tn =
   lookupDatatypeInfo tn >>= \dti -> case view #bbForm dti of
     Nothing -> throwError $ NoBBForm tn
     Just bbForm -> pure bbForm
 
-checkApp :: Map TyName (DatatypeInfo AbstractTy)
-         -> CompT Renamed
-         -> [Maybe (ValT Renamed)]
-         -> Either TypeAppError (ValT Renamed)
-checkApp tyDict f args = runUnifyM tyDict $ checkApp' f args 
+checkApp ::
+  Map TyName (DatatypeInfo AbstractTy) ->
+  CompT Renamed ->
+  [Maybe (ValT Renamed)] ->
+  Either TypeAppError (ValT Renamed)
+checkApp tyDict f args = runUnifyM tyDict $ checkApp' f args
 
 -- | @since 1.1.0
 checkApp' ::

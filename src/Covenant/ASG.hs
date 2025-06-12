@@ -599,7 +599,7 @@ app fId argRefs = do
       Right renamedFT -> do
         renamedArgs <- traverse renameArg argRefs
         tyDict <- asks (view #datatypeInfo)
-        result <- either (throwError . UnificationError) pure $  checkApp tyDict renamedFT (Vector.toList renamedArgs)
+        result <- either (throwError . UnificationError) pure $ checkApp tyDict renamedFT (Vector.toList renamedArgs)
         let restored = undoRename result
         refTo . AValNode restored . AppInternal fId $ argRefs
     ValNodeType t -> throwError . ApplyToValType $ t

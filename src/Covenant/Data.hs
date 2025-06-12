@@ -269,9 +269,10 @@ mkDatatypeInfo :: DataDeclaration AbstractTy -> DatatypeInfo AbstractTy
 mkDatatypeInfo decl = DatatypeInfo decl baseFStuff (mkBBF decl)
   where
     baseFStuff :: Maybe (DataDeclaration AbstractTy, ValT AbstractTy)
-    baseFStuff = let baseFDecl = runReader (mkBaseFunctor decl) 0
-                     baseBBF = mkBBF =<< baseFDecl
-                 in (,) <$> baseFDecl <*> baseBBF 
+    baseFStuff =
+      let baseFDecl = runReader (mkBaseFunctor decl) 0
+          baseBBF = mkBBF =<< baseFDecl
+       in (,) <$> baseFDecl <*> baseBBF
 
 renameDatatypeInfo :: DatatypeInfo AbstractTy -> Either RenameError (DatatypeInfo Renamed)
 renameDatatypeInfo (DatatypeInfo ogDecl baseFStuff bb) = runRenameM $ do

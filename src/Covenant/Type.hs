@@ -91,9 +91,9 @@ import Covenant.Internal.Rename
       ),
     RenameM,
     renameCompT,
+    renameDataDecl,
     renameValT,
     runRenameM,
-    renameDataDecl,
   )
 import Covenant.Internal.Type
   ( AbstractTy (BoundAt),
@@ -118,7 +118,8 @@ import Covenant.Internal.Type
     PlutusDataStrategy (ConstrData, EnumData, NewtypeData, ProductListData),
     Renamed (Rigid, Unifiable, Wildcard),
     TyName (TyName),
-    ValT (Abstraction, BuiltinFlat, Datatype, ThunkT), prettyStr,
+    ValT (Abstraction, BuiltinFlat, Datatype, ThunkT),
+    prettyStr,
   )
 import Covenant.Internal.Unification
   ( TypeAppError
@@ -128,7 +129,9 @@ import Covenant.Internal.Unification
         LeakingUnifiable,
         LeakingWildcard
       ),
-    checkApp, unify, runUnifyM,
+    checkApp,
+    runUnifyM,
+    unify,
   )
 import Data.Coerce (coerce)
 import Data.Kind (Type)

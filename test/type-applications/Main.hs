@@ -3,7 +3,9 @@
 module Main (main) where
 
 import Control.Applicative ((<|>))
-import Control.Monad (guard, (<=<), void)
+import Control.Exception.Base (throwIO)
+import Control.Monad (guard, void, (<=<))
+import Covenant.Data (DatatypeInfo, mkDatatypeInfo)
 import Covenant.DeBruijn (DeBruijn (S, Z), asInt)
 import Covenant.Index
   ( Index,
@@ -11,31 +13,17 @@ import Covenant.Index
     ix1,
   )
 import Covenant.Test (Concrete (Concrete), testDatatypes)
-import Covenant.Type
-  ( AbstractTy(BoundAt),
-    CompT (Comp0, Comp1, Comp2),
-    Renamed (Rigid, Wildcard),
-    TypeAppError
-      ( DoesNotUnify,
-        ExcessArgs,
-        InsufficientArgs
-      ),
-    ValT
-      ( Abstraction,
-        ThunkT
-      ),
-    checkApp,
-    integerT,
-    renameCompT,
-    renameValT,
-    runRenameM,
-    tyvar,
-    pattern ReturnT,
-    pattern (:--:>), TyName, DataDeclaration, renameDataDecl, runUnifyM, unify, prettyStr,
-  )
+import Covenant.Type (AbstractTy (BoundAt), CompT (Comp0, Comp1, Comp2), DataDeclaration, Renamed (Rigid, Wildcard), TyName, TypeAppError
+                                                                                                                               ( DoesNotUnify,
+                                                                                                                                 ExcessArgs,
+                                                                                                                                 InsufficientArgs
+                                                                                                                               ), ValT (Abstraction, Datatype, ThunkT), checkApp, integerT, prettyStr, renameCompT, renameDataDecl, renameValT, runRenameM, runUnifyM, tyvar, unify, pattern ReturnT, pattern (:--:>))
 import Data.Coerce (coerce)
+import Data.Foldable (Foldable (foldl'))
 import Data.Functor.Identity (Identity (Identity))
 import Data.Kind (Type)
+import Data.Map qualified as M
+import Data.Maybe (fromJust)
 import Data.Vector qualified as Vector
 import Optics.Core (review, view)
 import Test.QuickCheck
@@ -54,16 +42,9 @@ import Test.QuickCheck
     vectorOf,
     (===),
   )
-import Test.Tasty (adjustOption, defaultMain, testGroup, TestTree)
+import Test.Tasty (TestTree, adjustOption, defaultMain, testGroup)
 import Test.Tasty.HUnit (assertEqual, assertFailure, testCase)
 import Test.Tasty.QuickCheck (QuickCheckTests, testProperty)
-import qualified Data.Map as M
-import Covenant.Data (DatatypeInfo, mkDatatypeInfo)
-import Data.Foldable (Foldable(foldl'))
-import Control.Exception.Base (throwIO)
-import Data.Maybe (fromJust)
-import Covenant.Type (ValT(Datatype))
-
 
 main :: IO ()
 main =
@@ -87,10 +68,11 @@ main =
           testProperty "rigid expected, rigid actual" propUnifyRigid,
           testProperty "wildcard expected, rigid actual" propUnifyWildcardRigid
         ],
-      testGroup "Datatypes" [
-        testMonotypeBB,
-        testPolyUnify
-                            ]
+      testGroup
+        "Datatypes"
+        [ testMonotypeBB,
+          testPolyUnify
+        ]
     ]
   where
     -- Note (Koz, 26/02/2025): By default, QuickCheck runs only 100 tests per
@@ -345,15 +327,14 @@ propUnifyWildcardRigid = forAllShrink arbitrary shrink $ \(scope, index) ->
                   actual = checkApp M.empty f [Just argT']
                in expected === actual
 
-
 -- Simple datatype unification unit test. Checks whether `data Unit = Unit` has the expected BB form
 testMonotypeBB :: TestTree
 testMonotypeBB = testCase "unitBbf" $ do
-  let expected =  Comp1 $ Abstraction (BoundAt Z ix0) :--:> ReturnT (Abstraction $ BoundAt Z ix0)
-  expected' <- failLeft  . runRenameM . renameCompT $ expected
+  let expected = Comp1 $ Abstraction (BoundAt Z ix0) :--:> ReturnT (Abstraction $ BoundAt Z ix0)
+  expected' <- failLeft . runRenameM . renameCompT $ expected
   actual <- case fromJust . (view #bbForm <=< M.lookup "Unit") $ tyAppTestDatatypes of
-                  ThunkT inner -> either (throwIO . userError . show) pure .  runRenameM $ renameCompT inner
-                  _ ->  assertFailure "BB form not a thunk!"
+    ThunkT inner -> either (throwIO . userError . show) pure . runRenameM $ renameCompT inner
+    _ -> assertFailure "BB form not a thunk!"
   assertEqual "unit bbf" expected' actual
 
 -- checks whether `forall a. Maybe a` gives the expected BB form.
@@ -365,13 +346,19 @@ testPolyUnify = testCase "appMaybe" $ do
   let -- due to "datatypes don't have a binding context"
       -- we need to "double thunk" this. That is, the
       -- following expression should represent `forall a. (forall r. r -> (a -> r) -> r)`
-        expected = ThunkT . Comp1 $ ReturnT (ThunkT . Comp1 $
-                                    Abstraction (BoundAt Z ix0)
-                                    :--:> ThunkT (Comp0 $
-                                                   Abstraction (BoundAt (S (S Z)) ix0)
-                                                   :--:> ReturnT (Abstraction (BoundAt (S Z) ix0)))
-                                    :--:> ReturnT (Abstraction (BoundAt Z ix0)))
-        expected2 = ThunkT . Comp1 $ ReturnT (Datatype "Maybe" (Vector.fromList [Abstraction (BoundAt  Z ix0)]))
+      expected =
+        ThunkT . Comp1 $
+          ReturnT
+            ( ThunkT . Comp1 $
+                Abstraction (BoundAt Z ix0)
+                  :--:> ThunkT
+                    ( Comp0 $
+                        Abstraction (BoundAt (S (S Z)) ix0)
+                          :--:> ReturnT (Abstraction (BoundAt (S Z) ix0))
+                    )
+                  :--:> ReturnT (Abstraction (BoundAt Z ix0))
+            )
+      expected2 = ThunkT . Comp1 $ ReturnT (Datatype "Maybe" (Vector.fromList [Abstraction (BoundAt Z ix0)]))
   expected' <- failLeft . runRenameM . renameValT $ expected2
   actual <- lookupRenamedBB "Maybe"
   unifyTest expected' actual
@@ -422,9 +409,10 @@ _withRenamedDatadecl decl f = case runRenameM . renameDataDecl $ decl of
 tyAppTestDatatypes :: M.Map TyName (DatatypeInfo AbstractTy)
 tyAppTestDatatypes = foldl' (\acc decl -> M.insert (view #datatypeName decl) (mkDatatypeInfo decl) acc) M.empty testDatatypes
 
-lookupRenamedBB :: TyName
-                -> IO (ValT Renamed)
-lookupRenamedBB tn  = case  (view #bbForm <=< M.lookup tn) $ tyAppTestDatatypes of
+lookupRenamedBB ::
+  TyName ->
+  IO (ValT Renamed)
+lookupRenamedBB tn = case (view #bbForm <=< M.lookup tn) $ tyAppTestDatatypes of
   Nothing -> assertFailure $ "No datatypeinfo for " <> show tn
   Just bb -> (failLeft . runRenameM . renameValT $ bb)
 
