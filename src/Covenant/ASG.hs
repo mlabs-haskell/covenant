@@ -74,9 +74,7 @@ module Covenant.ASG
         UnificationError
       ),
     RenameError
-      ( InvalidAbstractionReference,
-        IrrelevantAbstraction,
-        UndeterminedAbstraction
+      ( InvalidAbstractionReference
       ),
 
     -- ** Introducers
@@ -120,9 +118,7 @@ import Covenant.DeBruijn (DeBruijn, asInt)
 import Covenant.Index (Index, count0, intIndex)
 import Covenant.Internal.Rename
   ( RenameError
-      ( InvalidAbstractionReference,
-        IrrelevantAbstraction,
-        UndeterminedAbstraction
+      ( InvalidAbstractionReference
       ),
     renameCompT,
     renameValT,
