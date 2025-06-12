@@ -132,7 +132,6 @@ testConstT2 = do
   let result = runRenameM . renameCompT $ constT
   assertRight (assertEqual "" expected) result
 
-
 -- Checks that `forall a . b -> !a` triggers the variable indexing checker.
 testIndexingIdT :: IO ()
 testIndexingIdT = do
