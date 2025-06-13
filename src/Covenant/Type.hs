@@ -98,9 +98,7 @@ import Covenant.Index
 import Covenant.Internal.KindCheck (cycleCheck)
 import Covenant.Internal.Rename
   ( RenameError
-      ( InvalidAbstractionReference,
-        IrrelevantAbstraction,
-        UndeterminedAbstraction
+      ( InvalidAbstractionReference
       ),
     RenameM,
     renameCompT,

@@ -110,7 +110,7 @@ instance
 
 -- | Ways in which the renamer can fail.
 --
--- @since 1.0.0
+-- @since 1.1.0
 data RenameError
   = -- | An attempt to reference an abstraction in a scope where this
     -- abstraction doesn't exist. First field is the true level, second is
@@ -118,18 +118,6 @@ data RenameError
     --
     -- @since 1.0.0
     InvalidAbstractionReference Int (Index "tyvar")
-  | -- | A value type specifies an abstraction that never gets used
-    -- anywhere. For example, the type @forall a b . [a]@ has @b@
-    -- irrelevant.
-    --
-    -- @since 1.0.0
-    IrrelevantAbstraction
-  | -- | A computation type specifies an abstraction which is not used
-    -- by any argument. For example, the type @forall a b . a -> !(b -> !a)@
-    -- has @b@ undetermined.
-    --
-    -- @since 1.1.0
-    UndeterminedAbstraction (Vector (ValT AbstractTy)) (Vector (ValT Renamed))
   deriving stock (Eq, Show)
 
 -- | A \'renaming monad\' which allows us to convert type representations from
@@ -186,9 +174,6 @@ renameCompT (CompT abses (CompTBody xs)) = RenameM $ do
     Vector.generateM
       (NonEmpty.length xs - 1)
       (\i -> coerce . renameValT $ xs NonEmpty.! i)
-  -- Check that we don't overdetermine anything
-  ourAbstractions <- gets (view (#tracker % to Vector.head % _1))
-  unless (Vector.and ourAbstractions) (throwError $ UndeterminedAbstraction (NonEmpty.toVector xs) renamedArgs)
   -- Check result type
   renamedResult <- coerce . renameValT . NonEmpty.last $ xs
   -- Roll back state

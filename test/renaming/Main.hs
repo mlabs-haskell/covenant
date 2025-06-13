@@ -20,10 +20,9 @@ import Covenant.Type
         StringT,
         UnitT
       ),
-    CompT (Comp0, Comp1, Comp2),
+    CompT (Comp1, Comp2),
     RenameError
-      ( InvalidAbstractionReference,
-        UndeterminedAbstraction
+      ( InvalidAbstractionReference
       ),
     Renamed (Unifiable, Wildcard),
     ValT (Abstraction, BuiltinFlat, ThunkT),
@@ -63,11 +62,6 @@ main =
       testCase "forall a . a -> !a" testIdT,
       testCase "forall a b . a -> b -> !a" testConstT,
       testCase "forall a . a -> !(forall b . b -> !a)" testConstT2,
-      testGroup
-        "Overdeterminance"
-        [ testCase "forall a b . a -> !(b -> !a)" testDodgyConstT,
-          testCase "forall a b . a -> !a" testDodgyIdT
-        ],
       testGroup
         "Non-existent abstractions"
         [ testCase "forall a . b -> !a" testIndexingIdT
@@ -138,29 +132,6 @@ testConstT2 = do
   let result = runRenameM . renameCompT $ constT
   assertRight (assertEqual "" expected) result
 
--- Checks that `forall a b . a -> !a` triggers the undetermined variable checker.
-testDodgyIdT :: IO ()
-testDodgyIdT = do
-  let idT = Comp2 $ tyvar Z ix0 :--:> ReturnT (tyvar Z ix0)
-  let result = runRenameM . renameCompT $ idT
-  case result of
-    Left UndeterminedAbstraction {} -> assertBool "" True
-    Left _ -> assertBool "wrong renaming error" False
-    _ -> assertBool "renaming succeeded when it should have failed" False
-
--- Checks that `forall a b. a -> !(b -> !a)` triggers the undetermined variable checker.
-testDodgyConstT :: IO ()
-testDodgyConstT = do
-  let constT =
-        Comp2 $
-          tyvar Z ix0
-            :--:> ReturnT (ThunkT . Comp0 $ tyvar (S Z) ix1 :--:> ReturnT (tyvar (S Z) ix0))
-  let result = runRenameM . renameCompT $ constT
-  case result of
-    Left UndeterminedAbstraction {} -> assertBool "" True
-    Left _ -> assertBool "wrong renaming error" False
-    _ -> assertBool "renaming succeeded when it should have failed" False
-
 -- Checks that `forall a . b -> !a` triggers the variable indexing checker.
 testIndexingIdT :: IO ()
 testIndexingIdT = do
@@ -170,7 +141,6 @@ testIndexingIdT = do
     Left (InvalidAbstractionReference trueLevel ix) -> do
       assertEqual "" trueLevel 1
       assertEqual "" ix ix1
-    Left _ -> assertBool "wrong renaming error" False
     _ -> assertBool "renaming succeeded when it should have failed" False
 
 -- Helpers
