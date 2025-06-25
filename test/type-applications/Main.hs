@@ -11,7 +11,7 @@ import Covenant.Index
     ix1,
     ix2,
   )
-import Covenant.Test (Concrete (Concrete), tyAppTestDatatypes, failLeft)
+import Covenant.Test (Concrete (Concrete), failLeft, tyAppTestDatatypes)
 import Covenant.Type
   ( AbstractTy,
     BuiltinFlatT (BoolT, IntegerT, UnitT),
@@ -338,8 +338,6 @@ propUnifyWildcardRigid = forAllShrink arbitrary shrink $ \(scope, index) ->
                   expected = Left . DoesNotUnify lhs $ argT'
                   actual = checkApp M.empty f [Just argT']
                in expected === actual
-
-
 
 -- Tries to apply some concrete types to `defaultLeft`, checks that the return type is
 -- correct after unification (via checkApp)

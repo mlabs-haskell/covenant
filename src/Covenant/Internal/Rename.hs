@@ -6,7 +6,7 @@ module Covenant.Internal.Rename
     renameDataDecl,
     renameCompT,
     undoRename,
-    renameDatatypeInfo
+    renameDatatypeInfo,
   )
 where
 
@@ -28,6 +28,7 @@ import Control.Monad.State.Strict
     gets,
     modify,
   )
+import Covenant.Data (DatatypeInfo (DatatypeInfo))
 import Covenant.DeBruijn (DeBruijn (S, Z), asInt)
 import Covenant.Index (Count, Index, intCount, intIndex)
 import Covenant.Internal.Type
@@ -59,7 +60,6 @@ import Optics.Core
     view,
     (%),
   )
-import Covenant.Data (DatatypeInfo (DatatypeInfo))
 
 -- Used during renaming. Contains a source of fresh indices for wildcards, as
 -- well as tracking:

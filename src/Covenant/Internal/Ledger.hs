@@ -1,11 +1,11 @@
 module Covenant.Internal.Ledger
   ( ledgerTypes,
     -- For testing
-    DeclBuilder(Decl),
-    CtorBuilder(Ctor),
+    DeclBuilder (Decl),
+    CtorBuilder (Ctor),
     mkDecl,
     maybeT,
-    pair
+    pair,
   )
 where
 
@@ -659,4 +659,3 @@ a = Abstraction (BoundAt Z ix0)
 
 b :: ValT AbstractTy
 b = Abstraction (BoundAt Z ix1)
-

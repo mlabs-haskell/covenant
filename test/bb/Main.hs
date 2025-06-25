@@ -1,44 +1,47 @@
 module Main (main) where
 
+-- import Data.Either (isRight)
+
+import Control.Exception (throwIO)
+import Control.Monad ((<=<))
 import Covenant.Data
   ( mkBBF,
   )
+import Covenant.DeBruijn (DeBruijn (Z))
+import Covenant.Index (ix0)
 import Covenant.Test
   ( DataDeclFlavor (Poly1PolyThunks),
     DataDeclSet (DataDeclSet),
-    prettyDeclSet,
     failLeft,
-    tyAppTestDatatypes
+    prettyDeclSet,
+    tyAppTestDatatypes,
   )
 import Covenant.Type
-    ( renameValT,
-      runRenameM,
-      ValT(ThunkT, Abstraction),
-      CompTBody((:--:>), ReturnT),
-      AbstractTy(BoundAt),
-      renameCompT,
-      CompT(Comp1) )
--- import Data.Either (isRight)
-import Control.Monad((<=<))
+  ( AbstractTy (BoundAt),
+    CompT (Comp1),
+    CompTBody (ReturnT, (:--:>)),
+    ValT (Abstraction, ThunkT),
+    renameCompT,
+    renameValT,
+    runRenameM,
+  )
 import Data.Map qualified as M
-import Data.Maybe (mapMaybe,fromJust)
+import Data.Maybe (fromJust, mapMaybe)
+import Optics.Core (view)
 import Test.QuickCheck
   ( Arbitrary (arbitrary, shrink),
     Property,
   )
-import Test.Tasty (adjustOption, defaultMain, testGroup, TestTree)
-import Test.Tasty.HUnit(testCase, assertFailure, assertEqual)
+import Test.Tasty (TestTree, adjustOption, defaultMain, testGroup)
+import Test.Tasty.HUnit (assertEqual, assertFailure, testCase)
 import Test.Tasty.QuickCheck (QuickCheckTests, forAllShrinkShow, testProperty)
-import Optics.Core (view)
-import Covenant.DeBruijn (DeBruijn(Z))
-import Covenant.Index (ix0)
-import Control.Exception (throwIO)
 
 main :: IO ()
 main =
   defaultMain . adjustOption moreTests . testGroup "BB" $
-    [testProperty "All BBF transformations rename properly" bbFormRenames
-    ,testMonotypeBB]
+    [ testProperty "All BBF transformations rename properly" bbFormRenames,
+      testMonotypeBB
+    ]
   where
     -- These tests are suuuuppeeerr inefficient, it'd be ideal to run more but it'll take too long
     moreTests :: QuickCheckTests -> QuickCheckTests

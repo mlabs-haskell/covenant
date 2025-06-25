@@ -1,4 +1,5 @@
-{-# LANGUAGE PolyKinds, CPP #-}
+{-# LANGUAGE CPP #-}
+{-# LANGUAGE PolyKinds #-}
 
 module Covenant.Test
   ( Concrete (Concrete),
@@ -17,10 +18,9 @@ module Covenant.Test
     testDatatypes,
     ledgerTypes,
     failLeft,
-    tyAppTestDatatypes
+    tyAppTestDatatypes,
   )
 where
-
 
 #if __GLASGOW_HASKELL__==908
 import Data.Foldable (foldl')
@@ -35,17 +35,19 @@ import Control.Monad.State.Strict
     gets,
     modify,
   )
-import Covenant.Data (mkBBF, mkBaseFunctor, noPhantomTyVars, DatatypeInfo, mkDatatypeInfo)
+import Covenant.Data (DatatypeInfo, mkBBF, mkBaseFunctor, mkDatatypeInfo, noPhantomTyVars)
 import Covenant.DeBruijn (DeBruijn (Z), asInt)
 import Covenant.Index
   ( Count,
     count0,
     count1,
+    count2,
     intCount,
     intIndex,
-    ix0, count2, ix1,
+    ix0,
+    ix1,
   )
-import Covenant.Internal.Ledger (ledgerTypes,DeclBuilder(Decl),CtorBuilder(Ctor),mkDecl, maybeT, pair)
+import Covenant.Internal.Ledger (CtorBuilder (Ctor), DeclBuilder (Decl), ledgerTypes, maybeT, mkDecl, pair)
 import Covenant.Internal.PrettyPrint (ScopeBoundary, prettyStr)
 import Covenant.Internal.Rename (renameDataDecl, renameValT)
 import Covenant.Internal.Type
@@ -73,8 +75,10 @@ import Covenant.Type
       ),
     CompT (Comp0, CompN),
     CompTBody (ArgsAndResult),
+    DataEncoding (PlutusData),
+    PlutusDataStrategy (ConstrData),
     RenameM,
-    runRenameM, PlutusDataStrategy (ConstrData), DataEncoding (PlutusData),
+    runRenameM,
   )
 import Data.Coerce (coerce)
 import Data.Foldable (forM_)

@@ -247,7 +247,7 @@ mkBBF (DataDeclaration _ numVars ctors _)
 -- | Packages up all of the relevation datatype information needed
 -- for the ASGBuilder. Note that only certain datatypes have a BB or BB/BF form
 -- (we do not generate forms that are "useless")
--- NOTE: `var` should either be `AbstractTy` or `Renamed` in normal usage 
+-- NOTE: `var` should either be `AbstractTy` or `Renamed` in normal usage
 data DatatypeInfo (var :: Type)
   = DatatypeInfo
   { _originalDecl :: DataDeclaration var,
@@ -270,8 +270,6 @@ mkDatatypeInfo decl = DatatypeInfo decl baseFStuff (mkBBF decl)
       let baseFDecl = runReader (mkBaseFunctor decl) 0
           baseBBF = mkBBF =<< baseFDecl
        in (,) <$> baseFDecl <*> baseBBF
-
-
 
 instance
   (k ~ A_Lens, a ~ DataDeclaration var, b ~ DataDeclaration var) =>

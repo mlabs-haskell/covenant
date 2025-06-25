@@ -50,24 +50,28 @@ data TypeAppError
     LeakingWildcard Word64 Int (Index "tyvar")
   | -- | We were given too many arguments.
     ExcessArgs (CompT Renamed) (Vector (Maybe (ValT Renamed)))
+  | -- \| We weren't given enough arguments.
+
     -- | @since 1.1.0
-  | -- | We weren't given enough arguments.
     InsufficientArgs Int (CompT Renamed) [Maybe (ValT Renamed)]
   | -- | The expected type (first field) and actual type (second field) do not
     -- unify.
     DoesNotUnify (ValT Renamed) (ValT Renamed)
+  | -- \| No datatype info associated with requested TyName
+
     -- | @since 1.1.0
-  | -- | No datatype info associated with requested TyName
     NoDatatypeInfo TyName
   | -- | No BB form. The only datatypes which should lack one are those isomorphic to `Void`
     -- @since 1.1.0
     NoBBForm TyName
+  | -- \| Datatype renaming failed.
+
     -- | @since 1.1.0
-  | -- | Datatype renaming failed.
     DatatypeInfoRenameFailed TyName RenameError
-    -- | @since 1.1.0
-  | -- | Something happened that definitely should not have. For right now, this means: The BB form of a datatype isn't a thunk
+  | -- \| Something happened that definitely should not have. For right now, this means: The BB form of a datatype isn't a thunk
     --   (but it might be useful to keep this around as a catchall for things that really shouldn't happen)
+
+    -- | @since 1.1.0
     ImpossibleHappened Text
   deriving stock
     ( -- | @since 1.0.0
@@ -125,7 +129,8 @@ checkApp' f@(CompT _ (CompTBody xs)) ys = do
     throwError $
       InsufficientArgs numArgsActual f ys
   when (numArgsExpected > numArgsActual) $
-    throwError $ ExcessArgs f (Vector.fromList ys)
+    throwError $
+      ExcessArgs f (Vector.fromList ys)
   go curr (Vector.toList rest) ys
   where
     go ::
