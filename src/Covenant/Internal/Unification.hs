@@ -17,7 +17,7 @@ import Data.Foldable (foldl')
 import Control.Monad.Except (MonadError, catchError, throwError)
 import Control.Monad.Reader (MonadReader, ReaderT (runReaderT), ask)
 import Covenant.Data (DatatypeInfo, renameDatatypeInfo)
-import Covenant.Index (Index, intCount, intIndex, count1)
+import Covenant.Index (Index, count1, intCount, intIndex)
 import Covenant.Internal.Rename (RenameError)
 import Covenant.Internal.Type
   ( AbstractTy,
@@ -38,11 +38,10 @@ import Data.Set qualified as Set
 import Data.Text (Text)
 import Data.Vector (Vector)
 import Data.Vector qualified as Vector
+import Data.Vector.NonEmpty (NonEmptyVector)
 import Data.Vector.NonEmpty qualified as NonEmpty
 import Data.Word (Word64)
-import Optics.Core (ix, preview, view, review)
-import Data.Vector.NonEmpty (NonEmptyVector)
-
+import Optics.Core (ix, preview, review, view)
 
 -- | @since 1.0.0
 data TypeAppError
@@ -119,12 +118,13 @@ checkApp' ::
 checkApp' f@(CompT _ (CompTBody xs)) ys = do
   let (curr, rest) = NonEmpty.uncons xs
       numArgsExpected = NonEmpty.length xs - 1
-      numArgsActual   = length ys
+      numArgsActual = length ys
   when (numArgsActual < numArgsExpected) $
-    throwError $ InsufficientArgs numArgsActual f ys
+    throwError $
+      InsufficientArgs numArgsActual f ys
   -- when (numArgsExpected > numArgsActual) $
   --  throwError $ ExcessArgs f (Vector.fromList ys)
-  go curr (Vector.toList rest) ys 
+  go curr (Vector.toList rest) ys
   where
     go ::
       ValT Renamed ->
@@ -138,7 +138,7 @@ checkApp' f@(CompT _ (CompTBody xs)) ys = do
         [] -> fixUp currParam
         _ -> throwError . ExcessArgs f . Vector.fromList $ args
       _ -> case args of
-        [] -> throwError $  InsufficientArgs (length args) f args
+        [] -> throwError $ InsufficientArgs (length args) f args
         (currArg : restArgs) -> do
           newRestParams <- case currArg of
             -- An error argument unifies with anything, as it's effectively
@@ -149,7 +149,7 @@ checkApp' f@(CompT _ (CompTBody xs)) ys = do
               subs <- catchError (unify currParam currArg') (promoteUnificationError currParam currArg')
               pure . Map.foldlWithKey' applySub restParams $ subs
           case newRestParams of
-            [] -> throwError $ InsufficientArgs (length args) f args 
+            [] -> throwError $ InsufficientArgs (length args) f args
             (currParam' : restParams') -> go currParam' restParams' restArgs
 
 -- Helpers
@@ -319,15 +319,15 @@ unify expected actual =
 
     concretify :: ValT Renamed -> Vector (ValT Renamed) -> UnifyM (ValT Renamed)
     concretify (ThunkT (CompT count (CompTBody fn))) args = fixUp $ ThunkT (CompT count (CompTBody newFn))
-     where
-      indexedArgs :: [(Index "tyvar", ValT Renamed)]
-      indexedArgs = Vector.toList $ Vector.imap (\i x -> (fromJust . preview intIndex $ i, x)) args
+      where
+        indexedArgs :: [(Index "tyvar", ValT Renamed)]
+        indexedArgs = Vector.toList $ Vector.imap (\i x -> (fromJust . preview intIndex $ i, x)) args
 
-      newFn :: NonEmptyVector (ValT Renamed)
-      newFn = go indexedArgs <$> fn
+        newFn :: NonEmptyVector (ValT Renamed)
+        newFn = go indexedArgs <$> fn
 
-      go :: [(Index "tyvar", ValT Renamed)] -> ValT Renamed -> ValT Renamed
-      go subs arg = foldl' (\val (ix,concrete) -> substitute ix concrete val) arg subs
+        go :: [(Index "tyvar", ValT Renamed)] -> ValT Renamed -> ValT Renamed
+        go subs arg = foldl' (\val (ix, concrete) -> substitute ix concrete val) arg subs
     concretify _ _ = throwError $ ImpossibleHappened "bbForm is not a thunk"
 
     reconcile ::
@@ -346,4 +346,3 @@ unify expected actual =
         Merge.preserveMissing
         Merge.preserveMissing
         (Merge.zipWithAMatched $ \_ l r -> l <$ unless (l == r) unificationError)
-

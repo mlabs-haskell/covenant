@@ -102,6 +102,7 @@ import Covenant.Index
   )
 -- re-export for tests
 import Covenant.Internal.KindCheck (cycleCheck)
+import Covenant.Internal.PrettyPrint (prettyStr)
 import Covenant.Internal.Rename
   ( RenameError
       ( InvalidAbstractionReference
@@ -167,7 +168,6 @@ import Covenant.Internal.Unification
     runUnifyM,
     unify,
   )
-import Covenant.Internal.PrettyPrint (prettyStr)
 import Data.Coerce (coerce)
 import Data.Kind (Type)
 import Data.Vector (Vector)

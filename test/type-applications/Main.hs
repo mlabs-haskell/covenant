@@ -5,35 +5,35 @@ module Main (main) where
 import Control.Applicative ((<|>))
 import Control.Exception.Base (throwIO)
 import Control.Monad (guard, (<=<))
-import Covenant.Data (mkDatatypeInfo, DatatypeInfo)
+import Covenant.Data (DatatypeInfo, mkDatatypeInfo)
 import Covenant.DeBruijn (DeBruijn (S, Z), asInt)
 import Covenant.Index
   ( Index,
     ix0,
-    ix1, ix2,
+    ix1,
+    ix2,
   )
 import Covenant.Test (Concrete (Concrete), testDatatypes)
 import Covenant.Type
-    ( AbstractTy(BoundAt),
-      CompT(Comp0, Comp1, Comp2, Comp3),
-      DataDeclaration,
-      Renamed(Rigid, Wildcard,Unifiable),
-      TyName,
-      TypeAppError(DoesNotUnify, ExcessArgs, InsufficientArgs),
-      ValT(Abstraction, Datatype, ThunkT),
-      checkApp,
-      integerT,
-      prettyStr,
-      renameCompT,
-      renameDataDecl,
-      renameValT,
-      runRenameM,
-      tyvar,
-      pattern ReturnT,
-      pattern (:--:>),
-      ValT(BuiltinFlat),
-      BuiltinFlatT(IntegerT,UnitT,BoolT),
-    )
+  ( AbstractTy (BoundAt),
+    BuiltinFlatT (BoolT, IntegerT, UnitT),
+    CompT (Comp0, Comp1, Comp2, Comp3),
+    DataDeclaration,
+    Renamed (Rigid, Unifiable, Wildcard),
+    TyName,
+    TypeAppError (DoesNotUnify, ExcessArgs, InsufficientArgs),
+    ValT (Abstraction, BuiltinFlat, Datatype, ThunkT),
+    checkApp,
+    integerT,
+    prettyStr,
+    renameCompT,
+    renameDataDecl,
+    renameValT,
+    runRenameM,
+    tyvar,
+    pattern ReturnT,
+    pattern (:--:>),
+  )
 import Data.Coerce (coerce)
 import Data.Foldable (Foldable (foldl'))
 import Data.Functor.Identity (Identity (Identity))
@@ -61,7 +61,6 @@ import Test.QuickCheck
 import Test.Tasty (TestTree, adjustOption, defaultMain, testGroup)
 import Test.Tasty.HUnit (assertEqual, assertFailure, testCase)
 import Test.Tasty.QuickCheck (QuickCheckTests, testProperty)
-
 
 main :: IO ()
 main =
@@ -372,11 +371,13 @@ testEitherConcrete = testCase "testEitherConcrete" $ do
 
       expected = BuiltinFlat IntegerT
   defaultLeftRenamed <- failLeft . runRenameM . renameCompT $ defaultLeft
-  actual <- either (assertFailure . show) pure $
-             checkApp tyAppTestDatatypes defaultLeftRenamed
-             (pure <$> [arg1,arg2,arg3])
+  actual <-
+    either (assertFailure . show) pure $
+      checkApp
+        tyAppTestDatatypes
+        defaultLeftRenamed
+        (pure <$> [arg1, arg2, arg3])
   assertEqual "testEitherConcrete" expected actual
-
 
 -- Tries to apply arguments containing a mixture of concrete and abstract types to the BB form for maybe,
 -- then checks whether the application types as the (concrete) return type.
@@ -385,33 +386,40 @@ testEitherConcrete = testCase "testEitherConcrete" $ do
 -- (Plutus defines 'Maybe' incorrectly, i.e., with the 'Just' ctor first)
 polymorphicApplicationM :: TestTree
 polymorphicApplicationM = testCase "polyAppMaybe" $ do
-  let testFn =  Comp1 $
-               (ThunkT . Comp1 $ tyvar Z ix0
-                                 :--:> ThunkT (Comp0 (tyvar (S (S Z)) ix0 :--:> ReturnT (tyvar (S Z) ix0)))
-                                 :--:> ReturnT (tyvar Z ix0))
-               :--:> ReturnT (BuiltinFlat IntegerT)
-      testArg = ThunkT . Comp1 $ tyvar Z ix0
-                                 :--:> ThunkT (Comp0 (BuiltinFlat BoolT :--:> ReturnT (tyvar (S Z) ix0)))
-                                 :--:> ReturnT (tyvar Z ix0)
+  let testFn =
+        Comp1 $
+          ( ThunkT . Comp1 $
+              tyvar Z ix0
+                :--:> ThunkT (Comp0 (tyvar (S (S Z)) ix0 :--:> ReturnT (tyvar (S Z) ix0)))
+                :--:> ReturnT (tyvar Z ix0)
+          )
+            :--:> ReturnT (BuiltinFlat IntegerT)
+      testArg =
+        ThunkT . Comp1 $
+          tyvar Z ix0
+            :--:> ThunkT (Comp0 (BuiltinFlat BoolT :--:> ReturnT (tyvar (S Z) ix0)))
+            :--:> ReturnT (tyvar Z ix0)
   fnRenamed <- failLeft . runRenameM . renameCompT $ testFn
   argRenamed <- failLeft . runRenameM . renameValT $ testArg
-  result <- either (assertFailure . show) pure $
-             checkApp tyAppTestDatatypes fnRenamed [Just argRenamed]
+  result <-
+    either (assertFailure . show) pure $
+      checkApp tyAppTestDatatypes fnRenamed [Just argRenamed]
   assertEqual "polyAppMaybe" result (BuiltinFlat IntegerT)
 
 -- Applies a mixture of polymorphic and concrete arguments to `defaultLeft` and checks that the  return
 -- type is what we expected after unification
 polymorphicApplicationE :: TestTree
 polymorphicApplicationE = testCase "polyAppEither" $ do
-      -- a = a' (arbitrary unifiable)
-      -- b = Bool
-      -- c = Integer
+  -- a = a' (arbitrary unifiable)
+  -- b = Bool
+  -- c = Integer
   let arg1 = Abstraction $ Unifiable ix0
       arg2 = ThunkT (Comp0 $ BuiltinFlat BoolT :--:> ReturnT (BuiltinFlat IntegerT))
       arg3 = Datatype "Either" . Vector.fromList $ [arg1, BuiltinFlat BoolT]
   fnRenamed <- failLeft . runRenameM . renameCompT $ defaultLeft
-  actual <- either (assertFailure . show) pure $
-                checkApp tyAppTestDatatypes fnRenamed (pure <$> [arg1,arg2,arg3])
+  actual <-
+    either (assertFailure . show) pure $
+      checkApp tyAppTestDatatypes fnRenamed (pure <$> [arg1, arg2, arg3])
   assertEqual "polyAppEither" actual (BuiltinFlat IntegerT)
 
 -- Applies a mixture of polymorphic and concrete arguments to `defaultPair` and checks that the return type
@@ -421,45 +429,50 @@ polymorphicApplicationP = testCase "polyAppPair" $ do
   -- a = a' (arbitrary unifiable)
   -- b = Bool
   -- c = Integer
-  let arg1 =  Abstraction $ Unifiable ix0
+  let arg1 = Abstraction $ Unifiable ix0
       arg2 = BuiltinFlat BoolT
       arg3 = ThunkT $ Comp0 $ Abstraction (Rigid 1 ix0) :--:> BuiltinFlat BoolT :--:> ReturnT (BuiltinFlat IntegerT)
       arg4 = Datatype "Pair" (Vector.fromList [arg1, BuiltinFlat BoolT])
   fnRenamed <- failLeft . runRenameM . renameCompT $ defaultPair
-  actual <- either (assertFailure . show) pure $
-              checkApp tyAppTestDatatypes fnRenamed (pure <$> [arg1,arg2,arg3,arg4])
+  actual <-
+    either (assertFailure . show) pure $
+      checkApp tyAppTestDatatypes fnRenamed (pure <$> [arg1, arg2, arg3, arg4])
   assertEqual "polyAppPair" actual (BuiltinFlat IntegerT)
-
 
 -- Checks whether `forall a. Maybe a -> Integer` unifies properly with `Maybe Bool -> Integer`
 unifyMaybe :: TestTree
 unifyMaybe = testCase "unifyMaybe" $ do
-  let testFn = Comp1 $
-                 Datatype "Maybe" (Vector.fromList [tyvar Z ix0])
-                 :--:> ReturnT (BuiltinFlat IntegerT)
+  let testFn =
+        Comp1 $
+          Datatype "Maybe" (Vector.fromList [tyvar Z ix0])
+            :--:> ReturnT (BuiltinFlat IntegerT)
       testArg = Datatype "Maybe" (Vector.fromList [BuiltinFlat BoolT])
   fnRenamed <- failLeft . runRenameM . renameCompT $ testFn
-  result <- either (assertFailure . catchInsufficientArgs) pure $
-              checkApp tyAppTestDatatypes fnRenamed [Just testArg]
+  result <-
+    either (assertFailure . catchInsufficientArgs) pure $
+      checkApp tyAppTestDatatypes fnRenamed [Just testArg]
   assertEqual "debugTest2" result (BuiltinFlat IntegerT)
- where
-   catchInsufficientArgs :: TypeAppError -> String
-   catchInsufficientArgs = \case
-     InsufficientArgs _ fn _ -> prettyStr fn
-     other -> show other 
+  where
+    catchInsufficientArgs :: TypeAppError -> String
+    catchInsufficientArgs = \case
+      InsufficientArgs _ fn _ -> prettyStr fn
+      other -> show other
 
 -- Tests whether renaming works as "expected" with free type variables.
 -- NOTE/FIXME/REVIEW: This test *probably* shouldn't pass, since it lets a free type variable through
 --                    by converting it into a rigid where it should fail.
 renameRigid :: TestTree
 renameRigid = testCase "debugTest3" $ do
-  let testFn = Comp1 $ Datatype "Maybe" (Vector.fromList [tyvar (S Z) ix0])
-                       :--:> ReturnT (BuiltinFlat IntegerT)
+  let testFn =
+        Comp1 $
+          Datatype "Maybe" (Vector.fromList [tyvar (S Z) ix0])
+            :--:> ReturnT (BuiltinFlat IntegerT)
   fnRenamed <- failLeft . runRenameM . renameCompT $ testFn
-  let expected = Comp1 $ Datatype "Maybe" (Vector.fromList [Abstraction $ Rigid 0 ix0])
-                       :--:> ReturnT (BuiltinFlat IntegerT)
+  let expected =
+        Comp1 $
+          Datatype "Maybe" (Vector.fromList [Abstraction $ Rigid 0 ix0])
+            :--:> ReturnT (BuiltinFlat IntegerT)
   assertEqual "debugTest3" expected fnRenamed
-
 
 -- Helpers
 
@@ -474,20 +487,22 @@ const2T = Comp2 $ tyvar Z ix0 :--:> tyvar Z ix1 :--:> ReturnT (tyvar Z ix0)
 -- forall a b c. c -> (b -> !c) -> Either a b -> !c
 -- ...I hope
 defaultLeft :: CompT AbstractTy
-defaultLeft = Comp3 $ tyvar Z ix2
-                      :--:> ThunkT (Comp0 $ tyvar (S Z) ix1 :--:> ReturnT (tyvar (S Z) ix2))
-                      :--:> Datatype "Either" (Vector.fromList [tyvar Z ix0, tyvar Z ix1])
-                      :--:> ReturnT (tyvar Z ix2)
+defaultLeft =
+  Comp3 $
+    tyvar Z ix2
+      :--:> ThunkT (Comp0 $ tyvar (S Z) ix1 :--:> ReturnT (tyvar (S Z) ix2))
+      :--:> Datatype "Either" (Vector.fromList [tyvar Z ix0, tyvar Z ix1])
+      :--:> ReturnT (tyvar Z ix2)
 
 -- forall a b c. a -> b -> (a -> b -> !c) -> Pair a b -> c
 defaultPair :: CompT AbstractTy
-defaultPair = Comp3 $ tyvar Z ix0
-                    :--:> tyvar Z ix1
-                    :--:> ThunkT (Comp0 $ tyvar (S Z) ix0 :--:> tyvar (S Z) ix1 :--:> ReturnT (tyvar (S Z) ix2))
-                    :--:> Datatype "Pair" (Vector.fromList [tyvar Z ix0, tyvar Z ix1])
-                    :--:> ReturnT (tyvar Z ix2)
-
-
+defaultPair =
+  Comp3 $
+    tyvar Z ix0
+      :--:> tyvar Z ix1
+      :--:> ThunkT (Comp0 $ tyvar (S Z) ix0 :--:> tyvar (S Z) ix1 :--:> ReturnT (tyvar (S Z) ix2))
+      :--:> Datatype "Pair" (Vector.fromList [tyvar Z ix0, tyvar Z ix1])
+      :--:> ReturnT (tyvar Z ix2)
 
 failLeft ::
   forall (a :: Type) (b :: Type).
