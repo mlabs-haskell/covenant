@@ -17,7 +17,7 @@ import Data.Foldable (foldl')
 import Control.Monad.Except (MonadError, catchError, throwError)
 import Control.Monad.Reader (MonadReader, ReaderT (runReaderT), ask)
 import Covenant.Data (DatatypeInfo, renameDatatypeInfo)
-import Covenant.Index (Index, count1, intCount, intIndex)
+import Covenant.Index (Index, intCount, intIndex)
 import Covenant.Internal.Rename (RenameError)
 import Covenant.Internal.Type
   ( AbstractTy,
@@ -41,7 +41,7 @@ import Data.Vector qualified as Vector
 import Data.Vector.NonEmpty (NonEmptyVector)
 import Data.Vector.NonEmpty qualified as NonEmpty
 import Data.Word (Word64)
-import Optics.Core (ix, preview, review, view)
+import Optics.Core (ix, preview, view)
 
 -- | @since 1.0.0
 data TypeAppError
@@ -327,7 +327,7 @@ unify expected actual =
         newFn = go indexedArgs <$> fn
 
         go :: [(Index "tyvar", ValT Renamed)] -> ValT Renamed -> ValT Renamed
-        go subs arg = foldl' (\val (ix, concrete) -> substitute ix concrete val) arg subs
+        go subs arg = foldl' (\val (i, concrete) -> substitute i concrete val) arg subs
     concretify _ _ = throwError $ ImpossibleHappened "bbForm is not a thunk"
 
     reconcile ::

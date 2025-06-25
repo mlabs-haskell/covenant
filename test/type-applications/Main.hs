@@ -451,7 +451,7 @@ unifyMaybe = testCase "unifyMaybe" $ do
   result <-
     either (assertFailure . catchInsufficientArgs) pure $
       checkApp tyAppTestDatatypes fnRenamed [Just testArg]
-  assertEqual "debugTest2" result (BuiltinFlat IntegerT)
+  assertEqual "unifyMaybe" result (BuiltinFlat IntegerT)
   where
     catchInsufficientArgs :: TypeAppError -> String
     catchInsufficientArgs = \case
@@ -462,7 +462,7 @@ unifyMaybe = testCase "unifyMaybe" $ do
 -- NOTE/FIXME/REVIEW: This test *probably* shouldn't pass, since it lets a free type variable through
 --                    by converting it into a rigid where it should fail.
 renameRigid :: TestTree
-renameRigid = testCase "debugTest3" $ do
+renameRigid = testCase "renameRigid" $ do
   let testFn =
         Comp1 $
           Datatype "Maybe" (Vector.fromList [tyvar (S Z) ix0])
@@ -472,7 +472,7 @@ renameRigid = testCase "debugTest3" $ do
         Comp1 $
           Datatype "Maybe" (Vector.fromList [Abstraction $ Rigid 0 ix0])
             :--:> ReturnT (BuiltinFlat IntegerT)
-  assertEqual "debugTest3" expected fnRenamed
+  assertEqual "renameRigid" expected fnRenamed
 
 -- Helpers
 
