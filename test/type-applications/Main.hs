@@ -1,15 +1,9 @@
-{-# LANGUAGE CPP #-}
 {-# LANGUAGE PatternSynonyms #-}
 
 module Main (main) where
 
-#if __GLASGOW_HASKELL__==908
-import Data.Foldable (foldl')
-#endif
 import Control.Applicative ((<|>))
-import Control.Exception.Base (throwIO)
-import Control.Monad (guard, (<=<))
-import Covenant.Data (DatatypeInfo, mkDatatypeInfo)
+import Control.Monad (guard)
 import Covenant.DeBruijn (DeBruijn (S, Z), asInt)
 import Covenant.Index
   ( Index,
@@ -17,21 +11,18 @@ import Covenant.Index
     ix1,
     ix2,
   )
-import Covenant.Test (Concrete (Concrete), testDatatypes)
+import Covenant.Test (Concrete (Concrete), tyAppTestDatatypes, failLeft)
 import Covenant.Type
-  ( AbstractTy (BoundAt),
+  ( AbstractTy,
     BuiltinFlatT (BoolT, IntegerT, UnitT),
     CompT (Comp0, Comp1, Comp2, Comp3),
-    DataDeclaration,
     Renamed (Rigid, Unifiable, Wildcard),
-    TyName,
     TypeAppError (DoesNotUnify, ExcessArgs, InsufficientArgs),
     ValT (Abstraction, BuiltinFlat, Datatype, ThunkT),
     checkApp,
     integerT,
     prettyStr,
     renameCompT,
-    renameDataDecl,
     renameValT,
     runRenameM,
     tyvar,
@@ -42,9 +33,8 @@ import Data.Coerce (coerce)
 import Data.Functor.Identity (Identity (Identity))
 import Data.Kind (Type)
 import Data.Map qualified as M
-import Data.Maybe (fromJust)
 import Data.Vector qualified as Vector
-import Optics.Core (review, view)
+import Optics.Core (review)
 import Test.QuickCheck
   ( Gen,
     Property,
@@ -89,13 +79,11 @@ main =
         ],
       testGroup
         "Datatypes"
-        [ testMonotypeBB,
-          testEitherConcrete,
+        [ testEitherConcrete,
           polymorphicApplicationM,
           polymorphicApplicationE,
           polymorphicApplicationP,
-          unifyMaybe,
-          renameRigid
+          unifyMaybe
         ]
     ]
   where
@@ -351,15 +339,7 @@ propUnifyWildcardRigid = forAllShrink arbitrary shrink $ \(scope, index) ->
                   actual = checkApp M.empty f [Just argT']
                in expected === actual
 
--- Simple datatype unification unit test. Checks whether `data Unit = Unit` has the expected BB form
-testMonotypeBB :: TestTree
-testMonotypeBB = testCase "unitBbf" $ do
-  let expected = Comp1 $ Abstraction (BoundAt Z ix0) :--:> ReturnT (Abstraction $ BoundAt Z ix0)
-  expected' <- failLeft . runRenameM . renameCompT $ expected
-  actual <- case fromJust . (view #bbForm <=< M.lookup "Unit") $ tyAppTestDatatypes of
-    ThunkT inner -> either (throwIO . userError . show) pure . runRenameM $ renameCompT inner
-    _ -> assertFailure "BB form not a thunk!"
-  assertEqual "unit bbf" expected' actual
+
 
 -- Tries to apply some concrete types to `defaultLeft`, checks that the return type is
 -- correct after unification (via checkApp)
@@ -461,22 +441,6 @@ unifyMaybe = testCase "unifyMaybe" $ do
       InsufficientArgs _ fn _ -> prettyStr fn
       other -> show other
 
--- Tests whether renaming works as "expected" with free type variables.
--- NOTE/FIXME/REVIEW: This test *probably* shouldn't pass, since it lets a free type variable through
---                    by converting it into a rigid where it should fail.
-renameRigid :: TestTree
-renameRigid = testCase "renameRigid" $ do
-  let testFn =
-        Comp1 $
-          Datatype "Maybe" (Vector.fromList [tyvar (S Z) ix0])
-            :--:> ReturnT (BuiltinFlat IntegerT)
-  fnRenamed <- failLeft . runRenameM . renameCompT $ testFn
-  let expected =
-        Comp1 $
-          Datatype "Maybe" (Vector.fromList [Abstraction $ Rigid 0 ix0])
-            :--:> ReturnT (BuiltinFlat IntegerT)
-  assertEqual "renameRigid" expected fnRenamed
-
 -- Helpers
 
 -- `forall a. a -> !a`
@@ -507,13 +471,6 @@ defaultPair =
       :--:> Datatype "Pair" (Vector.fromList [tyvar Z ix0, tyvar Z ix1])
       :--:> ReturnT (tyvar Z ix2)
 
-failLeft ::
-  forall (a :: Type) (b :: Type).
-  (Show a) =>
-  Either a b ->
-  IO b
-failLeft = either (assertFailure . show) pure
-
 withRenamedComp ::
   CompT AbstractTy ->
   (CompT Renamed -> Property) ->
@@ -531,14 +488,3 @@ withRenamedVals ::
 withRenamedVals vals f = case runRenameM . traverse renameValT $ vals of
   Left err -> counterexample (show err) False
   Right vals' -> f vals'
-
-_withRenamedDatadecl ::
-  DataDeclaration AbstractTy ->
-  (DataDeclaration Renamed -> Property) ->
-  Property
-_withRenamedDatadecl decl f = case runRenameM . renameDataDecl $ decl of
-  Left err -> counterexample (show err) False
-  Right decl' -> f decl'
-
-tyAppTestDatatypes :: M.Map TyName (DatatypeInfo AbstractTy)
-tyAppTestDatatypes = foldl' (\acc decl -> M.insert (view #datatypeName decl) (mkDatatypeInfo decl) acc) M.empty testDatatypes

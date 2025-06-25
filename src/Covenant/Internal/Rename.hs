@@ -6,6 +6,7 @@ module Covenant.Internal.Rename
     renameDataDecl,
     renameCompT,
     undoRename,
+    renameDatatypeInfo
   )
 where
 
@@ -38,6 +39,7 @@ import Covenant.Internal.Type
     Renamed (Rigid, Unifiable, Wildcard),
     ValT (Abstraction, BuiltinFlat, Datatype, ThunkT),
   )
+import Data.Bitraversable (Bitraversable (bitraverse))
 import Data.Coerce (coerce)
 import Data.Kind (Type)
 import Data.Tuple.Optics (_1)
@@ -57,6 +59,7 @@ import Optics.Core
     view,
     (%),
   )
+import Covenant.Data (DatatypeInfo (DatatypeInfo))
 
 -- Used during renaming. Contains a source of fresh indices for wildcards, as
 -- well as tracking:
@@ -207,6 +210,13 @@ renameDataDecl (DataDeclaration tn cnt ctors strat) = RenameM $ do
   where
     renameCtor :: Constructor AbstractTy -> RenameM (Constructor Renamed)
     renameCtor (Constructor cn args) = Constructor cn <$> traverse renameValT args
+
+renameDatatypeInfo :: DatatypeInfo AbstractTy -> Either RenameError (DatatypeInfo Renamed)
+renameDatatypeInfo (DatatypeInfo ogDecl baseFStuff bb) = runRenameM $ do
+  ogDecl' <- renameDataDecl ogDecl
+  baseFStuff' <- traverse (bitraverse renameDataDecl renameValT) baseFStuff
+  bb' <- traverse renameValT bb
+  pure $ DatatypeInfo ogDecl' baseFStuff' bb'
 
 -- A way of 'undoing' the renaming process. This is meant to be used only after
 -- applications, and assumes that what is being un-renamed is the result of a

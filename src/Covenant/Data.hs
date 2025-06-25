@@ -9,7 +9,6 @@ module Covenant.Data
     noPhantomTyVars,
     everythingOf,
     DatatypeInfo (DatatypeInfo),
-    renameDatatypeInfo,
     mkDatatypeInfo,
   )
 where
@@ -18,7 +17,6 @@ import Control.Monad.Reader (MonadReader (ask, local), Reader, runReader)
 import Covenant.DeBruijn (DeBruijn (S, Z), asInt)
 import Covenant.Index (Count, Index, count0, intCount, intIndex)
 import Covenant.Internal.PrettyPrint (ScopeBoundary (ScopeBoundary))
-import Covenant.Internal.Rename (RenameError, renameDataDecl, renameValT, runRenameM)
 import Covenant.Internal.Type
   ( AbstractTy (BoundAt),
     CompT (CompT),
@@ -26,11 +24,9 @@ import Covenant.Internal.Type
     Constructor (Constructor),
     ConstructorName (ConstructorName),
     DataDeclaration (DataDeclaration, OpaqueData),
-    Renamed,
     TyName (TyName),
     ValT (Abstraction, BuiltinFlat, Datatype, ThunkT),
   )
-import Data.Bitraversable (Bitraversable (bitraverse))
 import Data.Kind (Type)
 import Data.Maybe (fromJust)
 import Data.Set (Set)
@@ -251,6 +247,7 @@ mkBBF (DataDeclaration _ numVars ctors _)
 -- | Packages up all of the relevation datatype information needed
 -- for the ASGBuilder. Note that only certain datatypes have a BB or BB/BF form
 -- (we do not generate forms that are "useless")
+-- NOTE: `var` should either be `AbstractTy` or `Renamed` in normal usage 
 data DatatypeInfo (var :: Type)
   = DatatypeInfo
   { _originalDecl :: DataDeclaration var,
@@ -274,12 +271,7 @@ mkDatatypeInfo decl = DatatypeInfo decl baseFStuff (mkBBF decl)
           baseBBF = mkBBF =<< baseFDecl
        in (,) <$> baseFDecl <*> baseBBF
 
-renameDatatypeInfo :: DatatypeInfo AbstractTy -> Either RenameError (DatatypeInfo Renamed)
-renameDatatypeInfo (DatatypeInfo ogDecl baseFStuff bb) = runRenameM $ do
-  ogDecl' <- renameDataDecl ogDecl
-  baseFStuff' <- traverse (bitraverse renameDataDecl renameValT) baseFStuff
-  bb' <- traverse renameValT bb
-  pure $ DatatypeInfo ogDecl' baseFStuff' bb'
+
 
 instance
   (k ~ A_Lens, a ~ DataDeclaration var, b ~ DataDeclaration var) =>

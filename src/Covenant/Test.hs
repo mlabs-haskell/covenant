@@ -1,4 +1,4 @@
-{-# LANGUAGE PolyKinds #-}
+{-# LANGUAGE PolyKinds, CPP #-}
 
 module Covenant.Test
   ( Concrete (Concrete),
@@ -14,12 +14,17 @@ module Covenant.Test
     testNonConcrete,
     prettyDeclSet,
     testBBF,
-    -- re-exports for tests (modules are internal so shouldn't be exposed to users but we need them)
     testDatatypes,
     ledgerTypes,
+    failLeft,
+    tyAppTestDatatypes
   )
 where
 
+
+#if __GLASGOW_HASKELL__==908
+import Data.Foldable (foldl')
+#endif
 import Control.Applicative ((<|>))
 import Control.Monad (void)
 import Control.Monad.Reader (MonadTrans (lift), runReader)
@@ -30,7 +35,7 @@ import Control.Monad.State.Strict
     gets,
     modify,
   )
-import Covenant.Data (mkBBF, mkBaseFunctor, noPhantomTyVars)
+import Covenant.Data (mkBBF, mkBaseFunctor, noPhantomTyVars, DatatypeInfo, mkDatatypeInfo)
 import Covenant.DeBruijn (DeBruijn (Z), asInt)
 import Covenant.Index
   ( Count,
@@ -38,9 +43,9 @@ import Covenant.Index
     count1,
     intCount,
     intIndex,
-    ix0,
+    ix0, count2, ix1,
   )
-import Covenant.Internal.Ledger (ledgerTypes, testDatatypes)
+import Covenant.Internal.Ledger (ledgerTypes,DeclBuilder(Decl),CtorBuilder(Ctor),mkDecl, maybeT, pair)
 import Covenant.Internal.PrettyPrint (ScopeBoundary, prettyStr)
 import Covenant.Internal.Rename (renameDataDecl, renameValT)
 import Covenant.Internal.Type
@@ -69,7 +74,7 @@ import Covenant.Type
     CompT (Comp0, CompN),
     CompTBody (ArgsAndResult),
     RenameM,
-    runRenameM,
+    runRenameM, PlutusDataStrategy (ConstrData), DataEncoding (PlutusData),
   )
 import Data.Coerce (coerce)
 import Data.Foldable (forM_)
@@ -105,6 +110,7 @@ import Test.QuickCheck.GenT (GenT, MonadGen)
 import Test.QuickCheck.GenT qualified as GT
 import Test.QuickCheck.Instances.Containers ()
 import Test.QuickCheck.Instances.Vector ()
+import Test.Tasty.HUnit (assertFailure)
 
 -- | Wrapper for 'ValT' to provide an 'Arbitrary' instance to generate only
 -- value types without any type variables.
@@ -773,3 +779,38 @@ testBBF = do
       Just out -> do
         let outPretty = pretty $ unsafeRename (renameValT out)
         putDoc $ hardline <> "OUTPUT:" <> hardline <> hardline <> outPretty <> hardline
+
+-- Datatypes for testing
+
+eitherT :: DataDeclaration AbstractTy
+eitherT =
+  mkDecl $
+    Decl
+      "Either"
+      count2
+      [ Ctor "Left" [Abstraction (BoundAt Z ix0)],
+        Ctor "Right" [Abstraction (BoundAt Z ix1)]
+      ]
+      (PlutusData ConstrData)
+
+unitT :: DataDeclaration AbstractTy
+unitT =
+  mkDecl $
+    Decl
+      "Unit"
+      count0
+      [Ctor "Unit" []]
+      (PlutusData ConstrData)
+
+testDatatypes :: [DataDeclaration AbstractTy]
+testDatatypes = [maybeT, eitherT, unitT, pair]
+
+failLeft ::
+  forall (a :: Type) (b :: Type).
+  (Show a) =>
+  Either a b ->
+  IO b
+failLeft = either (assertFailure . show) pure
+
+tyAppTestDatatypes :: M.Map TyName (DatatypeInfo AbstractTy)
+tyAppTestDatatypes = foldl' (\acc decl -> M.insert (view #datatypeName decl) (mkDatatypeInfo decl) acc) M.empty testDatatypes

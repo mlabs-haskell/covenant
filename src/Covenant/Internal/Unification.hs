@@ -5,7 +5,6 @@ module Covenant.Internal.Unification
     checkApp,
     runUnifyM,
     UnifyM,
-    unify, -- need for tests
   )
 where
 
@@ -16,9 +15,9 @@ import Data.Foldable (foldl')
 #endif
 import Control.Monad.Except (MonadError, catchError, throwError)
 import Control.Monad.Reader (MonadReader, ReaderT (runReaderT), ask)
-import Covenant.Data (DatatypeInfo, renameDatatypeInfo)
+import Covenant.Data (DatatypeInfo)
 import Covenant.Index (Index, intCount, intIndex)
-import Covenant.Internal.Rename (RenameError)
+import Covenant.Internal.Rename (RenameError, renameDatatypeInfo)
 import Covenant.Internal.Type
   ( AbstractTy,
     BuiltinFlatT,
@@ -51,19 +50,22 @@ data TypeAppError
     LeakingWildcard Word64 Int (Index "tyvar")
   | -- | We were given too many arguments.
     ExcessArgs (CompT Renamed) (Vector (Maybe (ValT Renamed)))
+    -- | @since 1.1.0
   | -- | We weren't given enough arguments.
     InsufficientArgs Int (CompT Renamed) [Maybe (ValT Renamed)]
   | -- | The expected type (first field) and actual type (second field) do not
     -- unify.
     DoesNotUnify (ValT Renamed) (ValT Renamed)
+    -- | @since 1.1.0
   | -- | No datatype info associated with requested TyName
     NoDatatypeInfo TyName
   | -- | No BB form. The only datatypes which should lack one are those isomorphic to `Void`
+    -- @since 1.1.0
     NoBBForm TyName
-  | -- | Datatype renaming failed. NOTE/REVIEW: Using `DatatypeInfo AbstractTy` here lets use use the same
-    --   reader context as ASGBuilder, which seems like the simplest change possible
-    --   I guess actually this means that renaming the BB form of a datatype failed
+    -- | @since 1.1.0
+  | -- | Datatype renaming failed.
     DatatypeInfoRenameFailed TyName RenameError
+    -- | @since 1.1.0
   | -- | Something happened that definitely should not have. For right now, this means: The BB form of a datatype isn't a thunk
     --   (but it might be useful to keep this around as a catchall for things that really shouldn't happen)
     ImpossibleHappened Text
@@ -122,8 +124,8 @@ checkApp' f@(CompT _ (CompTBody xs)) ys = do
   when (numArgsActual < numArgsExpected) $
     throwError $
       InsufficientArgs numArgsActual f ys
-  -- when (numArgsExpected > numArgsActual) $
-  --  throwError $ ExcessArgs f (Vector.fromList ys)
+  when (numArgsExpected > numArgsActual) $
+    throwError $ ExcessArgs f (Vector.fromList ys)
   go curr (Vector.toList rest) ys
   where
     go ::
@@ -304,6 +306,11 @@ unify expected actual =
       _ -> unificationError
 
     expectDatatype :: TyName -> Vector (ValT Renamed) -> UnifyM (Map (Index "tyvar") (ValT Renamed))
+    -- Datatypes unify with wildcards or unifiables, or other "suitable" instances of the same datatype.
+    -- Suitability with other datatypes is determined by converting to BB form, then concretifying
+    -- the BB form using the arguments to the actual datatype.
+    -- For example, the BB form of `Maybe` is: forall a r. r -> (a -> r) -> r
+    -- which, if we concretify while attempting to unify with `Maybe Int`, becomes: `forall r. r -> (Int -> r) -> r`
     expectDatatype tn args = do
       bbForm <- lookupBBForm tn
       bbFormConcreteE <- concretify bbForm args

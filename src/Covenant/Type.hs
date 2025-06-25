@@ -53,7 +53,6 @@ module Covenant.Type
     -- * Type application
     TypeAppError (..),
     checkApp,
-    unify,
     runUnifyM,
     -- Data declarations & friends
     DataDeclaration (DataDeclaration, OpaqueData),
@@ -166,7 +165,6 @@ import Covenant.Internal.Unification
       ),
     checkApp,
     runUnifyM,
-    unify,
   )
 import Data.Coerce (coerce)
 import Data.Kind (Type)
