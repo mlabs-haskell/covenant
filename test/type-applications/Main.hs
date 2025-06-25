@@ -1,7 +1,10 @@
-{-# LANGUAGE PatternSynonyms #-}
+{-# LANGUAGE PatternSynonyms, CPP #-}
 
 module Main (main) where
 
+#if __GLASGOW_HASKELL__==908
+import Data.Foldable (foldl')
+#endif
 import Control.Applicative ((<|>))
 import Control.Exception.Base (throwIO)
 import Control.Monad (guard, (<=<))
@@ -35,7 +38,6 @@ import Covenant.Type
     pattern (:--:>),
   )
 import Data.Coerce (coerce)
-import Data.Foldable (Foldable (foldl'))
 import Data.Functor.Identity (Identity (Identity))
 import Data.Kind (Type)
 import Data.Map qualified as M
