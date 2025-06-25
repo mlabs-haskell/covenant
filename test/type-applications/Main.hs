@@ -1,4 +1,5 @@
-{-# LANGUAGE PatternSynonyms, CPP #-}
+{-# LANGUAGE CPP #-}
+{-# LANGUAGE PatternSynonyms #-}
 
 module Main (main) where
 
