@@ -40,7 +40,7 @@ import Covenant.Index
     intIndex,
     ix0,
   )
-import Covenant.Internal.Ledger (ledgerTypes, testDatatypes)
+import Covenant.Internal.PrettyPrint (ScopeBoundary, prettyStr)
 import Covenant.Internal.Rename (renameDataDecl, renameValT)
 import Covenant.Internal.Type
   ( CompT (CompT),
@@ -49,10 +49,8 @@ import Covenant.Internal.Type
     ConstructorName (ConstructorName),
     DataDeclaration (DataDeclaration, OpaqueData),
     DataEncoding (SOP),
-    ScopeBoundary,
     TyName (TyName),
     ValT (Abstraction, BuiltinFlat, Datatype, ThunkT),
-    prettyStr,
     runConstructorName,
   )
 import Covenant.Type
@@ -106,6 +104,7 @@ import Test.QuickCheck.GenT (GenT, MonadGen)
 import Test.QuickCheck.GenT qualified as GT
 import Test.QuickCheck.Instances.Containers ()
 import Test.QuickCheck.Instances.Vector ()
+import Covenant.Internal.Ledger (ledgerTypes, testDatatypes)
 
 -- | Wrapper for 'ValT' to provide an 'Arbitrary' instance to generate only
 -- value types without any type variables.

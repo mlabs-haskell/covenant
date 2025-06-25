@@ -1,6 +1,6 @@
-{-# OPTIONS_GHC -Wno-unrecognised-pragmas #-}
+{-# LANGUAGE OverloadedLists #-}
+{-# LANGUAGE PatternSynonyms #-}
 
-{-# HLINT ignore "Use camelCase" #-}
 module Covenant.Internal.Type
   ( AbstractTy (..),
     Renamed (..),
@@ -12,83 +12,88 @@ module Covenant.Internal.Type
     ValT (..),
     BuiltinFlatT (..),
     TyName (..),
-    ScopeBoundary (..), -- used in the generators
     DataEncoding (..),
-    PlutusDataConstructor (..),
-    PlutusDataStrategy (..),
-    InternalStrategy (..),
     runConstructorName,
     abstraction,
     thunkT,
     builtinFlat,
     datatype,
-    -- generic utility for debugging/testing
-    prettyStr,
     checkStrategy,
+    naturalBaseFunctor,
+    negativeBaseFunctor,
+    byteStringBaseFunctor,
   )
 where
 
-import Control.Monad.Reader
-  ( MonadReader (local),
-    Reader,
-    asks,
-    runReader,
-  )
-import Covenant.DeBruijn (DeBruijn)
+import Covenant.DeBruijn (DeBruijn (Z))
 import Covenant.Index
   ( Count,
     Index,
+    count1,
     intCount,
     intIndex,
+    ix0,
   )
+import Covenant.Internal.PrettyPrint
+  ( PrettyM,
+    bindVars,
+    lookupAbstraction,
+    mkForall,
+    runPrettyM,
+  )
+import Covenant.Internal.Strategy
+  ( DataEncoding
+      ( BuiltinStrategy,
+        PlutusData,
+        SOP
+      ),
+    InternalStrategy
+      ( InternalAssocMapStrat,
+        InternalDataStrat,
+        InternalListStrat,
+        InternalPairStrat
+      ),
+    PlutusDataConstructor,
+    PlutusDataStrategy
+      ( ConstrData,
+        EnumData,
+        NewtypeData,
+        ProductListData
+      ),
+  )
+import Covenant.Util (pattern ConsV, pattern NilV)
 import Data.Functor.Classes (Eq1 (liftEq))
 import Data.Kind (Type)
-import Data.Map.Strict (Map)
-import Data.Map.Strict qualified as Map
 import Data.Set (Set)
 import Data.String (IsString)
 import Data.Text (Text)
-import Data.Text qualified as T
 import Data.Vector (Vector)
 import Data.Vector qualified as Vector
 import Data.Vector.NonEmpty (NonEmptyVector)
 import Data.Vector.NonEmpty qualified as NonEmpty
 import Data.Word (Word64)
-import GHC.Exts (fromListN)
-import Optics.At ()
 import Optics.Core
   ( A_Fold,
     A_Lens,
     LabelOptic (labelOptic),
     Prism',
     folding,
-    ix,
     lens,
-    over,
     preview,
     prism,
     review,
-    set,
-    view,
-    (%),
   )
 import Prettyprinter
   ( Doc,
     Pretty (pretty),
-    defaultLayoutOptions,
     hsep,
     indent,
-    layoutPretty,
     parens,
     vcat,
     viaShow,
     (<+>),
   )
-import Prettyprinter.Render.Text (renderStrict)
 import Test.QuickCheck.Instances.Text ()
-
--- need the arbitary instance for TyName
--- largely for TyName
 
 -- | A type abstraction, using a combination of a DeBruijn index (to indicate
 -- which scope it refers to) and a positional index (to indicate which bound
@@ -183,13 +188,26 @@ instance Eq1 CompT where
   liftEq f (CompT abses1 xs) (CompT abses2 ys) =
     abses1 == abses2 && liftEq f xs ys
 
--- | @since 1.1.0
-newtype TyName = TyName Text
-  deriving (Show, Eq, Ord, IsString) via Text
-
 -- | @since 1.0.0
 instance Pretty (CompT Renamed) where
   pretty = runPrettyM . prettyCompTWithContext
+
+-- | The name of a data type. This refers specifically to non-\'flat\' types
+-- either provided by the ledger, or defined by the user.
+--
+-- @since 1.1.0
+newtype TyName = TyName Text
+  deriving
+    ( -- | @since 1.1.0
+      Show,
+      -- | @since 1.1.0
+      Eq,
+      -- | @since 1.1.0
+      Ord,
+      -- | @since 1.1.0
+      IsString
+    )
+    via Text
 
 -- | A value type, with abstractions indicated by the type argument. In pretty
 -- much any case imaginable, this would be either 'AbstractTy' (in the ASG) or
@@ -203,7 +221,8 @@ data ValT (a :: Type)
     ThunkT (CompT a)
   | -- | A builtin type without any nesting.
     BuiltinFlat BuiltinFlatT
-  | -- An applied type constructor, with a vector of arguments (which may be empty if the constructor is nullary)
+  | -- | An applied type constructor for a non-\'flat\' data type.
+    -- | @since 1.1.0
     Datatype TyName (Vector (ValT a))
   deriving stock
     ( -- | @since 1.0.0
@@ -213,21 +232,6 @@ data ValT (a :: Type)
       -- | @since 1.0.0
       Show
     )
-
-abstraction :: forall (a :: Type). Prism' (ValT a) a
-abstraction = prism Abstraction (\case (Abstraction a) -> Right a; other -> Left other)
-
-thunkT :: forall (a :: Type). Prism' (ValT a) (CompT a)
-thunkT = prism ThunkT (\case (ThunkT compT) -> Right compT; other -> Left other)
-
-builtinFlat :: forall (a :: Type). Prism' (ValT a) BuiltinFlatT
-builtinFlat = prism BuiltinFlat (\case (BuiltinFlat bi) -> Right bi; other -> Left other)
-
-datatype :: forall (a :: Type). Prism' (ValT a) (TyName, Vector (ValT a))
-datatype =
-  prism
-    (uncurry Datatype)
-    (\case (Datatype tn args) -> Right (tn, args); other -> Left other)
 
 -- | @since 1.0.0
 instance Eq1 ValT where
@@ -246,8 +250,32 @@ instance Eq1 ValT where
       Datatype tn2 args2 -> tn1 == tn2 && liftEq (liftEq f) args1 args2
       _ -> False
 
+-- | /Do not/ use this instance to write other 'Pretty' instances. It exists to
+-- ensure readable tests without having to expose a lot of internals.
+--
+-- @since 1.0.0
+instance Pretty (ValT Renamed) where
+  pretty = runPrettyM . prettyValTWithContext
+
+abstraction :: forall (a :: Type). Prism' (ValT a) a
+abstraction = prism Abstraction (\case (Abstraction a) -> Right a; other -> Left other)
+
+thunkT :: forall (a :: Type). Prism' (ValT a) (CompT a)
+thunkT = prism ThunkT (\case (ThunkT compT) -> Right compT; other -> Left other)
+
+builtinFlat :: forall (a :: Type). Prism' (ValT a) BuiltinFlatT
+builtinFlat = prism BuiltinFlat (\case (BuiltinFlat bi) -> Right bi; other -> Left other)
+
+datatype :: forall (a :: Type). Prism' (ValT a) (TyName, Vector (ValT a))
+datatype =
+  prism
+    (uncurry Datatype)
+    (\case (Datatype tn args) -> Right (tn, args); other -> Left other)
+
 -- | All builtin types that are \'flat\': that is, do not have other types
 -- \'nested inside them\'.
+--
+-- @since 1.0.0
 data BuiltinFlatT
   = UnitT
   | BoolT
@@ -266,73 +294,157 @@ data BuiltinFlatT
       Show
     )
 
--- Helpers
-
-prettyStr :: forall (b :: Type). (Pretty b) => b -> String
-prettyStr = T.unpack . renderStrict . layoutPretty defaultLayoutOptions . pretty
-
-newtype ScopeBoundary = ScopeBoundary Int
-  deriving (Show, Eq, Ord, Num, Real, Enum, Integral) via Int
-
--- Keeping the field names for clarity even if we don't use them
-data PrettyContext (ann :: Type)
-  = PrettyContext
-  { _boundIdents :: Map ScopeBoundary (Vector (Doc ann)),
-    _currentScope :: ScopeBoundary,
-    _varStream :: [Doc ann]
-  }
-
-instance
-  (k ~ A_Lens, a ~ Map ScopeBoundary (Vector (Doc ann)), b ~ Map ScopeBoundary (Vector (Doc ann))) =>
-  LabelOptic "boundIdents" k (PrettyContext ann) (PrettyContext ann) a b
-  where
-  {-# INLINEABLE labelOptic #-}
-  labelOptic =
-    lens
-      (\(PrettyContext x _ _) -> x)
-      (\(PrettyContext _ y z) x -> PrettyContext x y z)
-
-instance
-  (k ~ A_Lens, a ~ ScopeBoundary, b ~ ScopeBoundary) =>
-  LabelOptic "currentScope" k (PrettyContext ann) (PrettyContext ann) a b
-  where
-  {-# INLINEABLE labelOptic #-}
-  labelOptic =
-    lens
-      (\(PrettyContext _ x _) -> x)
-      (\(PrettyContext x _ z) y -> PrettyContext x y z)
-
-instance
-  (k ~ A_Lens, a ~ [Doc ann], b ~ [Doc ann]) =>
-  LabelOptic "varStream" k (PrettyContext ann) (PrettyContext ann) a b
-  where
-  {-# INLINEABLE labelOptic #-}
-  labelOptic =
-    lens
-      (\(PrettyContext _ _ x) -> x)
-      (\(PrettyContext x y _) z -> PrettyContext x y z)
-
--- Maybe make a newtype with error reporting since this can fail, but do later since *should't* fail
-newtype PrettyM (ann :: Type) (a :: Type) = PrettyM (Reader (PrettyContext ann) a)
+-- | The name of a data type constructor.
+--
+-- @since 1.1.0
+newtype ConstructorName = ConstructorName Text
   deriving
-    ( Functor,
-      Applicative,
-      Monad,
-      MonadReader (PrettyContext ann)
+    ( -- | @since 1.1.0
+      Show,
+      -- | @since 1.1.0
+      Eq,
+      -- | @since 1.1.0
+      Ord,
+      -- | @since 1.1.0
+      IsString
     )
-    via (Reader (PrettyContext ann))
+    via Text
 
-runPrettyM :: forall (ann :: Type) (a :: Type). PrettyM ann a -> a
-runPrettyM (PrettyM ma) = runReader ma (PrettyContext mempty 0 infiniteVars)
+-- | @since 1.1.0
+runConstructorName :: ConstructorName -> Text
+runConstructorName (ConstructorName nm) = nm
+
+-- | A single constructor of a data type.
+--
+-- @since 1.1.0
+data Constructor (a :: Type)
+  = Constructor ConstructorName (Vector (ValT a))
+  deriving stock
+    ( -- | @since 1.1.0
+      Show,
+      -- | @since 1.1.0
+      Eq
+    )
+
+-- | @since 1.1.0
+instance Eq1 Constructor where
+  liftEq f (Constructor nm args) (Constructor nm' args') =
+    nm == nm' && liftEq (liftEq f) args args'
+
+-- | @since 1.1.0
+instance
+  (k ~ A_Lens, a ~ ConstructorName, b ~ ConstructorName) =>
+  LabelOptic "constructorName" k (Constructor c) (Constructor c) a b
   where
-    -- Lazily generated infinite list of variables. Will start with a, b, c...
-    -- and cycle around to a1, b2, c3 etc.
-    -- We could do something more sophisticated but this should work.
-    infiniteVars :: [Doc ann]
-    infiniteVars =
-      let aToZ = ['a' .. 'z']
-          intStrings = ("" <$ aToZ) <> map (show @Integer) [0 ..]
-       in zipWith (\x xs -> pretty (x : xs)) aToZ intStrings
+  {-# INLINEABLE labelOptic #-}
+  labelOptic = lens (\(Constructor n _) -> n) (\(Constructor _ args) n -> Constructor n args)
+
+-- | @since 1.1.0
+instance
+  (k ~ A_Lens, a ~ Vector (ValT c), b ~ Vector (ValT c)) =>
+  LabelOptic "constructorArgs" k (Constructor c) (Constructor c) a b
+  where
+  {-# INLINEABLE labelOptic #-}
+  labelOptic = lens (\(Constructor _ args) -> args) (\(Constructor n _) args -> Constructor n args)
+
+-- | Description of a non-\'flat\' type, together with how it is encoded.
+--
+-- @since 1.1.0
+data DataDeclaration a
+  = DataDeclaration TyName (Count "tyvar") (Vector (Constructor a)) DataEncoding
+  | OpaqueData TyName (Set PlutusDataConstructor)
+  deriving stock
+    ( -- | @since 1.1.0
+      Show,
+      -- | @since 1.1.0
+      Eq
+    )
+
+-- | @since 1.1.0
+instance Pretty (DataDeclaration Renamed) where
+  pretty = runPrettyM . prettyDataDeclWithContext
+
+-- | @since 1.1.0
+instance
+  (k ~ A_Lens, a ~ TyName, b ~ TyName) =>
+  LabelOptic "datatypeName" k (DataDeclaration c) (DataDeclaration c) a b
+  where
+  {-# INLINEABLE labelOptic #-}
+  labelOptic =
+    lens
+      (\case OpaqueData tn _ -> tn; DataDeclaration tn _ _ _ -> tn)
+      (\decl tn -> case decl of OpaqueData _ x -> OpaqueData tn x; DataDeclaration _ x y z -> DataDeclaration tn x y z)
+
+-- | @since 1.1.0
+instance
+  (k ~ A_Fold, a ~ Count "tyvar", b ~ Count "tyvar") =>
+  LabelOptic "datatypeBinders" k (DataDeclaration c) (DataDeclaration c) a b
+  where
+  {-# INLINEABLE labelOptic #-}
+  labelOptic =
+    folding $ \case
+      DataDeclaration _ cnt _ _ -> Just cnt
+      _ -> Nothing
+
+-- | @since 1.1.0
+instance
+  (k ~ A_Fold, a ~ Vector (Constructor c), b ~ Vector (Constructor c)) =>
+  LabelOptic "datatypeConstructors" k (DataDeclaration c) (DataDeclaration c) a b
+  where
+  {-# INLINEABLE labelOptic #-}
+  labelOptic =
+    folding $ \case
+      DataDeclaration _ _ ctors _ -> Just ctors
+      _ -> Nothing
+
+checkStrategy :: forall (a :: Type). DataDeclaration a -> Bool
+checkStrategy = \case
+  OpaqueData _ _ -> True
+  DataDeclaration tn _ ctors strat -> case strat of
+    SOP -> True
+    BuiltinStrategy internalStrat -> case internalStrat of
+      InternalListStrat -> tn == "List"
+      InternalPairStrat -> tn == "Pair"
+      InternalDataStrat -> tn == "Data"
+      InternalAssocMapStrat -> tn == "Map"
+    PlutusData plutusStrat -> case plutusStrat of
+      ConstrData -> True
+      EnumData -> all (\(Constructor _ args) -> null args) ctors
+      ProductListData -> length ctors == 1
+      NewtypeData -> case ctors of
+        ConsV x NilV -> case preview #constructorArgs x of
+          Just (ConsV _ NilV) -> True
+          _ -> False
+        _ -> False
+
+naturalBaseFunctor :: DataDeclaration AbstractTy
+naturalBaseFunctor = DataDeclaration "Natural_F" count1 constrs SOP
+  where
+    constrs :: Vector (Constructor AbstractTy)
+    constrs =
+      [ Constructor "ZeroNat_F" [],
+        Constructor "SuccNat_F" [Abstraction . BoundAt Z $ ix0]
+      ]
+
+negativeBaseFunctor :: DataDeclaration AbstractTy
+negativeBaseFunctor = DataDeclaration "Negative_F" count1 constrs SOP
+  where
+    constrs :: Vector (Constructor AbstractTy)
+    constrs =
+      [ Constructor "ZeroNeg_F" [],
+        Constructor "PredNeg_F" [Abstraction . BoundAt Z $ ix0]
+      ]
+
+byteStringBaseFunctor :: DataDeclaration AbstractTy
+byteStringBaseFunctor = DataDeclaration "ByteString_F" count1 constrs SOP
+  where
+    constrs :: Vector (Constructor AbstractTy)
+    constrs =
+      [ Constructor "EmptyByteString_F" [],
+        Constructor "ConsByteString_F" [BuiltinFlat IntegerT, Abstraction . BoundAt Z $ ix0]
+      ]
+
+-- Helpers
 
 prettyCompTWithContext :: forall (ann :: Type). CompT Renamed -> PrettyM ann (Doc ann)
 prettyCompTWithContext (CompT count (CompTBody funArgs))
@@ -355,39 +467,6 @@ prettyFunTy' args = case NonEmpty.unsnoc args of
         argsWithoutResult <- Vector.foldM (\acc x -> (\z -> acc <+> "->" <+> z) <$> prettyValTWithContext x) prettyArg1 otherArgs
         pure . parens $ argsWithoutResult <+> "->" <+> resTy'
 
-bindVars ::
-  forall (ann :: Type) (a :: Type).
-  Count "tyvar" ->
-  (Vector (Doc ann) -> PrettyM ann a) ->
-  PrettyM ann a
-bindVars count' act
-  | count == 0 = crossBoundary (act Vector.empty)
-  | otherwise = crossBoundary $ do
-      here <- asks (view #currentScope)
-      withFreshVarNames count $ \newBoundVars ->
-        local (over #boundIdents (Map.insert here newBoundVars)) (act newBoundVars)
-  where
-    -- Increment the current scope
-    crossBoundary :: PrettyM ann a -> PrettyM ann a
-    crossBoundary = local (over #currentScope (+ 1))
-    count :: Int
-    count = review intCount count'
-
-mkForall ::
-  forall (ann :: Type).
-  Vector (Doc ann) ->
-  Doc ann ->
-  Doc ann
-mkForall tvars funTyBody =
-  if Vector.null tvars
-    then funTyBody
-    else "forall" <+> hsep (Vector.toList tvars) <> "." <+> funTyBody
-
--- | DO NOT USE THIS TO WRITE OTHER INSTANCES
---   It exists soley to make readable tests easier to write w/o having to export a bunch of internal printing stuff
-instance Pretty (ValT Renamed) where
-  pretty = runPrettyM . prettyValTWithContext
-
 prettyValTWithContext :: forall (ann :: Type). ValT Renamed -> PrettyM ann (Doc ann)
 prettyValTWithContext = \case
   Abstraction abstr -> prettyRenamedWithContext abstr
@@ -408,39 +487,11 @@ prettyCtorWithContext (Constructor ctorNm ctorArgs)
       args' <- Vector.toList <$> traverse prettyValTWithContext ctorArgs
       pure $ ctorNm' <+> hsep args'
 
--- Generate N fresh var names and use the supplied monadic function to do something with them.
-withFreshVarNames ::
-  forall (ann :: Type) (a :: Type).
-  Int ->
-  (Vector (Doc ann) -> PrettyM ann a) ->
-  PrettyM ann a
-withFreshVarNames n act = do
-  stream <- asks (view #varStream)
-  let (used, rest) = splitAt n stream
-  local (set #varStream rest) . act . fromListN n $ used
-
 prettyRenamedWithContext :: forall (ann :: Type). Renamed -> PrettyM ann (Doc ann)
 prettyRenamedWithContext = \case
   Rigid offset index -> lookupAbstraction offset index
   Unifiable i -> lookupAbstraction 0 i
   Wildcard w64 offset i -> pure $ pretty offset <> "_" <> viaShow w64 <> "#" <> pretty (review intIndex i)
-
-lookupAbstraction :: forall (ann :: Type). Int -> Index "tyvar" -> PrettyM ann (Doc ann)
-lookupAbstraction offset argIndex = do
-  let scopeOffset = ScopeBoundary offset
-  let argIndex' = review intIndex argIndex
-  here <- asks (view #currentScope)
-  asks (preview (#boundIdents % ix (here + scopeOffset) % ix argIndex')) >>= \case
-    Nothing ->
-      -- TODO: actual error reporting
-      error $
-        "Internal error: The encountered a variable at arg index "
-          <> show argIndex'
-          <> " with true level "
-          <> show scopeOffset
-          <> " but could not locate the corresponding pretty form at scope level "
-          <> show here
-    Just res' -> pure res'
 
 prettyDataDeclWithContext :: forall (ann :: Type). DataDeclaration Renamed -> PrettyM ann (Doc ann)
 prettyDataDeclWithContext (OpaqueData (TyName tn) _) = pure . pretty $ tn
@@ -460,135 +511,3 @@ prettyDataDeclWithContext (DataDeclaration (TyName tn) numVars ctors _) = bindVa
       where
         goPrefix [] = []
         goPrefix (y : ys) = (sep <> y) : goPrefix ys
-
--- Datatype stuff. Stashing this here for now because this much is needed for the ValT change PR
--- (technically only need TyName for the ValT change but the "kind checker" needs decls)
-
--- @since 1.1.0
-newtype ConstructorName = ConstructorName Text
-  deriving (Show, Eq, Ord, IsString) via Text
-
--- @since 1.1.0
-runConstructorName :: ConstructorName -> Text
-runConstructorName (ConstructorName nm) = nm
-
--- I.e. a product in the sum of products
-data Constructor (a :: Type)
-  = Constructor ConstructorName (Vector (ValT a))
-  deriving stock (Show, Eq)
-
-instance Eq1 Constructor where
-  liftEq f (Constructor nm args) (Constructor nm' args') = nm == nm' && liftEq (liftEq f) args args'
-
-instance (k ~ A_Lens, a ~ ConstructorName, b ~ ConstructorName) => LabelOptic "constructorName" k (Constructor c) (Constructor c) a b where
-  {-# INLINEABLE labelOptic #-}
-  labelOptic = lens (\(Constructor n _) -> n) (\(Constructor _ args) n -> Constructor n args)
-
-instance (k ~ A_Lens, a ~ Vector (ValT c), b ~ Vector (ValT c)) => LabelOptic "constructorArgs" k (Constructor c) (Constructor c) a b where
-  {-# INLINEABLE labelOptic #-}
-  labelOptic = lens (\(Constructor _ args) -> args) (\(Constructor n _) args -> Constructor n args)
-
--- | @since 1.1.0
-data DataEncoding
-  = SOP
-  | PlutusData PlutusDataStrategy
-  | BuiltinStrategy InternalStrategy
-  deriving stock
-    ( -- | @since 1.1.0
-      Show,
-      -- | @since 1.1.0
-      Eq,
-      -- | @since 1.1.0
-      Ord
-    )
-
--- | @since 1.1.0
-data PlutusDataConstructor
-  = PD_I
-  | PD_B
-  | PD_Constructor
-  | PD_List
-  | PD_Map
-  deriving stock
-    ( -- | @since 1.1.0
-      Show,
-      -- | @since 1.1.0
-      Eq,
-      -- | @since 1.1.0
-      Ord
-    )
-
--- | @since 1.1.0
--- NOTE: Wrapped data-primitive (Integer + ByteString) require a special case for their encoders, which was originally
---       part of a "WrapperData" strategy here which we generalized to the NewtypeData strategy.
-data PlutusDataStrategy
-  = EnumData
-  | ProductListData
-  | ConstrData
-  | NewtypeData
-  deriving stock
-    ( -- | @since 1.1.0
-      Show,
-      -- | @since 1.1.0
-      Eq,
-      -- | @since 1.1.0
-      Ord
-    )
-
--- TxID encoding changes from v2 to v3 (so make sure to use the v3) / MLResult has a weird broken instance
-data InternalStrategy = InternalListStrat | InternalPairStrat | InternalDataStrat | InternalAssocMapStrat
-  deriving stock (Show, Eq, Ord)
-
--- | @since 1.1.0
-data DataDeclaration a
-  = DataDeclaration TyName (Count "tyvar") (Vector (Constructor a)) DataEncoding -- Allows for representations of "empty" types in case we want to represent Void like that
-  | OpaqueData TyName (Set PlutusDataConstructor)
-  deriving stock
-    ( -- | @since 1.1.0
-      Show,
-      -- | @since 1.1.0
-      Eq
-    )
-
-checkStrategy :: forall (a :: Type). DataDeclaration a -> Bool
-checkStrategy OpaqueData {} = True
-checkStrategy (DataDeclaration _ _ _ SOP) = True
-{- This isn't *ideal* -}
-checkStrategy (DataDeclaration tn _ _ (BuiltinStrategy internalStrat)) = case internalStrat of
-  InternalListStrat -> tn == TyName "List"
-  InternalPairStrat -> tn == TyName "Pair"
-  InternalDataStrat -> tn == TyName "Data"
-  InternalAssocMapStrat -> tn == TyName "Map"
-checkStrategy (DataDeclaration _ _ ctors (PlutusData strat)) = case strat of
-  ConstrData -> True
-  EnumData -> all (\(Constructor _ args) -> Vector.null args) ctors
-  ProductListData -> Vector.length ctors == 1
-  NewtypeData
-    | Vector.length ctors == 1 -> case Vector.toList <$> preview #constructorArgs (ctors Vector.! 0) of
-        Just [_] -> True -- pushing the cycle check to the "kind checker"
-        _ -> False
-    | otherwise -> False
-
-instance Pretty (DataDeclaration Renamed) where
-  pretty = runPrettyM . prettyDataDeclWithContext
-
-instance (k ~ A_Lens, a ~ TyName, b ~ TyName) => LabelOptic "datatypeName" k (DataDeclaration c) (DataDeclaration c) a b where
-  {-# INLINEABLE labelOptic #-}
-  labelOptic =
-    lens
-      (\case OpaqueData tn _ -> tn; DataDeclaration tn _ _ _ -> tn)
-      (\decl tn -> case decl of OpaqueData _ x -> OpaqueData tn x; DataDeclaration _ x y z -> DataDeclaration tn x y z)
-
-instance (k ~ A_Fold, a ~ Count "tyvar", b ~ Count "tyvar") => LabelOptic "datatypeBinders" k (DataDeclaration c) (DataDeclaration c) a b where
-  {-# INLINEABLE labelOptic #-}
-  labelOptic =
-    folding $ \case
-      DataDeclaration _ cnt _ _ -> Just cnt
-      _ -> Nothing
-
-instance (k ~ A_Fold, a ~ Vector (Constructor c), b ~ Vector (Constructor c)) => LabelOptic "datatypeConstructors" k (DataDeclaration c) (DataDeclaration c) a b where
-  {-# INLINEABLE labelOptic #-}
-  labelOptic =
-    folding $ \case
-      DataDeclaration _ _ ctors _ -> Just ctors
-      _ -> Nothing

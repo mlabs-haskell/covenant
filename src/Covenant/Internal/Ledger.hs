@@ -6,16 +6,17 @@ where
 
 import Covenant.DeBruijn (DeBruijn (Z))
 import Covenant.Index (Count, count0, count1, count2, ix0, ix1)
-import Covenant.Type
-  ( -- weirdly, can't coerece w/o importing the constructor?
-    AbstractTy (BoundAt),
+import Covenant.Internal.Strategy
+  ( InternalStrategy (InternalAssocMapStrat, InternalDataStrat, InternalListStrat, InternalPairStrat),
+    PlutusDataStrategy (ConstrData, NewtypeData),
+  )
+import Covenant.Internal.Type
+  ( AbstractTy (BoundAt),
     BuiltinFlatT (BoolT, ByteStringT, IntegerT),
     Constructor (Constructor),
     ConstructorName (ConstructorName),
     DataDeclaration (DataDeclaration),
     DataEncoding (BuiltinStrategy, PlutusData),
-    InternalStrategy (InternalAssocMapStrat, InternalDataStrat, InternalListStrat, InternalPairStrat),
-    PlutusDataStrategy (ConstrData, NewtypeData),
     TyName (TyName),
     ValT (Abstraction, BuiltinFlat, Datatype),
   )
@@ -677,4 +678,4 @@ unitT =
       (PlutusData ConstrData)
 
 testDatatypes :: [DataDeclaration AbstractTy]
-testDatatypes = [maybeT, eitherT, unitT]
+testDatatypes = [maybeT, eitherT, unitT, pair]

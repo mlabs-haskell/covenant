@@ -22,6 +22,9 @@ module Covenant.Type
 
     -- * Value types
     ValT (..),
+    dataTypeT,
+    dataType1T,
+    dataType2T,
     BuiltinFlatT (..),
     byteStringT,
     integerT,
@@ -58,9 +61,25 @@ module Covenant.Type
     TyName (TyName),
     ConstructorName (ConstructorName),
     DataEncoding (SOP, PlutusData, BuiltinStrategy),
-    PlutusDataConstructor (PD_I, PD_B, PD_Constructor, PD_List),
-    PlutusDataStrategy (EnumData, ProductListData, ConstrData, NewtypeData),
-    InternalStrategy (InternalListStrat, InternalPairStrat, InternalDataStrat, InternalAssocMapStrat),
+    PlutusDataConstructor
+      ( PlutusI,
+        PlutusB,
+        PlutusConstr,
+        PlutusList,
+        PlutusMap
+      ),
+    PlutusDataStrategy
+      ( EnumData,
+        ProductListData,
+        ConstrData,
+        NewtypeData
+      ),
+    InternalStrategy
+      ( InternalListStrat,
+        InternalPairStrat,
+        InternalDataStrat,
+        InternalAssocMapStrat
+      ),
 
     -- * Datatype sanity checking
     cycleCheck,
@@ -85,15 +104,34 @@ import Covenant.Index
 import Covenant.Internal.KindCheck (cycleCheck)
 import Covenant.Internal.Rename
   ( RenameError
-      ( InvalidAbstractionReference,
-        IrrelevantAbstraction,
-        UndeterminedAbstraction
+      ( InvalidAbstractionReference
       ),
     RenameM,
     renameCompT,
     renameDataDecl,
     renameValT,
     runRenameM,
+  )
+import Covenant.Internal.Strategy
+  ( InternalStrategy
+      ( InternalAssocMapStrat,
+        InternalDataStrat,
+        InternalListStrat,
+        InternalPairStrat
+      ),
+    PlutusDataConstructor
+      ( PlutusB,
+        PlutusConstr,
+        PlutusI,
+        PlutusList,
+        PlutusMap
+      ),
+    PlutusDataStrategy
+      ( ConstrData,
+        EnumData,
+        NewtypeData,
+        ProductListData
+      ),
   )
 import Covenant.Internal.Type
   ( AbstractTy (BoundAt),
@@ -113,13 +151,9 @@ import Covenant.Internal.Type
     ConstructorName (ConstructorName),
     DataDeclaration (DataDeclaration, OpaqueData),
     DataEncoding (BuiltinStrategy, PlutusData, SOP),
-    InternalStrategy (InternalAssocMapStrat, InternalDataStrat, InternalListStrat, InternalPairStrat),
-    PlutusDataConstructor (PD_B, PD_Constructor, PD_I, PD_List),
-    PlutusDataStrategy (ConstrData, EnumData, NewtypeData, ProductListData),
     Renamed (Rigid, Unifiable, Wildcard),
     TyName (TyName),
     ValT (Abstraction, BuiltinFlat, Datatype, ThunkT),
-    prettyStr,
   )
 import Covenant.Internal.Unification
   ( TypeAppError
@@ -133,12 +167,14 @@ import Covenant.Internal.Unification
     runUnifyM,
     unify,
   )
+import Covenant.Internal.PrettyPrint (prettyStr)
 import Data.Coerce (coerce)
 import Data.Kind (Type)
 import Data.Vector (Vector)
 import Data.Vector qualified as Vector
 import Data.Vector.NonEmpty (NonEmptyVector)
 import Data.Vector.NonEmpty qualified as NonEmpty
+import GHC.Exts (fromListN)
 import Optics.Core (preview)
 
 -- | The body of a computation type that doesn't take any arguments and produces
@@ -281,6 +317,24 @@ pattern CompN count xs <- CompT count xs
 -- @since 1.0.0
 tyvar :: DeBruijn -> Index "tyvar" -> ValT AbstractTy
 tyvar db = Abstraction . BoundAt db
+
+-- | Helper for referring to compound data types with no type variables.
+--
+-- @since 1.1.0
+dataTypeT :: forall (a :: Type). TyName -> ValT a
+dataTypeT tn = Datatype tn Vector.empty
+
+-- | Helper for referring to compound data types with one type variable.
+--
+-- @since 1.1.0
+dataType1T :: TyName -> ValT AbstractTy -> ValT AbstractTy
+dataType1T tn = Datatype tn . Vector.singleton
+
+-- | Helper for referring to compound data types with two type variables.
+--
+-- @since 1.1.0
+dataType2T :: TyName -> ValT AbstractTy -> ValT AbstractTy -> ValT AbstractTy
+dataType2T tn v1 v2 = Datatype tn . fromListN 2 $ [v1, v2]
 
 -- | Helper for defining the value type of builtin bytestrings.
 --

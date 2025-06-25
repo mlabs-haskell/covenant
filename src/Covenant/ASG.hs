@@ -35,6 +35,7 @@ module Covenant.ASG
       ( Builtin1,
         Builtin2,
         Builtin3,
+        Builtin6,
         Lam,
         Force,
         Return
@@ -73,9 +74,7 @@ module Covenant.ASG
         UnificationError
       ),
     RenameError
-      ( InvalidAbstractionReference,
-        IrrelevantAbstraction,
-        UndeterminedAbstraction
+      ( InvalidAbstractionReference
       ),
 
     -- ** Introducers
@@ -83,6 +82,7 @@ module Covenant.ASG
     builtin1,
     builtin2,
     builtin3,
+    builtin6,
     force,
     ret,
     lam,
@@ -118,9 +118,7 @@ import Covenant.DeBruijn (DeBruijn, asInt)
 import Covenant.Index (Index, count0, intIndex)
 import Covenant.Internal.Rename
   ( RenameError
-      ( InvalidAbstractionReference,
-        IrrelevantAbstraction,
-        UndeterminedAbstraction
+      ( InvalidAbstractionReference
       ),
     renameCompT,
     renameValT,
@@ -135,6 +133,7 @@ import Covenant.Internal.Term
       ( Builtin1Internal,
         Builtin2Internal,
         Builtin3Internal,
+        Builtin6Internal,
         ForceInternal,
         LamInternal,
         ReturnInternal
@@ -178,9 +177,11 @@ import Covenant.Internal.Type
 import Covenant.Internal.Unification (checkApp)
 import Covenant.Prim
   ( OneArgFunc,
+    SixArgFunc,
     ThreeArgFunc,
     TwoArgFunc,
     typeOneArgFunc,
+    typeSixArgFunc,
     typeThreeArgFunc,
     typeTwoArgFunc,
   )
@@ -320,6 +321,12 @@ pattern Builtin2 f <- Builtin2Internal f
 pattern Builtin3 :: ThreeArgFunc -> CompNodeInfo
 pattern Builtin3 f <- Builtin3Internal f
 
+-- | A Plutus primop with six arguments.
+--
+-- @since 1.1.0
+pattern Builtin6 :: SixArgFunc -> CompNodeInfo
+pattern Builtin6 f <- Builtin6Internal f
+
 -- | Force a thunk back into the computation it wraps.
 --
 -- @since 1.0.0
@@ -338,7 +345,7 @@ pattern Return r <- ReturnInternal r
 pattern Lam :: Id -> CompNodeInfo
 pattern Lam i <- LamInternal i
 
-{-# COMPLETE Builtin1, Builtin2, Builtin3, Force, Return, Lam #-}
+{-# COMPLETE Builtin1, Builtin2, Builtin3, Builtin6, Force, Return, Lam #-}
 
 -- | A compile-time literal of a flat builtin type.
 --
@@ -485,6 +492,18 @@ builtin3 ::
   m Id
 builtin3 bi = do
   let node = ACompNode (typeThreeArgFunc bi) . Builtin3Internal $ bi
+  refTo node
+
+-- | As 'builtin1', but for six-argument primops.
+--
+-- @since 1.1.0
+builtin6 ::
+  forall (m :: Type -> Type).
+  (MonadHashCons Id ASGNode m) =>
+  SixArgFunc ->
+  m Id
+builtin6 bi = do
+  let node = ACompNode (typeSixArgFunc bi) . Builtin6Internal $ bi
   refTo node
 
 -- | Given a reference to a thunk, turn it back into a computation. Will fail if

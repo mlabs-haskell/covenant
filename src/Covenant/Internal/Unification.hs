@@ -9,7 +9,7 @@ module Covenant.Internal.Unification
   )
 where
 
-import Control.Monad (foldM, unless)
+import Control.Monad (foldM, unless, when)
 import Data.Ord (comparing)
 #if __GLASGOW_HASKELL__==908
 import Data.Foldable (foldl')
@@ -17,7 +17,7 @@ import Data.Foldable (foldl')
 import Control.Monad.Except (MonadError, catchError, throwError)
 import Control.Monad.Reader (MonadReader, ReaderT (runReaderT), ask)
 import Covenant.Data (DatatypeInfo, renameDatatypeInfo)
-import Covenant.Index (Index, intCount, intIndex)
+import Covenant.Index (Index, intCount, intIndex, count1)
 import Covenant.Internal.Rename (RenameError)
 import Covenant.Internal.Type
   ( AbstractTy,
@@ -40,7 +40,9 @@ import Data.Vector (Vector)
 import Data.Vector qualified as Vector
 import Data.Vector.NonEmpty qualified as NonEmpty
 import Data.Word (Word64)
-import Optics.Core (ix, preview, view)
+import Optics.Core (ix, preview, view, review)
+import Data.Vector.NonEmpty (NonEmptyVector)
+
 
 -- | @since 1.0.0
 data TypeAppError
@@ -51,7 +53,7 @@ data TypeAppError
   | -- | We were given too many arguments.
     ExcessArgs (CompT Renamed) (Vector (Maybe (ValT Renamed)))
   | -- | We weren't given enough arguments.
-    InsufficientArgs (CompT Renamed)
+    InsufficientArgs Int (CompT Renamed) [Maybe (ValT Renamed)]
   | -- | The expected type (first field) and actual type (second field) do not
     -- unify.
     DoesNotUnify (ValT Renamed) (ValT Renamed)
@@ -114,9 +116,15 @@ checkApp' ::
   CompT Renamed ->
   [Maybe (ValT Renamed)] ->
   UnifyM (ValT Renamed)
-checkApp' f@(CompT _ (CompTBody xs)) =
+checkApp' f@(CompT _ (CompTBody xs)) ys = do
   let (curr, rest) = NonEmpty.uncons xs
-   in go curr (Vector.toList rest)
+      numArgsExpected = NonEmpty.length xs - 1
+      numArgsActual   = length ys
+  when (numArgsActual < numArgsExpected) $
+    throwError $ InsufficientArgs numArgsActual f ys
+  -- when (numArgsExpected > numArgsActual) $
+  --  throwError $ ExcessArgs f (Vector.fromList ys)
+  go curr (Vector.toList rest) ys 
   where
     go ::
       ValT Renamed ->
@@ -130,7 +138,7 @@ checkApp' f@(CompT _ (CompTBody xs)) =
         [] -> fixUp currParam
         _ -> throwError . ExcessArgs f . Vector.fromList $ args
       _ -> case args of
-        [] -> throwError . InsufficientArgs $ f
+        [] -> throwError $  InsufficientArgs (length args) f args
         (currArg : restArgs) -> do
           newRestParams <- case currArg of
             -- An error argument unifies with anything, as it's effectively
@@ -141,7 +149,7 @@ checkApp' f@(CompT _ (CompTBody xs)) =
               subs <- catchError (unify currParam currArg') (promoteUnificationError currParam currArg')
               pure . Map.foldlWithKey' applySub restParams $ subs
           case newRestParams of
-            [] -> throwError . InsufficientArgs $ f
+            [] -> throwError $ InsufficientArgs (length args) f args 
             (currParam' : restParams') -> go currParam' restParams' restArgs
 
 -- Helpers
@@ -310,8 +318,17 @@ unify expected actual =
         _ -> unificationError
 
     concretify :: ValT Renamed -> Vector (ValT Renamed) -> UnifyM (ValT Renamed)
-    concretify (ThunkT compT) args = checkApp' compT (pure <$> Vector.toList args)
-    concretify _ _ = throwError $ ImpossibleHappened "BBForm not a Thunk"
+    concretify (ThunkT (CompT count (CompTBody fn))) args = fixUp $ ThunkT (CompT count (CompTBody newFn))
+     where
+      indexedArgs :: [(Index "tyvar", ValT Renamed)]
+      indexedArgs = Vector.toList $ Vector.imap (\i x -> (fromJust . preview intIndex $ i, x)) args
+
+      newFn :: NonEmptyVector (ValT Renamed)
+      newFn = go indexedArgs <$> fn
+
+      go :: [(Index "tyvar", ValT Renamed)] -> ValT Renamed -> ValT Renamed
+      go subs arg = foldl' (\val (ix,concrete) -> substitute ix concrete val) arg subs
+    concretify _ _ = throwError $ ImpossibleHappened "bbForm is not a thunk"
 
     reconcile ::
       Map (Index "tyvar") (ValT Renamed) ->
@@ -329,3 +346,4 @@ unify expected actual =
         Merge.preserveMissing
         Merge.preserveMissing
         (Merge.zipWithAMatched $ \_ l r -> l <$ unless (l == r) unificationError)
+
