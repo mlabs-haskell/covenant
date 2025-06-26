@@ -102,5 +102,17 @@ jobs:
           restore-keys: ${{ runner.os }}-${{ matrix.ghc }}-
       - name: Build
         run: cabal build
-      - name: Run tests
-        run: cabal test all
+      - name: Run renaming suite
+        run: cabal test renaming
+      - name: Run base functor suite
+        run: cabal test base-functor
+      - name: Run type applications suite
+        run: cabal test type-applications
+      - name: Run primops suite
+        run: cabal test primops
+      - name: Run ASG suite
+        run: cabal test asg
+      - name: Run Boehm-Berrarducci suite
+        run: cabal test bb
+      - name: Run kind checking suite
+        run: cabal test kindcheck
