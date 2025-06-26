@@ -102,3 +102,5 @@ jobs:
           restore-keys: ${{ runner.os }}-${{ matrix.ghc }}-
       - name: Build
         run: cabal build
+      - name: Run tests
+        run: cabal test all
