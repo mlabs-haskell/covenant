@@ -40,7 +40,7 @@ module Covenant.ASG
         Force,
         Return
       ),
-    ValNodeInfo (Lit, App, Thunk),
+    ValNodeInfo (Lit, App, Thunk, Cata),
     ASGNode (..),
 
     -- ** Functions
@@ -52,27 +52,7 @@ module Covenant.ASG
     CovenantError (..),
     ScopeInfo,
     ASGBuilder,
-    CovenantTypeError
-      ( BrokenIdReference,
-        ForceCompType,
-        ForceNonThunk,
-        ForceError,
-        ThunkValType,
-        ThunkError,
-        ApplyToValType,
-        ApplyToError,
-        ApplyCompType,
-        RenameFunctionFailed,
-        RenameArgumentFailed,
-        NoSuchArgument,
-        ReturnCompType,
-        LambdaResultsInValType,
-        LambdaResultsInNonReturn,
-        ReturnWrapsError,
-        ReturnWrapsCompType,
-        WrongReturnType,
-        UnificationError
-      ),
+    CovenantTypeError (..),
     RenameError
       ( InvalidAbstractionReference
       ),
@@ -90,6 +70,7 @@ module Covenant.ASG
     lit,
     thunk,
     app,
+    cata,
 
     -- ** Elimination
 
@@ -101,6 +82,7 @@ module Covenant.ASG
   )
 where
 
+import Control.Monad (unless)
 import Control.Monad.Except
   ( ExceptT,
     MonadError (throwError),
@@ -151,6 +133,11 @@ import Covenant.Internal.Term
         ApplyToValType,
         BrokenIdReference,
         EncodingError,
+        CataApplyToNonValT,
+        CataNotAnAlgebra,
+        CataUnsuitable,
+        CataWrongBuiltinType,
+        CataWrongValT,
         ForceCompType,
         ForceError,
         ForceNonThunk,
@@ -169,19 +156,21 @@ import Covenant.Internal.Term
       ),
     Id,
     Ref (AnArg, AnId),
-    ValNodeInfo (AppInternal, LitInternal, ThunkInternal),
+    ValNodeInfo (AppInternal, CataInternal, LitInternal, ThunkInternal),
     typeASGNode,
     typeId,
     typeRef,
   )
 import Covenant.Internal.Type
   ( AbstractTy,
+    BuiltinFlatT (ByteStringT, IntegerT),
     CompT (CompT),
     CompTBody (CompTBody),
-    DataDeclaration,
+    DataDeclaration (DataDeclaration),
     Renamed,
     TyName,
-    ValT (ThunkT),
+    ValT (BuiltinFlat, Datatype, ThunkT),
+    arity,
   )
 import Covenant.Internal.Unification (checkApp)
 import Covenant.Prim
@@ -208,6 +197,7 @@ import Data.Vector.NonEmpty qualified as NonEmpty
 import Optics.Core
   ( A_Lens,
     LabelOptic (labelOptic),
+    at,
     ix,
     lens,
     over,
@@ -375,7 +365,13 @@ pattern App f args <- AppInternal f args
 pattern Thunk :: Id -> ValNodeInfo
 pattern Thunk i <- ThunkInternal i
 
-{-# COMPLETE Lit, App, Thunk #-}
+-- | \'Tear down\' a self-recursive value with an algebra.
+--
+-- @since 1.0.0
+pattern Cata :: Ref -> Ref -> ValNodeInfo
+pattern Cata algebraRef valRef <- CataInternal algebraRef valRef
+
+{-# COMPLETE Lit, App, Thunk, Cata #-}
 
 -- | Any problem that might arise when building an ASG programmatically.
 --
@@ -673,6 +669,68 @@ thunk i = do
     ValNodeType t -> throwError . ThunkValType $ t
     ErrorNodeType -> throwError ThunkError
 
+-- | Given a 'Ref' to an algebra (that is, something taking a base functor and
+-- producing some result), and a 'Ref' to a value associated with that base
+-- functor, build a catamorphism to tear it down. This can fail for a range of
+-- reasons:
+--
+-- * First 'Ref' is not a thunk taking one argument
+-- * The argument to the thunk isn't a base functor, or isn't a suitable base
+--   functor for the second argument
+-- * Second argument is not a value type
+--
+-- @since 1.1.0
+cata ::
+  forall (m :: Type -> Type).
+  (MonadHashCons Id ASGNode m, MonadError CovenantTypeError m, MonadReader ASGEnv m) =>
+  Ref ->
+  Ref ->
+  m Id
+cata rAlg rVal =
+  typeRef rVal >>= \case
+    ValNodeType valT ->
+      typeRef rAlg >>= \case
+        t@(ValNodeType (ThunkT algT@(CompT _ (CompTBody nev)))) -> do
+          unless (arity algT == 2) (throwError . CataNotAnAlgebra $ t)
+          case nev NonEmpty.! 0 of
+            Datatype bfName bfTyArgs -> do
+              -- If we got this far, we know at minimum that we have somewhat
+              -- sensical arguments. Now we have to make sure that we have a
+              -- suitable type for the algebra, and a suitable thing to tear
+              -- down.
+              --
+              -- After verifying this, we use `tryApply` so the unification
+              -- machinery can produce the type we expect with proper
+              -- concretifications.
+              unless (Vector.length bfTyArgs > 0) (throwError . CataNotAnAlgebra $ t)
+              let lastVar = Vector.last bfTyArgs
+              unless (nev NonEmpty.! 1 == lastVar) (throwError . CataNotAnAlgebra $ t)
+              appliedArgT <- case valT of
+                BuiltinFlat bT -> case bT of
+                  ByteStringT -> do
+                    unless (bfName == "ByteString_F") (throwError . CataUnsuitable algT $ valT)
+                    pure $ Datatype "ByteString_F" . Vector.singleton $ lastVar
+                  IntegerT -> do
+                    let isSuitableBaseFunctor = bfName == "Natural_F" || bfName == "Negative_F"
+                    unless isSuitableBaseFunctor (throwError . CataUnsuitable algT $ valT)
+                    pure $ Datatype bfName . Vector.singleton $ lastVar
+                  _ -> throwError . CataWrongBuiltinType $ bT
+                Datatype tyName tyVars -> do
+                  lookedUp <- asks (view (#datatypeInfo % at tyName))
+                  case lookedUp of
+                    Nothing -> throwError . CataUnsuitable algT $ valT
+                    Just info -> case view #baseFunctor info of
+                      Just (DataDeclaration actualBfName _ _ _, _) -> do
+                        unless (bfName == actualBfName) (throwError . CataUnsuitable algT $ valT)
+                        pure . Datatype bfName . Vector.snoc tyVars $ lastVar
+                      _ -> throwError . CataUnsuitable algT $ valT
+                _ -> throwError . CataWrongValT $ valT
+              resultT <- tryApply algT appliedArgT
+              refTo . AValNode resultT . CataInternal rAlg $ rVal
+            _ -> throwError . CataNotAnAlgebra $ t
+        t -> throwError . CataNotAnAlgebra $ t
+    t -> throwError . CataApplyToNonValT $ t
+
 -- Helpers
 
 renameArg ::
@@ -697,3 +755,17 @@ checkEncodingWithInfo ::
 checkEncodingWithInfo tyDict valT = case checkEncodingArgs (view (#originalDecl % #datatypeEncoding)) tyDict valT of
   Left encErr -> throwError $ EncodingError encErr
   Right {} -> pure ()
+
+tryApply ::
+  forall (m :: Type -> Type).
+  (MonadError CovenantTypeError m, MonadReader ASGEnv m) =>
+  CompT AbstractTy -> ValT AbstractTy -> m (ValT AbstractTy)
+tryApply algebraT argT = case runRenameM . renameCompT $ algebraT of
+  Left err' -> throwError . RenameFunctionFailed algebraT $ err'
+  Right renamedAlgebraT -> case runRenameM . renameValT $ argT of
+    Left err' -> throwError . RenameArgumentFailed argT $ err'
+    Right renamedArgT -> do
+      tyDict <- asks (view #datatypeInfo)
+      case checkApp tyDict renamedAlgebraT [Just renamedArgT] of
+        Left err' -> throwError . UnificationError $ err'
+        Right resultT -> pure . undoRename $ resultT
