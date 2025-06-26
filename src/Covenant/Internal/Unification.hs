@@ -3,21 +3,28 @@
 module Covenant.Internal.Unification
   ( TypeAppError (..),
     checkApp,
+    runUnifyM,
+    UnifyM,
   )
 where
 
-import Control.Monad (foldM, unless)
+import Control.Monad (foldM, unless, when)
 import Data.Ord (comparing)
 #if __GLASGOW_HASKELL__==908
 import Data.Foldable (foldl')
 #endif
-import Control.Monad.Except (catchError, throwError)
+import Control.Monad.Except (MonadError, catchError, throwError)
+import Control.Monad.Reader (MonadReader, ReaderT (runReaderT), ask)
+import Covenant.Data (DatatypeInfo)
 import Covenant.Index (Index, intCount, intIndex)
+import Covenant.Internal.Rename (RenameError, renameDatatypeInfo)
 import Covenant.Internal.Type
-  ( BuiltinFlatT,
+  ( AbstractTy,
+    BuiltinFlatT,
     CompT (CompT),
     CompTBody (CompTBody),
     Renamed (Rigid, Unifiable, Wildcard),
+    TyName,
     ValT (Abstraction, BuiltinFlat, Datatype, ThunkT),
   )
 import Data.Kind (Type)
@@ -27,11 +34,13 @@ import Data.Map.Strict qualified as Map
 import Data.Maybe (fromJust, mapMaybe)
 import Data.Set (Set)
 import Data.Set qualified as Set
+import Data.Text (Text)
 import Data.Vector (Vector)
 import Data.Vector qualified as Vector
+import Data.Vector.NonEmpty (NonEmptyVector)
 import Data.Vector.NonEmpty qualified as NonEmpty
 import Data.Word (Word64)
-import Optics.Core (preview)
+import Optics.Core (ix, preview, view)
 
 -- | @since 1.0.0
 data TypeAppError
@@ -41,11 +50,29 @@ data TypeAppError
     LeakingWildcard Word64 Int (Index "tyvar")
   | -- | We were given too many arguments.
     ExcessArgs (CompT Renamed) (Vector (Maybe (ValT Renamed)))
-  | -- | We weren't given enough arguments.
-    InsufficientArgs (CompT Renamed)
+  | -- \| We weren't given enough arguments.
+
+    -- | @since 1.1.0
+    InsufficientArgs Int (CompT Renamed) [Maybe (ValT Renamed)]
   | -- | The expected type (first field) and actual type (second field) do not
     -- unify.
     DoesNotUnify (ValT Renamed) (ValT Renamed)
+  | -- \| No datatype info associated with requested TyName
+
+    -- | @since 1.1.0
+    NoDatatypeInfo TyName
+  | -- | No BB form. The only datatypes which should lack one are those isomorphic to `Void`
+    -- @since 1.1.0
+    NoBBForm TyName
+  | -- \| Datatype renaming failed.
+
+    -- | @since 1.1.0
+    DatatypeInfoRenameFailed TyName RenameError
+  | -- \| Something happened that definitely should not have. For right now, this means: The BB form of a datatype isn't a thunk
+    --   (but it might be useful to keep this around as a catchall for things that really shouldn't happen)
+
+    -- | @since 1.1.0
+    ImpossibleHappened Text
   deriving stock
     ( -- | @since 1.0.0
       Eq,
@@ -53,17 +80,64 @@ data TypeAppError
       Show
     )
 
--- | @since 1.0.0
-checkApp :: CompT Renamed -> [Maybe (ValT Renamed)] -> Either TypeAppError (ValT Renamed)
-checkApp f@(CompT _ (CompTBody xs)) =
+{- This will probably only get used directly in testing and we'll use capabilities w/ the class everywhere else? -}
+newtype UnifyM a = UnifyM (ReaderT (Map TyName (DatatypeInfo AbstractTy)) (Either TypeAppError) a)
+  deriving
+    ( -- | @since 1.1.0
+      Functor,
+      Applicative,
+      Monad,
+      MonadReader (Map TyName (DatatypeInfo AbstractTy)),
+      MonadError TypeAppError
+    )
+    via (ReaderT (Map TyName (DatatypeInfo AbstractTy)) (Either TypeAppError))
+
+runUnifyM :: Map TyName (DatatypeInfo AbstractTy) -> UnifyM a -> Either TypeAppError a
+runUnifyM tyDict (UnifyM act) = runReaderT act tyDict
+
+lookupDatatypeInfo ::
+  TyName ->
+  UnifyM (DatatypeInfo Renamed)
+lookupDatatypeInfo tn =
+  ask >>= \tyDict -> case preview (ix tn) tyDict of
+    Nothing -> throwError $ NoDatatypeInfo tn
+    Just dti -> either (throwError . DatatypeInfoRenameFailed tn) pure $ renameDatatypeInfo dti
+
+lookupBBForm :: TyName -> UnifyM (ValT Renamed)
+lookupBBForm tn =
+  lookupDatatypeInfo tn >>= \dti -> case view #bbForm dti of
+    Nothing -> throwError $ NoBBForm tn
+    Just bbForm -> pure bbForm
+
+checkApp ::
+  Map TyName (DatatypeInfo AbstractTy) ->
+  CompT Renamed ->
+  [Maybe (ValT Renamed)] ->
+  Either TypeAppError (ValT Renamed)
+checkApp tyDict f args = runUnifyM tyDict $ checkApp' f args
+
+-- | @since 1.1.0
+checkApp' ::
+  CompT Renamed ->
+  [Maybe (ValT Renamed)] ->
+  UnifyM (ValT Renamed)
+checkApp' f@(CompT _ (CompTBody xs)) ys = do
   let (curr, rest) = NonEmpty.uncons xs
-   in go curr (Vector.toList rest)
+      numArgsExpected = NonEmpty.length xs - 1
+      numArgsActual = length ys
+  when (numArgsActual < numArgsExpected) $
+    throwError $
+      InsufficientArgs numArgsActual f ys
+  when (numArgsExpected > numArgsActual) $
+    throwError $
+      ExcessArgs f (Vector.fromList ys)
+  go curr (Vector.toList rest) ys
   where
     go ::
       ValT Renamed ->
       [ValT Renamed] ->
       [Maybe (ValT Renamed)] ->
-      Either TypeAppError (ValT Renamed)
+      UnifyM (ValT Renamed)
     go currParam restParams args = case restParams of
       [] -> case args of
         -- If we got here, currParam is the resulting type after all
@@ -71,7 +145,7 @@ checkApp f@(CompT _ (CompTBody xs)) =
         [] -> fixUp currParam
         _ -> throwError . ExcessArgs f . Vector.fromList $ args
       _ -> case args of
-        [] -> throwError . InsufficientArgs $ f
+        [] -> throwError $ InsufficientArgs (length args) f args
         (currArg : restArgs) -> do
           newRestParams <- case currArg of
             -- An error argument unifies with anything, as it's effectively
@@ -82,7 +156,7 @@ checkApp f@(CompT _ (CompTBody xs)) =
               subs <- catchError (unify currParam currArg') (promoteUnificationError currParam currArg')
               pure . Map.foldlWithKey' applySub restParams $ subs
           case newRestParams of
-            [] -> throwError . InsufficientArgs $ f
+            [] -> throwError $ InsufficientArgs (length args) f args
             (currParam' : restParams') -> go currParam' restParams' restArgs
 
 -- Helpers
@@ -109,7 +183,7 @@ substitute index toSub = \case
   ThunkT (CompT abstractions (CompTBody xs)) ->
     ThunkT . CompT abstractions . CompTBody . fmap (substitute index toSub) $ xs
   BuiltinFlat t -> BuiltinFlat t
-  Datatype {} -> error "Don't unify datatypes until BBF implemented" -- Datatype tn abstractions $ substitute index toSub <$> xs
+  Datatype tn args -> Datatype tn $ substitute index toSub <$> args
 
 -- Because unification is inherently recursive, if we find an error deep within
 -- a type, the message will signify only the _part_ that fails to unify, not the
@@ -118,17 +192,16 @@ substitute index toSub = \case
 -- function, which effectively allows us to rename the types reported in
 -- unification errors to whatever types 'wrap' them.
 promoteUnificationError ::
-  forall (a :: Type).
   ValT Renamed ->
   ValT Renamed ->
   TypeAppError ->
-  Either TypeAppError a
+  UnifyM a
 promoteUnificationError topLevelExpected topLevelActual =
-  Left . \case
+  throwError . \case
     DoesNotUnify _ _ -> DoesNotUnify topLevelExpected topLevelActual
     err -> err
 
-fixUp :: ValT Renamed -> Either TypeAppError (ValT Renamed)
+fixUp :: ValT Renamed -> UnifyM (ValT Renamed)
 fixUp = \case
   -- We have a result that's effectively `forall a . a` but not an error
   Abstraction (Unifiable index) -> throwError . LeakingUnifiable $ index
@@ -163,12 +236,12 @@ collectUnifiables = \case
     _ -> Set.empty
   BuiltinFlat _ -> Set.empty
   ThunkT (CompT _ (CompTBody xs)) -> NonEmpty.foldl' (\acc t -> acc <> collectUnifiables t) Set.empty xs
-  Datatype {} -> error "Implement unification machinery for datatypes"
+  Datatype _ args -> Vector.foldl' (\acc t -> acc <> collectUnifiables t) Set.empty args
 
 unify ::
   ValT Renamed ->
   ValT Renamed ->
-  Either TypeAppError (Map (Index "tyvar") (ValT Renamed))
+  UnifyM (Map (Index "tyvar") (ValT Renamed))
 unify expected actual =
   catchError
     ( case expected of
@@ -179,16 +252,16 @@ unify expected actual =
           Wildcard scopeId1 _ index1 -> expectWildcard scopeId1 index1
         ThunkT t1 -> expectThunk t1
         BuiltinFlat t1 -> expectFlatBuiltin t1
-        Datatype {} -> error "Don't try to unify datatypes yet" -- expectDatatype tn abses xs
+        Datatype tn xs -> expectDatatype tn xs
     )
     (promoteUnificationError expected actual)
   where
-    unificationError :: forall (a :: Type). Either TypeAppError a
-    unificationError = Left . DoesNotUnify expected $ actual
-    noSubUnify :: forall (k :: Type) (a :: Type). Either TypeAppError (Map k a)
+    unificationError :: forall (a :: Type). UnifyM a
+    unificationError = throwError . DoesNotUnify expected $ actual
+    noSubUnify :: forall (k :: Type) (a :: Type). UnifyM (Map k a)
     noSubUnify = pure Map.empty
     expectRigid ::
-      Int -> Index "tyvar" -> Either TypeAppError (Map (Index "tyvar") (ValT Renamed))
+      Int -> Index "tyvar" -> UnifyM (Map (Index "tyvar") (ValT Renamed))
     -- Rigids behave identically to concrete types: they can unify with
     -- themselves, or any other abstraction, but nothing else. No substitutional
     -- rewrites are needed.
@@ -200,7 +273,7 @@ unify expected actual =
       Abstraction _ -> noSubUnify
       _ -> unificationError
     expectWildcard ::
-      Word64 -> Index "tyvar" -> Either TypeAppError (Map (Index "tyvar") (ValT Renamed))
+      Word64 -> Index "tyvar" -> UnifyM (Map (Index "tyvar") (ValT Renamed))
     -- Wildcards can unify with unifiables, as well as themselves, but nothing
     -- else. No substitutional rewrites are needed.
     expectWildcard scopeId1 index1 = case actual of
@@ -210,7 +283,7 @@ unify expected actual =
           then noSubUnify
           else unificationError
       _ -> unificationError
-    expectThunk :: CompT Renamed -> Either TypeAppError (Map (Index "tyvar") (ValT Renamed))
+    expectThunk :: CompT Renamed -> UnifyM (Map (Index "tyvar") (ValT Renamed))
     -- Thunks unify unconditionally with wildcards or unifiables. They unify
     -- conditionally with other thunks, provided that we can unify each argument
     -- with its counterpart in the same position, as well as their result types,
@@ -224,7 +297,7 @@ unify expected actual =
           (foldM (\acc (l, r) -> unify l r >>= reconcile acc) Map.empty . NonEmpty.zip t1 $ t2)
           (promoteUnificationError expected actual)
       _ -> unificationError
-    expectFlatBuiltin :: BuiltinFlatT -> Either TypeAppError (Map (Index "tyvar") (ValT Renamed))
+    expectFlatBuiltin :: BuiltinFlatT -> UnifyM (Map (Index "tyvar") (ValT Renamed))
     -- 'Flat' builtins are always concrete. They can unify with themselves,
     -- unifiables or wildcards, but nothing else. No substitutional rewrites are
     -- needed.
@@ -236,10 +309,43 @@ unify expected actual =
           then noSubUnify
           else unificationError
       _ -> unificationError
+
+    expectDatatype :: TyName -> Vector (ValT Renamed) -> UnifyM (Map (Index "tyvar") (ValT Renamed))
+    -- Datatypes unify with wildcards or unifiables, or other "suitable" instances of the same datatype.
+    -- Suitability with other datatypes is determined by converting to BB form, then concretifying
+    -- the BB form using the arguments to the actual datatype.
+    -- For example, the BB form of `Maybe` is: forall a r. r -> (a -> r) -> r
+    -- which, if we concretify while attempting to unify with `Maybe Int`, becomes: `forall r. r -> (Int -> r) -> r`
+    expectDatatype tn args = do
+      bbForm <- lookupBBForm tn
+      bbFormConcreteE <- concretify bbForm args
+      case actual of
+        Abstraction (Rigid _ _) -> unificationError
+        Abstraction _ -> noSubUnify
+        Datatype tn' args'
+          | tn' /= tn -> unificationError
+          | otherwise -> do
+              bbFormConcreteA <- concretify bbForm args'
+              unify bbFormConcreteE bbFormConcreteA
+        _ -> unificationError
+
+    concretify :: ValT Renamed -> Vector (ValT Renamed) -> UnifyM (ValT Renamed)
+    concretify (ThunkT (CompT count (CompTBody fn))) args = fixUp $ ThunkT (CompT count (CompTBody newFn))
+      where
+        indexedArgs :: [(Index "tyvar", ValT Renamed)]
+        indexedArgs = Vector.toList $ Vector.imap (\i x -> (fromJust . preview intIndex $ i, x)) args
+
+        newFn :: NonEmptyVector (ValT Renamed)
+        newFn = go indexedArgs <$> fn
+
+        go :: [(Index "tyvar", ValT Renamed)] -> ValT Renamed -> ValT Renamed
+        go subs arg = foldl' (\val (i, concrete) -> substitute i concrete val) arg subs
+    concretify _ _ = throwError $ ImpossibleHappened "bbForm is not a thunk"
+
     reconcile ::
       Map (Index "tyvar") (ValT Renamed) ->
       Map (Index "tyvar") (ValT Renamed) ->
-      Either TypeAppError (Map (Index "tyvar") (ValT Renamed))
+      UnifyM (Map (Index "tyvar") (ValT Renamed))
     -- Note (Koz, 14/04/2025): This utter soup means the following:
     --
     -- - If the old map and the new map don't have any overlapping assignments,

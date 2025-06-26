@@ -1,5 +1,11 @@
 module Covenant.Internal.Ledger
   ( ledgerTypes,
+    -- For testing
+    DeclBuilder (Decl),
+    CtorBuilder (Ctor),
+    mkDecl,
+    maybeT,
+    pair,
   )
 where
 

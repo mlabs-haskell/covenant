@@ -204,6 +204,7 @@ import Optics.Core
     over,
     preview,
     review,
+    view,
     (%),
   )
 
@@ -247,7 +248,7 @@ topLevelNode asg@(ASG (rootId, _)) = nodeAt rootId asg
 nodeAt :: Id -> ASG -> ASGNode
 nodeAt i (ASG (_, mappings)) = fromJust . Map.lookup i $ mappings
 
-data ASGEnv = ASGEnv ScopeInfo (Map TyName DatatypeInfo)
+data ASGEnv = ASGEnv ScopeInfo (Map TyName (DatatypeInfo AbstractTy))
 
 instance
   (k ~ A_Lens, a ~ ScopeInfo, b ~ ScopeInfo) =>
@@ -260,7 +261,7 @@ instance
       (\(ASGEnv _ dti) si -> ASGEnv si dti)
 
 instance
-  (k ~ A_Lens, a ~ Map TyName DatatypeInfo, b ~ Map TyName DatatypeInfo) =>
+  (k ~ A_Lens, a ~ Map TyName (DatatypeInfo AbstractTy), b ~ Map TyName (DatatypeInfo AbstractTy)) =>
   LabelOptic "datatypeInfo" k ASGEnv ASGEnv a b
   where
   {-# INLINEABLE labelOptic #-}
@@ -422,7 +423,7 @@ newtype ASGBuilder (a :: Type)
 -- @since 1.0.0
 runASGBuilder ::
   forall (a :: Type).
-  Map TyName DatatypeInfo ->
+  Map TyName (DatatypeInfo AbstractTy) ->
   ASGBuilder a ->
   Either CovenantError ASG
 runASGBuilder tyDict (ASGBuilder comp) =
@@ -605,7 +606,7 @@ err = refTo AnError
 -- @since 1.0.0
 app ::
   forall (m :: Type -> Type).
-  (MonadHashCons Id ASGNode m, MonadError CovenantTypeError m) =>
+  (MonadHashCons Id ASGNode m, MonadError CovenantTypeError m, MonadReader ASGEnv m) =>
   Id ->
   Vector Ref ->
   m Id
@@ -616,11 +617,10 @@ app fId argRefs = do
       Left err' -> throwError . RenameFunctionFailed fT $ err'
       Right renamedFT -> do
         renamedArgs <- traverse renameArg argRefs
-        case checkApp renamedFT . Vector.toList $ renamedArgs of
-          Left err' -> throwError . UnificationError $ err'
-          Right result -> do
-            let restored = undoRename result
-            refTo . AValNode restored . AppInternal fId $ argRefs
+        tyDict <- asks (view #datatypeInfo)
+        result <- either (throwError . UnificationError) pure $ checkApp tyDict renamedFT (Vector.toList renamedArgs)
+        let restored = undoRename result
+        refTo . AValNode restored . AppInternal fId $ argRefs
     ValNodeType t -> throwError . ApplyToValType $ t
     ErrorNodeType -> throwError ApplyToError
 

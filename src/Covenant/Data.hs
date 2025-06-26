@@ -9,6 +9,7 @@ module Covenant.Data
     noPhantomTyVars,
     everythingOf,
     DatatypeInfo (DatatypeInfo),
+    mkDatatypeInfo,
   )
 where
 
@@ -246,12 +247,13 @@ mkBBF (DataDeclaration _ numVars ctors _)
 -- | Packages up all of the relevation datatype information needed
 -- for the ASGBuilder. Note that only certain datatypes have a BB or BB/BF form
 -- (we do not generate forms that are "useless")
-data DatatypeInfo
+-- NOTE: `var` should either be `AbstractTy` or `Renamed` in normal usage
+data DatatypeInfo (var :: Type)
   = DatatypeInfo
-  { _originalDecl :: DataDeclaration AbstractTy,
-    _baseFunctorStuff :: Maybe (DataDeclaration AbstractTy, ValT AbstractTy),
+  { _originalDecl :: DataDeclaration var,
+    _baseFunctorStuff :: Maybe (DataDeclaration var, ValT var),
     -- NOTE: The ONLY type that won't have a BB form is `Void` (or something isomorphic to it)
-    _bbForm :: Maybe (ValT AbstractTy)
+    _bbForm :: Maybe (ValT var)
   }
   deriving stock
     ( -- | @since 1.1.0
@@ -260,9 +262,18 @@ data DatatypeInfo
       Show
     )
 
+mkDatatypeInfo :: DataDeclaration AbstractTy -> DatatypeInfo AbstractTy
+mkDatatypeInfo decl = DatatypeInfo decl baseFStuff (mkBBF decl)
+  where
+    baseFStuff :: Maybe (DataDeclaration AbstractTy, ValT AbstractTy)
+    baseFStuff =
+      let baseFDecl = runReader (mkBaseFunctor decl) 0
+          baseBBF = mkBBF =<< baseFDecl
+       in (,) <$> baseFDecl <*> baseBBF
+
 instance
-  (k ~ A_Lens, a ~ DataDeclaration AbstractTy, b ~ DataDeclaration AbstractTy) =>
-  LabelOptic "originalDecl" k DatatypeInfo DatatypeInfo a b
+  (k ~ A_Lens, a ~ DataDeclaration var, b ~ DataDeclaration var) =>
+  LabelOptic "originalDecl" k (DatatypeInfo var) (DatatypeInfo var) a b
   where
   {-# INLINEABLE labelOptic #-}
   labelOptic =
@@ -271,8 +282,8 @@ instance
       (\(DatatypeInfo _ b c) ogDecl -> DatatypeInfo ogDecl b c)
 
 instance
-  (k ~ A_Lens, a ~ Maybe (DataDeclaration AbstractTy, ValT AbstractTy), b ~ Maybe (DataDeclaration AbstractTy, ValT AbstractTy)) =>
-  LabelOptic "baseFunctor" k DatatypeInfo DatatypeInfo a b
+  (k ~ A_Lens, a ~ Maybe (DataDeclaration var, ValT var), b ~ Maybe (DataDeclaration var, ValT var)) =>
+  LabelOptic "baseFunctor" k (DatatypeInfo var) (DatatypeInfo var) a b
   where
   {-# INLINEABLE labelOptic #-}
   labelOptic =
@@ -281,8 +292,8 @@ instance
       (\(DatatypeInfo a _ c) baseF -> DatatypeInfo a baseF c)
 
 instance
-  (k ~ A_Lens, a ~ Maybe (ValT AbstractTy), b ~ Maybe (ValT AbstractTy)) =>
-  LabelOptic "bbForm" k DatatypeInfo DatatypeInfo a b
+  (k ~ A_Lens, a ~ Maybe (ValT var), b ~ Maybe (ValT var)) =>
+  LabelOptic "bbForm" k (DatatypeInfo var) (DatatypeInfo var) a b
   where
   {-# INLINEABLE labelOptic #-}
   labelOptic =
@@ -291,8 +302,8 @@ instance
       (\(DatatypeInfo a b _) bb -> DatatypeInfo a b bb)
 
 instance
-  (k ~ A_Fold, a ~ ValT AbstractTy, b ~ ValT AbstractTy) =>
-  LabelOptic "bbBaseF" k DatatypeInfo DatatypeInfo a b
+  (k ~ A_Fold, a ~ ValT var, b ~ ValT var) =>
+  LabelOptic "bbBaseF" k (DatatypeInfo var) (DatatypeInfo var) a b
   where
   {-# INLINEABLE labelOptic #-}
   labelOptic = #baseFunctor % folded % _2

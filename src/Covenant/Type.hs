@@ -45,6 +45,7 @@ module Covenant.Type
     -- ** Introduction
     renameValT,
     renameCompT,
+    renameDataDecl,
 
     -- ** Elimination
     runRenameM,
@@ -52,6 +53,7 @@ module Covenant.Type
     -- * Type application
     TypeAppError (..),
     checkApp,
+    runUnifyM,
     -- Data declarations & friends
     DataDeclaration (DataDeclaration, OpaqueData),
     Constructor (Constructor),
@@ -80,6 +82,9 @@ module Covenant.Type
 
     -- * Datatype sanity checking
     cycleCheck,
+
+    -- * for tests
+    prettyStr,
   )
 where
 
@@ -96,12 +101,14 @@ import Covenant.Index
   )
 -- re-export for tests
 import Covenant.Internal.KindCheck (cycleCheck)
+import Covenant.Internal.PrettyPrint (prettyStr)
 import Covenant.Internal.Rename
   ( RenameError
       ( InvalidAbstractionReference
       ),
     RenameM,
     renameCompT,
+    renameDataDecl,
     renameValT,
     runRenameM,
   )
@@ -157,6 +164,7 @@ import Covenant.Internal.Unification
         LeakingWildcard
       ),
     checkApp,
+    runUnifyM,
   )
 import Data.Coerce (coerce)
 import Data.Kind (Type)
