@@ -2,6 +2,7 @@ module Main (main) where
 
 import Covenant.Prim
   ( typeOneArgFunc,
+    typeSixArgFunc,
     typeThreeArgFunc,
     typeTwoArgFunc,
   )
@@ -35,15 +36,15 @@ main =
         "Arity"
         [ testProperty "One-argument primops take one argument" prop1Arg,
           testProperty "Two-argument primops take two arguments" prop2Args,
-          testProperty "Three-argument primops take three arguments" prop3Args
-          --         testProperty "Six-argument primops take six arguments" prop6Args
+          testProperty "Three-argument primops take three arguments" prop3Args,
+          testProperty "Six-argument primops take six arguments" prop6Args
         ],
       testGroup
         "Renaming"
         [ testProperty "One-argument primops rename correctly" prop1Rename,
           testProperty "Two-argument primops rename correctly" prop2Rename,
-          testProperty "Three-argument primops rename correctly" prop3Rename
-          -- testProperty "Six-argument primops rename correctly" prop6Rename
+          testProperty "Three-argument primops rename correctly" prop3Rename,
+          testProperty "Six-argument primops rename correctly" prop6Rename
         ]
     ]
 
@@ -67,13 +68,11 @@ prop3Args = mkArgProp typeThreeArgFunc 3
 prop3Rename :: Property
 prop3Rename = mkRenameProp typeThreeArgFunc
 
-{-
 prop6Args :: Property
 prop6Args = mkArgProp typeSixArgFunc 6
 
 prop6Rename :: Property
 prop6Rename = mkRenameProp typeSixArgFunc
--}
 
 -- Helpers
 
