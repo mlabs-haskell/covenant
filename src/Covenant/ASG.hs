@@ -92,6 +92,11 @@ module Covenant.ASG
     app,
 
     -- ** Elimination
+
+    -- *** Environment
+    defaultDatatypes,
+
+    -- *** Function
     runASGBuilder,
   )
 where
@@ -113,9 +118,10 @@ import Control.Monad.Reader
     runReaderT,
   )
 import Covenant.Constant (AConstant, typeConstant)
-import Covenant.Data (DatatypeInfo)
+import Covenant.Data (DatatypeInfo, mkDatatypeInfo)
 import Covenant.DeBruijn (DeBruijn, asInt)
 import Covenant.Index (Index, count0, intIndex)
+import Covenant.Internal.Ledger (ledgerTypes)
 import Covenant.Internal.Rename
   ( RenameError
       ( InvalidAbstractionReference
@@ -170,6 +176,7 @@ import Covenant.Internal.Type
   ( AbstractTy,
     CompT (CompT),
     CompTBody (CompTBody),
+    DataDeclaration,
     Renamed,
     TyName,
     ValT (ThunkT),
@@ -417,6 +424,17 @@ newtype ASGBuilder (a :: Type)
       MonadHashCons Id ASGNode
     )
     via ReaderT ASGEnv (ExceptT CovenantTypeError (HashConsT Id ASGNode Identity))
+
+-- | A standard collection of types required for almost any realistic script.
+-- This includes non-\'flat\' builtin types (such as lists and pairs), as well
+-- as all types required by the ledger (including types like @Maybe@).
+--
+-- @since 1.1.0
+defaultDatatypes :: Map TyName (DatatypeInfo AbstractTy)
+defaultDatatypes = foldMap go ledgerTypes
+  where
+    go :: DataDeclaration AbstractTy -> Map TyName (DatatypeInfo AbstractTy)
+    go decl = Map.singleton (view #datatypeName decl) (mkDatatypeInfo decl)
 
 -- | Executes an 'ASGBuilder' to make a \'finished\' ASG.
 --
