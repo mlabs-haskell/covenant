@@ -1,7 +1,13 @@
 module Main (main) where
 
+import Covenant.ASG (defaultDatatypes)
 import Covenant.Prim
-  ( typeOneArgFunc,
+  ( OneArgFunc
+      ( FstPair,
+        HeadList,
+        SndPair
+      ),
+    typeOneArgFunc,
     typeSixArgFunc,
     typeThreeArgFunc,
     typeTwoArgFunc,
@@ -10,12 +16,20 @@ import Covenant.Type
   ( AbstractTy (BoundAt),
     CompT,
     Renamed (Unifiable),
+    ValT (Datatype),
     arity,
+    byteStringT,
+    checkApp,
+    integerT,
     renameCompT,
+    renameValT,
     runRenameM,
   )
 import Data.Functor.Classes (liftEq)
+import Data.Functor.Identity (Identity (Identity))
 import Data.Kind (Type)
+import Data.Vector qualified as Vector
+import Optics.Core (at, preview, (%), _Just)
 import Test.QuickCheck
   ( Arbitrary (arbitrary),
     Property,
@@ -25,6 +39,7 @@ import Test.QuickCheck
     (===),
   )
 import Test.Tasty (defaultMain, testGroup)
+import Test.Tasty.HUnit (assertEqual, assertFailure, testCase)
 import Test.Tasty.QuickCheck (testProperty)
 
 main :: IO ()
@@ -45,6 +60,12 @@ main =
           testProperty "Two-argument primops rename correctly" prop2Rename,
           testProperty "Three-argument primops rename correctly" prop3Rename,
           testProperty "Six-argument primops rename correctly" prop6Rename
+        ],
+      testGroup
+        "Application"
+        [ testCase "FstPair" unitFstPair,
+          testCase "SndPair" unitSndPair
+          -- testCase "HeadList" unitHeadList
         ]
     ]
 
@@ -73,6 +94,26 @@ prop6Args = mkArgProp typeSixArgFunc 6
 
 prop6Rename :: Property
 prop6Rename = mkRenameProp typeSixArgFunc
+
+unitFstPair :: IO ()
+unitFstPair = withRenamedComp (typeOneArgFunc FstPair) $ \renamedFunT ->
+  withRenamedVals (Identity . Datatype "Pair" . Vector.fromList $ [integerT, byteStringT]) $ \(Identity renamedArgT) ->
+    tryAndApply1 integerT renamedFunT renamedArgT
+
+unitSndPair :: IO ()
+unitSndPair = withRenamedComp (typeOneArgFunc SndPair) $ \renamedFunT ->
+  withRenamedVals (Identity . Datatype "Pair" . Vector.fromList $ [integerT, byteStringT]) $ \(Identity renamedArgT) ->
+    tryAndApply1 byteStringT renamedFunT renamedArgT
+
+{-
+unitHeadList :: IO ()
+unitHeadList = withRenamedComp (typeOneArgFunc HeadList) $ \_ ->
+  withRenamedVals (Identity . Datatype "List" . Vector.singleton $ integerT) $ \(Identity _) -> do
+    let test = show . preview (at "List" % _Just % #bbForm) $ defaultDatatypes
+    assertEqual test (1 :: Int) 2
+
+-- tryAndApply1 integerT renamedFunT renamedArgT
+-}
 
 -- Helpers
 
@@ -105,3 +146,30 @@ eqRenamedVar :: AbstractTy -> Renamed -> Bool
 eqRenamedVar (BoundAt _ ix) = \case
   Unifiable ix' -> ix == ix'
   _ -> False
+
+withRenamedComp ::
+  CompT AbstractTy ->
+  (CompT Renamed -> IO ()) ->
+  IO ()
+withRenamedComp t f = case runRenameM . renameCompT $ t of
+  Left err -> assertFailure $ "Could not rename: " <> show err
+  Right t' -> f t'
+
+withRenamedVals ::
+  forall (t :: Type -> Type).
+  (Traversable t) =>
+  t (ValT AbstractTy) ->
+  (t (ValT Renamed) -> IO ()) ->
+  IO ()
+withRenamedVals vals f = case runRenameM . traverse renameValT $ vals of
+  Left err -> assertFailure $ "Could not rename: " <> show err
+  Right vals' -> f vals'
+
+tryAndApply1 ::
+  ValT Renamed ->
+  CompT Renamed ->
+  ValT Renamed ->
+  IO ()
+tryAndApply1 expected f x = case checkApp defaultDatatypes f [Just x] of
+  Left err -> assertFailure $ "Could not apply: " <> show err
+  Right res -> assertEqual "" expected res
