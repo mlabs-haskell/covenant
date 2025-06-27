@@ -83,7 +83,8 @@ main =
           polymorphicApplicationM,
           polymorphicApplicationE,
           polymorphicApplicationP,
-          unifyMaybe
+          unifyMaybe,
+          testCase "Nested datatypes" unitNestedDatatypes
         ]
     ]
   where
@@ -438,6 +439,21 @@ unifyMaybe = testCase "unifyMaybe" $ do
     catchInsufficientArgs = \case
       InsufficientArgs _ fn _ -> prettyStr fn
       other -> show other
+
+-- Checks that `forall a . Maybe a -> Maybe (Maybe a)`, when applied to `Maybe
+-- Integer`, produces `Maybe (Maybe Integer)`
+unitNestedDatatypes :: IO ()
+unitNestedDatatypes = do
+  let fn =
+        Comp1 $
+          Datatype "Maybe" (Vector.singleton $ tyvar Z ix0)
+            :--:> ReturnT (Datatype "Maybe" (Vector.singleton . Datatype "Maybe" . Vector.singleton $ tyvar Z ix0))
+  fnRenamed <- failLeft . runRenameM . renameCompT $ fn
+  let arg = Datatype "Maybe" . Vector.singleton $ integerT
+  let expected = Datatype "Maybe" . Vector.singleton . Datatype "Maybe" . Vector.singleton $ integerT
+  case checkApp tyAppTestDatatypes fnRenamed [Just arg] of
+    Left err -> assertFailure . show $ err
+    Right res -> assertEqual "type mismatch" expected res
 
 -- Helpers
 
