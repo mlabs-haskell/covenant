@@ -9,7 +9,7 @@ import Control.Monad ((<=<))
 import Covenant.Data
   ( mkBBF,
   )
-import Covenant.DeBruijn (DeBruijn (Z, S))
+import Covenant.DeBruijn (DeBruijn (S, Z))
 import Covenant.Index (ix0, ix1)
 import Covenant.Test
   ( DataDeclFlavor (Poly1PolyThunks),
@@ -22,12 +22,13 @@ import Covenant.Test
   )
 import Covenant.Type
   ( AbstractTy (BoundAt),
-    CompT (Comp1,Comp2, Comp0),
+    CompT (Comp0, Comp1, Comp2),
     CompTBody (ReturnT, (:--:>)),
     ValT (Abstraction, ThunkT),
     renameCompT,
     renameValT,
-    runRenameM, tyvar,
+    runRenameM,
+    tyvar,
   )
 import Data.Map qualified as M
 import Data.Maybe (catMaybes, fromJust)
@@ -83,21 +84,17 @@ bbfList = testCase "bbfList" $ do
     expectedListBBF =
       ThunkT
         ( Comp2
-            (
-                tyvar Z ix1
-                :--:>
-                      ThunkT
-                        ( Comp0
-                            (  tyvar (S Z) ix0
-                               :--:> tyvar (S Z) ix1
-                               :--:> ReturnT (tyvar (S Z) ix1)
-
-                                )
-                            )
+            ( tyvar Z ix1
+                :--:> ThunkT
+                  ( Comp0
+                      ( tyvar (S Z) ix0
+                          :--:> tyvar (S Z) ix1
+                          :--:> ReturnT (tyvar (S Z) ix1)
+                      )
+                  )
                 :--:> ReturnT (tyvar Z ix1)
-                )
             )
-
+        )
 
 bbfTree :: TestTree
 bbfTree = testCase "bbfTree" $ do
@@ -108,25 +105,22 @@ bbfTree = testCase "bbfTree" $ do
     expectedTreeBBF =
       ThunkT
         ( Comp2
-            ( ThunkT (
-                        Comp0
-                          (tyvar (S Z) ix1
-                           :--:> tyvar (S Z) ix1
-                           :--:> ReturnT (tyvar (S Z) ix1)
-                          ))
-              :--:>
-                      ThunkT (
-                        Comp0
-                          (tyvar (S Z) ix0
-                           :--:>
-                           ReturnT (tyvar (S Z) ix1)
-                          ))
-                :--:>
-                      ReturnT (tyvar Z ix1)
-
+            ( ThunkT
+                ( Comp0
+                    ( tyvar (S Z) ix1
+                        :--:> tyvar (S Z) ix1
+                        :--:> ReturnT (tyvar (S Z) ix1)
+                    )
                 )
+                :--:> ThunkT
+                  ( Comp0
+                      ( tyvar (S Z) ix0
+                          :--:> ReturnT (tyvar (S Z) ix1)
+                      )
+                  )
+                :--:> ReturnT (tyvar Z ix1)
             )
-
+        )
 
 -- Simple datatype unification unit test. Checks whether `data Unit = Unit` has the expected BB form
 testMonotypeBB :: TestTree
