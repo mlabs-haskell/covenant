@@ -1,3 +1,5 @@
+{-# LANGUAGE ViewPatterns #-}
+
 module Main (main) where
 
 -- import Data.Either (isRight)
@@ -7,26 +9,29 @@ import Control.Monad ((<=<))
 import Covenant.Data
   ( mkBBF,
   )
-import Covenant.DeBruijn (DeBruijn (Z))
-import Covenant.Index (ix0)
+import Covenant.DeBruijn (DeBruijn (S, Z))
+import Covenant.Index (ix0, ix1)
 import Covenant.Test
   ( DataDeclFlavor (Poly1PolyThunks),
     DataDeclSet (DataDeclSet),
     failLeft,
+    list,
     prettyDeclSet,
+    tree,
     tyAppTestDatatypes,
   )
 import Covenant.Type
   ( AbstractTy (BoundAt),
-    CompT (Comp1),
+    CompT (Comp0, Comp1, Comp2),
     CompTBody (ReturnT, (:--:>)),
     ValT (Abstraction, ThunkT),
     renameCompT,
     renameValT,
     runRenameM,
+    tyvar,
   )
 import Data.Map qualified as M
-import Data.Maybe (fromJust, mapMaybe)
+import Data.Maybe (catMaybes, fromJust)
 import Optics.Core (view)
 import Test.QuickCheck
   ( Arbitrary (arbitrary, shrink),
@@ -40,7 +45,9 @@ main :: IO ()
 main =
   defaultMain . adjustOption moreTests . testGroup "BB" $
     [ testProperty "All BBF transformations rename properly" bbFormRenames,
-      testMonotypeBB
+      testMonotypeBB,
+      bbfList,
+      bbfTree
     ]
   where
     -- These tests are suuuuppeeerr inefficient, it'd be ideal to run more but it'll take too long
@@ -54,11 +61,66 @@ main =
 -}
 bbFormRenames :: Property
 bbFormRenames = forAllShrinkShow (arbitrary @(DataDeclSet 'Poly1PolyThunks)) shrink prettyDeclSet $ \(DataDeclSet decls) ->
-  let bbfDecls = mapMaybe mkBBF decls -- only gives 'Nothing' if it's a 0 constructor type (a la `Void`) so no real point testing
-      results = mapM (runRenameM . renameValT) bbfDecls
-   in case results of -- all (isRight . runRenameM . renameValT) bbfDecls
-        Left err -> error (show err)
-        Right _ -> True
+  case traverse mkBBF decls of
+    Left _ -> False
+    Right (catMaybes -> bbfDecls) ->
+      let results =
+            mapM
+              ( \valT -> case runRenameM . renameValT $ valT of
+                  Left err -> Left (err, valT)
+                  Right res -> Right res
+              )
+              bbfDecls
+       in case results of -- all (isRight . runRenameM . renameValT) bbfDecls
+            Right {} -> True
+            Left err -> error (show err)
+
+bbfList :: TestTree
+bbfList = testCase "bbfList" $ do
+  let bbf = mkBBF list
+  bbf' <- either (assertFailure . show) (maybe (assertFailure "no bbf for list") pure) bbf
+  assertEqual "bbfList" bbf' expectedListBBF
+  where
+    expectedListBBF =
+      ThunkT
+        ( Comp2
+            ( tyvar Z ix1
+                :--:> ThunkT
+                  ( Comp0
+                      ( tyvar (S Z) ix0
+                          :--:> tyvar (S Z) ix1
+                          :--:> ReturnT (tyvar (S Z) ix1)
+                      )
+                  )
+                :--:> ReturnT (tyvar Z ix1)
+            )
+        )
+
+bbfTree :: TestTree
+bbfTree = testCase "bbfTree" $ do
+  let bbf = mkBBF tree
+  bbf' <- either (assertFailure . show) (maybe (assertFailure "no bbf for tree") pure) bbf
+  assertEqual "bbfList" bbf' expectedTreeBBF
+  where
+    expectedTreeBBF =
+      ThunkT
+        ( Comp2
+            ( ThunkT
+                ( Comp0
+                    ( tyvar (S Z) ix1
+                        :--:> tyvar (S Z) ix1
+                        :--:> ReturnT (tyvar (S Z) ix1)
+                    )
+                )
+                :--:> ThunkT
+                  ( Comp0
+                      ( tyvar (S Z) ix0
+                          :--:> ReturnT (tyvar (S Z) ix1)
+                      )
+                  )
+                :--:> ReturnT (tyvar Z ix1)
+            )
+        )
 
 -- Simple datatype unification unit test. Checks whether `data Unit = Unit` has the expected BB form
 testMonotypeBB :: TestTree

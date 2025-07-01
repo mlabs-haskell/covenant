@@ -8,7 +8,7 @@
 --       - The "count" - the number of bound tyvars in the `ValT.Datatype` representation - may be incorrect (i.e. inconsistent with the count in the declaration)
 --
 --     The checks to detect these errors are entirely independent from the checks performed during typechecking or renaming, so we do them in a separate pass.
-module Covenant.Internal.KindCheck (checkKinds, KindCheckError (..), cycleCheck) where
+module Covenant.Internal.KindCheck (checkDataDecls, checkValT, KindCheckError (..), cycleCheck) where
 
 import Control.Monad (unless)
 import Control.Monad.Except (ExceptT, MonadError (throwError), runExceptT)
@@ -23,6 +23,7 @@ import Covenant.Internal.Type
     DataDeclaration (DataDeclaration, OpaqueData),
     TyName,
     ValT (Abstraction, BuiltinFlat, Datatype, ThunkT),
+    checkStrategy,
     datatype,
   )
 import Data.Foldable (traverse_)
@@ -37,11 +38,23 @@ import Data.Vector (Vector)
 import Data.Vector qualified as V
 import Optics.Core (A_Lens, LabelOptic (labelOptic), lens, preview, review, to, view, (%))
 
+{- TODO: Explicitly separate the kind checker into two check functions:
+     - One which kind checks `ValT`s to ensure:
+       1. All TyCons in the ValT exist
+       2. All TyCons in the ValT have the correct arity
+
+     - One which checks *datatype declarations* to ensure:
+       1. Everything satisfies the above ValT checks
+       2. No thunk arguments to ctors!
+       3. No mutual recursion (cycles)
+-}
+
 data KindCheckError
   = UnknownType TyName
   | IncorrectNumArgs TyName (Count "tyvar") (Vector (ValT AbstractTy)) -- first is expected (from the decl), second is actual
-  | HigherOrderConstructorArg (CompT AbstractTy) -- no polymorphic function args to ctors
+  | ThunkConstructorArg (CompT AbstractTy) -- no polymorphic function args to ctors
   | MutualRecursionDetected (Set TyName)
+  | InvalidStrategy TyName
   deriving stock (Show, Eq)
 
 newtype KindCheckContext a = KindCheckContext (Map TyName (DataDeclaration a))
@@ -61,8 +74,8 @@ newtype KindCheckM t a = KindCheckM (ReaderT (KindCheckContext t) (ExceptT KindC
     (Functor, Applicative, Monad, MonadReader (KindCheckContext t), MonadError KindCheckError)
     via (ReaderT (KindCheckContext t) (ExceptT KindCheckError Identity))
 
-runKindCheckM :: forall (t :: Type) (a :: Type). KindCheckM t a -> Either KindCheckError a
-runKindCheckM (KindCheckM act) = runIdentity . runExceptT $ runReaderT act (KindCheckContext M.empty)
+runKindCheckM :: forall (t :: Type) (a :: Type). Map TyName (DataDeclaration t) -> KindCheckM t a -> Either KindCheckError a
+runKindCheckM dtypes (KindCheckM act) = runIdentity . runExceptT $ runReaderT act (KindCheckContext dtypes)
 
 lookupDeclaration :: forall (t :: Type). TyName -> KindCheckM t (DataDeclaration t)
 lookupDeclaration tn = do
@@ -71,13 +84,31 @@ lookupDeclaration tn = do
     Nothing -> throwError $ UnknownType tn
     Just decl -> pure decl
 
+{- This sanity checks datatype declarations using the criteria enumerated above.
+
+-}
+
+checkDataDecls :: Map TyName (DataDeclaration AbstractTy) -> Either KindCheckError ()
+checkDataDecls decls = runKindCheckM decls $ traverse_ checkDataDecl (M.elems decls)
+
+checkDataDecl :: DataDeclaration AbstractTy -> KindCheckM AbstractTy ()
+checkDataDecl OpaqueData {} = pure ()
+checkDataDecl decl@(DataDeclaration tn _ ctors _) = do
+  unless (checkStrategy decl) $ throwError (InvalidStrategy tn)
+  cycleCheck' mempty decl
+  let allCtorArgs = view #constructorArgs =<< ctors
+  traverse_ (checkKinds CheckDataDecl) allCtorArgs
+
+data KindCheckMode = CheckDataDecl | CheckValT
+  deriving stock (Show, Eq, Ord)
+
 -- This isn't really a "kind checker" in the normal sense and just checks that none of the three failure conditions above obtain
-checkKinds' :: ValT AbstractTy -> KindCheckM AbstractTy ()
-checkKinds' = \case
+checkKinds :: KindCheckMode -> ValT AbstractTy -> KindCheckM AbstractTy ()
+checkKinds mode = \case
   Abstraction _ -> pure ()
-  ThunkT compT@(CompT cnt (CompTBody nev)) -> case review intCount cnt of
-    0 -> traverse_ checkKinds' nev
-    _ -> throwError $ HigherOrderConstructorArg compT -- no higher order arguments to ctors (makes life much easier, not that useful)
+  ThunkT compT@(CompT _ (CompTBody nev))
+    | mode == CheckDataDecl -> throwError $ ThunkConstructorArg compT
+    | otherwise -> traverse_ (checkKinds mode) nev
   BuiltinFlat {} -> pure ()
   Datatype tn args ->
     lookupDeclaration tn >>= \case
@@ -86,22 +117,24 @@ checkKinds' = \case
         let numArgsActual = V.length args
             numArgsExpected = review intCount numVars
         unless (numArgsActual == numArgsExpected) $ throwError (IncorrectNumArgs tn numVars args)
-        traverse_ checkKinds' args
+        traverse_ (checkKinds mode) args
 
-checkKinds :: ValT AbstractTy -> Maybe KindCheckError
-checkKinds = either Just (const Nothing) . runKindCheckM . checkKinds'
+-- | This is for checking type annotations in the ASG, *not* datatypes
+checkValT :: Map TyName (DataDeclaration AbstractTy) -> ValT AbstractTy -> Maybe KindCheckError
+checkValT dtypes = either Just (const Nothing) . runKindCheckM dtypes . checkKinds CheckValT
 
 -- Ensures that we don't have any *mutually* recursive datatypes (which we don't want b/c they mess with data encoding strategies)
 cycleCheck :: forall (a :: Type). (Ord a) => Map TyName (DataDeclaration a) -> Maybe KindCheckError
-cycleCheck decls = either Just (const Nothing) $ runKindCheckM go
+cycleCheck decls = either Just (const Nothing) $ runKindCheckM decls go
   where
     go =
       local (\_ -> KindCheckContext decls) $
-        traverse_ (cycleCheck' Set.empty) =<< asks (view (#kindCheckContext % to M.elems))
+        traverse_ (cycleCheck' mempty) =<< asks (view (#kindCheckContext % to M.elems))
 
 {- This is a bit odd b/c we don't want to fail for auto-recursive types, so we need to be careful
    *not* to mark the current decl being examined as "visited" until we've "descended" into the dependencies
    (I think?)
+
 -}
 cycleCheck' :: forall (a :: Type). (Ord a) => Set TyName -> DataDeclaration a -> KindCheckM a ()
 cycleCheck' _ OpaqueData {} = pure ()
