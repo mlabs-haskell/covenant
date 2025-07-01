@@ -8,7 +8,7 @@
 --       - The "count" - the number of bound tyvars in the `ValT.Datatype` representation - may be incorrect (i.e. inconsistent with the count in the declaration)
 --
 --     The checks to detect these errors are entirely independent from the checks performed during typechecking or renaming, so we do them in a separate pass.
-module Covenant.Internal.KindCheck (checkDataDecls, checkValT,  KindCheckError (..), cycleCheck) where
+module Covenant.Internal.KindCheck (checkDataDecls, checkValT, KindCheckError (..), cycleCheck) where
 
 import Control.Monad (unless)
 import Control.Monad.Except (ExceptT, MonadError (throwError), runExceptT)
@@ -23,7 +23,8 @@ import Covenant.Internal.Type
     DataDeclaration (DataDeclaration, OpaqueData),
     TyName,
     ValT (Abstraction, BuiltinFlat, Datatype, ThunkT),
-    datatype, checkStrategy,
+    checkStrategy,
+    datatype,
   )
 import Data.Foldable (traverse_)
 import Data.Functor.Identity (Identity, runIdentity)
@@ -87,28 +88,28 @@ lookupDeclaration tn = do
 
 -}
 
-checkDataDecls :: Map TyName (DataDeclaration AbstractTy)  -> Either KindCheckError ()
+checkDataDecls :: Map TyName (DataDeclaration AbstractTy) -> Either KindCheckError ()
 checkDataDecls decls = runKindCheckM decls $ traverse_ checkDataDecl (M.elems decls)
 
 -- REVIEW/TODO: Maybe we should do the encoding strategy sanity check here too?
 checkDataDecl :: DataDeclaration AbstractTy -> KindCheckM AbstractTy ()
-checkDataDecl OpaqueData{} = pure ()
+checkDataDecl OpaqueData {} = pure ()
 checkDataDecl decl@(DataDeclaration tn _ ctors _) = do
   unless (checkStrategy decl) $ throwError (InvalidStrategy tn)
   cycleCheck' mempty decl
   let allCtorArgs = view #constructorArgs =<< ctors
-  traverse_ (checkKinds CheckDataDecl) allCtorArgs 
+  traverse_ (checkKinds CheckDataDecl) allCtorArgs
 
 data KindCheckMode = CheckDataDecl | CheckValT
   deriving stock (Show, Eq, Ord)
 
 -- This isn't really a "kind checker" in the normal sense and just checks that none of the three failure conditions above obtain
-checkKinds :: KindCheckMode ->  ValT AbstractTy -> KindCheckM AbstractTy ()
+checkKinds :: KindCheckMode -> ValT AbstractTy -> KindCheckM AbstractTy ()
 checkKinds mode = \case
   Abstraction _ -> pure ()
   ThunkT compT@(CompT _ (CompTBody nev))
     | mode == CheckDataDecl -> throwError $ ThunkConstructorArg compT
-    | otherwise ->  traverse_ (checkKinds mode) nev
+    | otherwise -> traverse_ (checkKinds mode) nev
   BuiltinFlat {} -> pure ()
   Datatype tn args ->
     lookupDeclaration tn >>= \case
@@ -119,8 +120,8 @@ checkKinds mode = \case
         unless (numArgsActual == numArgsExpected) $ throwError (IncorrectNumArgs tn numVars args)
         traverse_ (checkKinds mode) args
 
--- | This is for checking type annotations in the ASG, *not* datatypes 
-checkValT:: Map TyName (DataDeclaration AbstractTy) -> ValT AbstractTy -> Maybe KindCheckError
+-- | This is for checking type annotations in the ASG, *not* datatypes
+checkValT :: Map TyName (DataDeclaration AbstractTy) -> ValT AbstractTy -> Maybe KindCheckError
 checkValT dtypes = either Just (const Nothing) . runKindCheckM dtypes . checkKinds CheckValT
 
 -- Ensures that we don't have any *mutually* recursive datatypes (which we don't want b/c they mess with data encoding strategies)

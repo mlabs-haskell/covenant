@@ -101,7 +101,7 @@ import Covenant.Index
     intCount,
   )
 -- re-export for tests
-import Covenant.Internal.KindCheck (cycleCheck, checkDataDecls)
+import Covenant.Internal.KindCheck (checkDataDecls, cycleCheck)
 import Covenant.Internal.PrettyPrint (prettyStr)
 import Covenant.Internal.Rename
   ( RenameError

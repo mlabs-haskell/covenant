@@ -7,7 +7,7 @@ module Covenant.Internal.Ledger
     maybeT,
     pair,
     list,
-    tree
+    tree,
   )
 where
 

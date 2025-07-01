@@ -20,7 +20,7 @@ module Covenant.Test
     failLeft,
     tyAppTestDatatypes,
     list,
-    tree
+    tree,
   )
 where
 
@@ -28,6 +28,7 @@ where
 import Data.Foldable (foldl')
 #endif
 import Control.Applicative ((<|>))
+import Control.Exception (throwIO)
 import Control.Monad (void)
 import Control.Monad.Reader (MonadTrans (lift), runReader)
 import Control.Monad.State.Strict
@@ -49,7 +50,7 @@ import Covenant.Index
     ix0,
     ix1,
   )
-import Covenant.Internal.Ledger (CtorBuilder (Ctor), DeclBuilder (Decl), ledgerTypes, maybeT, mkDecl, pair,list,tree)
+import Covenant.Internal.Ledger (CtorBuilder (Ctor), DeclBuilder (Decl), ledgerTypes, list, maybeT, mkDecl, pair, tree)
 import Covenant.Internal.PrettyPrint (ScopeBoundary, prettyStr)
 import Covenant.Internal.Rename (renameDataDecl, renameValT)
 import Covenant.Internal.Type
@@ -114,7 +115,6 @@ import Test.QuickCheck.GenT qualified as GT
 import Test.QuickCheck.Instances.Containers ()
 import Test.QuickCheck.Instances.Vector ()
 import Test.Tasty.HUnit (assertFailure)
-import Control.Exception (throwIO)
 
 -- | Wrapper for 'ValT' to provide an 'Arbitrary' instance to generate only
 -- value types without any type variables.
@@ -574,8 +574,8 @@ genNonConcrete = NonConcrete <$> GT.sized go
        in mapMaybe (fmap (Abstraction . BoundAt resolvedScope) . preview intIndex) [0 .. (fromIntegral numIndices - 1)]
 
     helper :: Int -> DataGenM (ValT AbstractTy)
-    helper size =  do
-      GT.oneof  [coerce <$> genConcrete, appliedTyCon size]
+    helper size = do
+      GT.oneof [coerce <$> genConcrete, appliedTyCon size]
 
 -- NOTE: We have to call this with a "driver" which pre-generates suitable (i.e. polymorphic) data declarations, see notes in `genNonConcrete`
 genNonConcreteDecl :: DataGenM (DataDeclaration AbstractTy)
