@@ -7,21 +7,31 @@ import Covenant.Type
     DataDeclaration (DataDeclaration, OpaqueData),
     DataEncoding (SOP),
     ValT (Abstraction, BuiltinFlat, Datatype),
-    cycleCheck,
+    cycleCheck, checkDataDecls,
   )
+import Covenant.Test (ledgerTypes)
 import Data.Map qualified as M
 import Data.Vector qualified as V
-import Test.Tasty (defaultMain, testGroup)
+import Test.Tasty (defaultMain, testGroup, TestTree)
 import Test.Tasty.ExpectedFailure (expectFail)
 import Test.Tasty.HUnit (assertFailure, testCase)
+import Optics.Core (view)
 
 main :: IO ()
 main =
   defaultMain . testGroup "DatatypeCycleCheck" $
     [ testCase "singleNonRec" $ runCycleCheck [maybee],
       testCase "singleSelfRec" $ runCycleCheck [intList],
-      expectFail $ testCase "mutRecShouldFail" (runCycleCheck [mutRec1, mutRec2])
+      expectFail $ testCase "mutRecShouldFail" (runCycleCheck [mutRec1, mutRec2]),
+      checkLedgerTypes
     ]
+
+checkLedgerTypes :: TestTree
+checkLedgerTypes = testCase "kindCheckLedgerTypes"
+                   . either (assertFailure . show) pure
+                   . checkDataDecls
+                   . foldr (\x acc -> M.insert (view #datatypeName x) x acc) M.empty
+                   $ ledgerTypes
 
 runCycleCheck :: [DataDeclaration ()] -> IO ()
 runCycleCheck decls = case cycleCheck declMap of

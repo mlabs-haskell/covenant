@@ -16,8 +16,8 @@ module Covenant.Type
     Renamed (..),
 
     -- * Computation types
-    CompT (Comp0, Comp1, Comp2, Comp3, CompN),
-    CompTBody (ReturnT, (:--:>), ArgsAndResult),
+    CompT (CompT, Comp0, Comp1, Comp2, Comp3, CompN),
+    CompTBody (CompTBody, ReturnT, (:--:>), ArgsAndResult),
     arity,
 
     -- * Value types
@@ -82,6 +82,7 @@ module Covenant.Type
 
     -- * Datatype sanity checking
     cycleCheck,
+    checkDataDecls,
 
     -- * for tests
     prettyStr,
@@ -100,7 +101,7 @@ import Covenant.Index
     intCount,
   )
 -- re-export for tests
-import Covenant.Internal.KindCheck (cycleCheck)
+import Covenant.Internal.KindCheck (cycleCheck, checkDataDecls)
 import Covenant.Internal.PrettyPrint (prettyStr)
 import Covenant.Internal.Rename
   ( RenameError

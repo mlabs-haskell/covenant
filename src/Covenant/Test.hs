@@ -19,6 +19,8 @@ module Covenant.Test
     ledgerTypes,
     failLeft,
     tyAppTestDatatypes,
+    list,
+    tree
   )
 where
 
@@ -47,13 +49,11 @@ import Covenant.Index
     ix0,
     ix1,
   )
-import Covenant.Internal.Ledger (CtorBuilder (Ctor), DeclBuilder (Decl), ledgerTypes, maybeT, mkDecl, pair)
+import Covenant.Internal.Ledger (CtorBuilder (Ctor), DeclBuilder (Decl), ledgerTypes, maybeT, mkDecl, pair,list,tree)
 import Covenant.Internal.PrettyPrint (ScopeBoundary, prettyStr)
 import Covenant.Internal.Rename (renameDataDecl, renameValT)
 import Covenant.Internal.Type
-  ( CompT (CompT),
-    CompTBody (CompTBody),
-    Constructor (Constructor),
+  ( Constructor (Constructor),
     ConstructorName (ConstructorName),
     DataDeclaration (DataDeclaration, OpaqueData),
     DataEncoding (SOP),
@@ -92,7 +92,6 @@ import Data.Text (Text)
 import Data.Text qualified as T
 import Data.Vector (Vector)
 import Data.Vector qualified as Vector
-import Data.Vector.NonEmpty qualified as NEV
 import GHC.Exts (fromListN)
 import GHC.Word (Word32)
 import Optics.Core (A_Lens, LabelOptic (labelOptic), folded, lens, over, preview, review, set, toListOf, view, (%))
@@ -115,6 +114,7 @@ import Test.QuickCheck.GenT qualified as GT
 import Test.QuickCheck.Instances.Containers ()
 import Test.QuickCheck.Instances.Vector ()
 import Test.Tasty.HUnit (assertFailure)
+import Control.Exception (throwIO)
 
 -- | Wrapper for 'ValT' to provide an 'Arbitrary' instance to generate only
 -- value types without any type variables.
@@ -338,6 +338,11 @@ newtype ConcreteConstructor = ConcreteConstructor (Constructor AbstractTy)
   deriving (Eq) via (Constructor AbstractTy)
   deriving stock (Show)
 
+notAThunk :: Concrete -> Bool
+notAThunk (Concrete valT) = case valT of
+  ThunkT _ -> False
+  _ -> True
+
 genConcreteConstructor :: DataGenM ConcreteConstructor
 genConcreteConstructor = ConcreteConstructor <$> go
   where
@@ -345,7 +350,7 @@ genConcreteConstructor = ConcreteConstructor <$> go
     go = do
       ctorNm <- freshConstructorName
       numArgs <- chooseInt (0, 5)
-      args <- GT.liftGen $ Vector.replicateM numArgs (arbitrary @Concrete)
+      args <- GT.liftGen $ Vector.replicateM numArgs (arbitrary @Concrete `suchThat` notAThunk)
       pure $ Constructor ctorNm (coerce <$> args)
 
 genConcreteDataDecl :: DataGenM ConcreteDataDecl
@@ -568,15 +573,9 @@ genNonConcrete = NonConcrete <$> GT.sized go
           resolvedScope = fromJust . preview asInt . fromIntegral $ currentScope - varScope
        in mapMaybe (fmap (Abstraction . BoundAt resolvedScope) . preview intIndex) [0 .. (fromIntegral numIndices - 1)]
 
-    unsafeFromList :: forall (a :: Type). [a] -> NEV.NonEmptyVector a
-    unsafeFromList = fromJust . NEV.fromList
-
     helper :: Int -> DataGenM (ValT AbstractTy)
-    helper size = withBoundVars count0 $ do
-      -- we're going to return a thunk so we need to enter a new scope
-      funLen <- chooseInt (1, 5)
-      funList <- GT.vectorOf funLen $ GT.frequency [(5, coerce <$> genConcrete), (2, appliedTyCon size), (3, helper (size `quot` 8))]
-      pure $ ThunkT . CompT count0 . CompTBody $ unsafeFromList funList
+    helper size =  do
+      GT.oneof  [coerce <$> genConcrete, appliedTyCon size]
 
 -- NOTE: We have to call this with a "driver" which pre-generates suitable (i.e. polymorphic) data declarations, see notes in `genNonConcrete`
 genNonConcreteDecl :: DataGenM (DataDeclaration AbstractTy)
@@ -779,10 +778,12 @@ testBBF = do
     let inpPretty = pretty $ unsafeRename (renameDataDecl inp)
     putDoc $ hardline <> "INPUT:" <> hardline <> hardline <> inpPretty <> hardline
     case mkBBF inp of
-      Nothing -> putDoc $ hardline <> "OUTPUT: Nothing (Empty datatype)"
-      Just out -> do
-        let outPretty = pretty $ unsafeRename (renameValT out)
-        putDoc $ hardline <> "OUTPUT:" <> hardline <> hardline <> outPretty <> hardline
+      Left err -> throwIO . userError . show $ err
+      Right res -> case res of
+        Nothing -> putDoc $ hardline <> "OUTPUT: Nothing (Empty datatype)"
+        Just out -> do
+          let outPretty = pretty $ unsafeRename (renameValT out)
+          putDoc $ hardline <> "OUTPUT:" <> hardline <> hardline <> outPretty <> hardline
 
 -- Datatypes for testing
 
@@ -817,4 +818,8 @@ failLeft ::
 failLeft = either (assertFailure . show) pure
 
 tyAppTestDatatypes :: M.Map TyName (DatatypeInfo AbstractTy)
-tyAppTestDatatypes = foldl' (\acc decl -> M.insert (view #datatypeName decl) (mkDatatypeInfo decl) acc) M.empty testDatatypes
+tyAppTestDatatypes = foldl' (\acc decl -> M.insert (view #datatypeName decl) (unsafeMkDatatypeInfo decl) acc) M.empty testDatatypes
+  where
+    unsafeMkDatatypeInfo d = case mkDatatypeInfo d of
+      Left err -> error (show err)
+      Right res -> res

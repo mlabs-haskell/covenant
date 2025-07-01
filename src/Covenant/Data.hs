@@ -13,7 +13,7 @@ module Covenant.Data
   )
 where
 
-import Control.Monad.Reader (MonadReader (ask, local), Reader, runReader)
+import Control.Monad.Reader (MonadReader (ask, local), Reader, runReader, MonadTrans (lift))
 import Covenant.DeBruijn (DeBruijn (S, Z), asInt)
 import Covenant.Index (Count, Index, count0, intCount, intIndex)
 import Covenant.Internal.PrettyPrint (ScopeBoundary (ScopeBoundary))
@@ -35,6 +35,9 @@ import Data.Vector qualified as V
 import Data.Vector.NonEmpty qualified as NEV
 import Optics.Core (A_Lens, LabelOptic (labelOptic), folded, lens, preview, review, toListOf, view, (%), _2)
 import Optics.Indexed.Core (A_Fold)
+import Control.Monad.Trans.Except (ExceptT, runExceptT)
+import Control.Monad.Except (MonadError(throwError))
+import Data.Bitraversable (bisequence)
 
 {- NOTE: For the purposes of base functor transformation, we follow the pattern established by Edward Kmett's
          'recursion-schemes' library. That is, we regard a datatype as "recursive" if and only if at least one
@@ -195,37 +198,63 @@ mkBaseFunctor (DataDeclaration tn numVars ctors strat) = do
     isRecursive :: ValT AbstractTy -> Reader ScopeBoundary Bool
     isRecursive = isRecursiveChildOf tn
 
--- data Maybe a = Just a | Nothing ~> forall out. (a -> out) -> out -> out
-
--- Only returns `Nothing` if there are no Constructors
-mkBBF :: DataDeclaration AbstractTy -> Maybe (ValT AbstractTy)
-mkBBF OpaqueData {} = Nothing
-mkBBF (DataDeclaration _ numVars ctors _)
-  | V.null ctors = Nothing
-  | otherwise = ThunkT . CompT bbfCount . CompTBody . flip NEV.snoc topLevelOut <$> (NEV.fromVector =<< traverse mkEliminator ctors)
-  where
-    mkEliminator :: Constructor AbstractTy -> Maybe (ValT AbstractTy)
-    mkEliminator (Constructor _ (fmap incAbstractionDB -> args))
-      | V.null args = Just topLevelOut
-      | otherwise =
-          let out = Abstraction $ BoundAt (S Z) outIx
-           in ThunkT . CompT count0 . CompTBody . flip NEV.snoc out <$> NEV.fromVector args
-
-    incAbstractionDB :: ValT AbstractTy -> ValT AbstractTy
-    incAbstractionDB = mapValT $ \case
+incAbstractionDB :: ValT AbstractTy -> ValT AbstractTy
+incAbstractionDB = mapValT $ \case
       Abstraction (BoundAt db indx) ->
         let db' = fromJust . preview asInt $ review asInt db + 1
          in Abstraction (BoundAt db' indx)
       other -> other
 
-    topLevelOut = Abstraction $ BoundAt Z outIx
+-- | @since 1.1.0
+-- The name of the type and the invalid recursive argument to a ctor
+data BBFError = InvalidRecursion TyName (ValT AbstractTy)
+  deriving stock
+    ( -- | @since 1.1.0
+      Show,
+      -- | @since 1.1.0
+      Eq
+    )
 
-    -- We have to add a type parameter for the result.
-    bbfCount = fromJust . preview intCount $ review intCount numVars + 1
+mkBBF :: DataDeclaration AbstractTy -> Either BBFError (Maybe (ValT AbstractTy))
+mkBBF decl = sequence . runExceptT $ mkBBF' decl
 
-    -- The index of the 'out' parameter, indicates the return type
-    outIx :: Index "tyvar"
-    outIx = fromJust . preview intIndex $ review intCount numVars
+-- Only returns `Nothing` if there are no Constructors or the type is Opaque
+mkBBF' :: DataDeclaration AbstractTy -> ExceptT BBFError Maybe (ValT AbstractTy)
+mkBBF' OpaqueData{} = lift Nothing
+mkBBF' (DataDeclaration tn numVars ctors _)
+  | V.null ctors = lift Nothing
+  | otherwise =  do
+      ctors' <- traverse mkBBCtor ctors
+      lift $ ThunkT . CompT bbfCount . CompTBody . flip NEV.snoc topLevelOut <$> NEV.fromVector ctors'
+ where
+   topLevelOut = Abstraction $ BoundAt Z outIx
+
+   outIx :: Index "tyvar"
+   outIx = fromJust . preview intIndex $ review intCount numVars
+
+   bbfCount = fromJust . preview intCount $ review intCount numVars + 1
+
+   mkBBCtor :: Constructor AbstractTy -> ExceptT BBFError Maybe (ValT AbstractTy)
+   mkBBCtor (Constructor _ args)
+     | V.null args = pure topLevelOut
+     | otherwise =  do
+         elimArgs <- traverse fixArg args
+         elimArgs' <- lift . NEV.fromVector $ elimArgs
+         let out = Abstraction $ BoundAt (S Z) outIx
+         pure . ThunkT . CompT count0  . CompTBody . flip NEV.snoc out $ elimArgs'
+
+   fixArg :: ValT AbstractTy -> ExceptT BBFError Maybe (ValT AbstractTy)
+   fixArg (Abstraction (BoundAt db indx)) = pure . Abstraction $ BoundAt (S db) indx
+   fixArg arg  = do
+     let isDirectRecursiveTy = runReader  (isRecursiveChildOf tn arg) 0
+     if isDirectRecursiveTy
+       then pure $ Abstraction (BoundAt (S Z) outIx)
+       else case arg of
+         Datatype tn' dtArgs
+          | tn == tn' -> throwError $ InvalidRecursion tn arg
+          | otherwise -> pure . Datatype tn' $ incAbstractionDB <$> dtArgs 
+         _ -> pure arg
+
 
 {- Note (Sean, 14/05/25): Re  DeBruijn indices:
 
@@ -262,14 +291,16 @@ data DatatypeInfo (var :: Type)
       Show
     )
 
-mkDatatypeInfo :: DataDeclaration AbstractTy -> DatatypeInfo AbstractTy
-mkDatatypeInfo decl = DatatypeInfo decl baseFStuff (mkBBF decl)
+mkDatatypeInfo :: DataDeclaration AbstractTy -> Either BBFError (DatatypeInfo AbstractTy)
+mkDatatypeInfo decl = DatatypeInfo decl <$> baseFStuff <*> mkBBF decl
   where
-    baseFStuff :: Maybe (DataDeclaration AbstractTy, ValT AbstractTy)
+    -- baseFStuff :: Either BBFError (Maybe (DataDeclaration AbstractTy, ValT AbstractTy))
     baseFStuff =
       let baseFDecl = runReader (mkBaseFunctor decl) 0
-          baseBBF = mkBBF =<< baseFDecl
-       in (,) <$> baseFDecl <*> baseBBF
+          baseBBF =  case  baseFDecl of
+                      Nothing -> Right Nothing
+                      Just d  -> mkBBF d
+       in  (bisequence . (baseFDecl,) <$> baseBBF)
 
 instance
   (k ~ A_Lens, a ~ DataDeclaration var, b ~ DataDeclaration var) =>
