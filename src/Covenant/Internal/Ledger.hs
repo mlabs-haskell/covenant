@@ -6,6 +6,8 @@ module Covenant.Internal.Ledger
     mkDecl,
     maybeT,
     pair,
+    list,
+    tree,
   )
 where
 
@@ -268,7 +270,7 @@ value =
     )
 
 lovelace :: DataDeclaration AbstractTy
-lovelace = mkSimpleNewtype "LoveLance" (BuiltinFlat IntegerT)
+lovelace = mkSimpleNewtype "Lovelace" (BuiltinFlat IntegerT)
 
 rational :: DataDeclaration AbstractTy
 rational =
@@ -659,3 +661,8 @@ a = Abstraction (BoundAt Z ix0)
 
 b :: ValT AbstractTy
 b = Abstraction (BoundAt Z ix1)
+
+-- For tests, much easier to define this here w/ the helpers
+
+tree :: DataDeclaration AbstractTy
+tree = mkDecl $ Decl "Tree" count1 [Ctor "Bin" [tycon "Tree" [a], tycon "Tree" [a]], Ctor "Tip" [a]] (PlutusData ConstrData)
