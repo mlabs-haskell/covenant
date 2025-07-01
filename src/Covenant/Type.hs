@@ -16,8 +16,8 @@ module Covenant.Type
     Renamed (..),
 
     -- * Computation types
-    CompT (CompT, Comp0, Comp1, Comp2, Comp3, CompN),
-    CompTBody (CompTBody, ReturnT, (:--:>), ArgsAndResult),
+    CompT (Comp0, Comp1, Comp2, Comp3, CompN),
+    CompTBody (ReturnT, (:--:>), ArgsAndResult),
     arity,
 
     -- * Value types

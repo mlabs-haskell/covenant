@@ -9,8 +9,8 @@ import Control.Monad ((<=<))
 import Covenant.Data
   ( mkBBF,
   )
-import Covenant.DeBruijn (DeBruijn (Z))
-import Covenant.Index (count0, count2, ix0, ix1)
+import Covenant.DeBruijn (DeBruijn (Z, S))
+import Covenant.Index (ix0, ix1)
 import Covenant.Test
   ( DataDeclFlavor (Poly1PolyThunks),
     DataDeclSet (DataDeclSet),
@@ -22,17 +22,15 @@ import Covenant.Test
   )
 import Covenant.Type
   ( AbstractTy (BoundAt),
-    CompT (Comp1, CompT),
-    CompTBody (CompTBody, ReturnT, (:--:>)),
-    Renamed (Unifiable),
+    CompT (Comp1,Comp2, Comp0),
+    CompTBody (ReturnT, (:--:>)),
     ValT (Abstraction, ThunkT),
     renameCompT,
     renameValT,
-    runRenameM,
+    runRenameM, tyvar,
   )
 import Data.Map qualified as M
 import Data.Maybe (catMaybes, fromJust)
-import Data.Vector.NonEmpty qualified as NEV
 import Optics.Core (view)
 import Test.QuickCheck
   ( Arbitrary (arbitrary, shrink),
@@ -80,73 +78,55 @@ bbfList :: TestTree
 bbfList = testCase "bbfList" $ do
   let bbf = mkBBF list
   bbf' <- either (assertFailure . show) (maybe (assertFailure "no bbf for list") pure) bbf
-  renamed <- either (assertFailure . show) pure . runRenameM . renameValT $ bbf'
-  assertEqual "bbfList" renamed expectedListBBF
+  assertEqual "bbfList" bbf' expectedListBBF
   where
     expectedListBBF =
       ThunkT
-        ( CompT
-            count2
-            ( CompTBody
-                ( fromJust . NEV.fromList $
-                    [ Abstraction (Unifiable ix1),
+        ( Comp2
+            (
+                tyvar Z ix1
+                :--:>
                       ThunkT
-                        ( CompT
-                            count0
-                            ( CompTBody
-                                ( fromJust . NEV.fromList $
-                                    [ Abstraction (Unifiable ix0),
-                                      Abstraction (Unifiable ix1),
-                                      Abstraction (Unifiable ix1)
-                                    ]
+                        ( Comp0
+                            (  tyvar (S Z) ix0
+                               :--:> tyvar (S Z) ix1
+                               :--:> ReturnT (tyvar (S Z) ix1)
+
                                 )
                             )
-                        ),
-                      Abstraction (Unifiable ix1)
-                    ]
+                :--:> ReturnT (tyvar Z ix1)
                 )
             )
-        )
+
 
 bbfTree :: TestTree
 bbfTree = testCase "bbfTree" $ do
   let bbf = mkBBF tree
   bbf' <- either (assertFailure . show) (maybe (assertFailure "no bbf for tree") pure) bbf
-  renamed <- either (assertFailure . show) pure . runRenameM . renameValT $ bbf'
-  assertEqual "bbfList" renamed expectedTreeBBF
+  assertEqual "bbfList" bbf' expectedTreeBBF
   where
     expectedTreeBBF =
       ThunkT
-        ( CompT
-            count2
-            ( CompTBody
-                ( fromJust . NEV.fromList $
-                    [ ThunkT $
-                        CompT
-                          count0
-                          ( CompTBody
-                              ( fromJust . NEV.fromList $
-                                  [ Abstraction (Unifiable ix1),
-                                    Abstraction (Unifiable ix1),
-                                    Abstraction (Unifiable ix1)
-                                  ]
-                              )
-                          ),
-                      ThunkT $
-                        CompT
-                          count0
-                          ( CompTBody
-                              ( fromJust . NEV.fromList $
-                                  [ Abstraction (Unifiable ix0),
-                                    Abstraction (Unifiable ix1)
-                                  ]
-                              )
-                          ),
-                      Abstraction (Unifiable ix1)
-                    ]
+        ( Comp2
+            ( ThunkT (
+                        Comp0
+                          (tyvar (S Z) ix1
+                           :--:> tyvar (S Z) ix1
+                           :--:> ReturnT (tyvar (S Z) ix1)
+                          ))
+              :--:>
+                      ThunkT (
+                        Comp0
+                          (tyvar (S Z) ix0
+                           :--:>
+                           ReturnT (tyvar (S Z) ix1)
+                          ))
+                :--:>
+                      ReturnT (tyvar Z ix1)
+
                 )
             )
-        )
+
 
 -- Simple datatype unification unit test. Checks whether `data Unit = Unit` has the expected BB form
 testMonotypeBB :: TestTree

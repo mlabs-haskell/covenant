@@ -91,7 +91,6 @@ lookupDeclaration tn = do
 checkDataDecls :: Map TyName (DataDeclaration AbstractTy) -> Either KindCheckError ()
 checkDataDecls decls = runKindCheckM decls $ traverse_ checkDataDecl (M.elems decls)
 
--- REVIEW/TODO: Maybe we should do the encoding strategy sanity check here too?
 checkDataDecl :: DataDeclaration AbstractTy -> KindCheckM AbstractTy ()
 checkDataDecl OpaqueData {} = pure ()
 checkDataDecl decl@(DataDeclaration tn _ ctors _) = do
