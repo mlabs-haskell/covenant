@@ -434,7 +434,9 @@ defaultDatatypes :: Map TyName (DatatypeInfo AbstractTy)
 defaultDatatypes = foldMap go ledgerTypes
   where
     go :: DataDeclaration AbstractTy -> Map TyName (DatatypeInfo AbstractTy)
-    go decl = Map.singleton (view #datatypeName decl) (mkDatatypeInfo decl)
+    go decl = case mkDatatypeInfo decl of
+      Left err' -> error $ "Unexpected failure in default datatypes: " <> show err'
+      Right info -> Map.singleton (view #datatypeName decl) info
 
 -- | Executes an 'ASGBuilder' to make a \'finished\' ASG.
 --
