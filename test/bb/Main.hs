@@ -18,7 +18,7 @@ import Covenant.Test
     list,
     prettyDeclSet,
     tree,
-    tyAppTestDatatypes,
+    tyAppTestDatatypes, weirderList,
   )
 import Covenant.Type
   ( AbstractTy (BoundAt),
@@ -28,7 +28,7 @@ import Covenant.Type
     renameCompT,
     renameValT,
     runRenameM,
-    tyvar,
+    tyvar, tyCon,
   )
 import Data.Map qualified as M
 import Data.Maybe (catMaybes, fromJust)
@@ -47,7 +47,8 @@ main =
     [ testProperty "All BBF transformations rename properly" bbFormRenames,
       testMonotypeBB,
       bbfList,
-      bbfTree
+      bbfTree,
+      bbfWeirderList
     ]
   where
     -- These tests are suuuuppeeerr inefficient, it'd be ideal to run more but it'll take too long
@@ -79,7 +80,7 @@ bbfList :: TestTree
 bbfList = testCase "bbfList" $ do
   let bbf = mkBBF list
   bbf' <- either (assertFailure . show) (maybe (assertFailure "no bbf for list") pure) bbf
-  assertEqual "bbfList" bbf' expectedListBBF
+  assertEqual "bbfList" expectedListBBF bbf'
   where
     expectedListBBF =
       ThunkT
@@ -100,7 +101,7 @@ bbfTree :: TestTree
 bbfTree = testCase "bbfTree" $ do
   let bbf = mkBBF tree
   bbf' <- either (assertFailure . show) (maybe (assertFailure "no bbf for tree") pure) bbf
-  assertEqual "bbfList" bbf' expectedTreeBBF
+  assertEqual "bbfList" expectedTreeBBF bbf'
   where
     expectedTreeBBF =
       ThunkT
@@ -121,6 +122,22 @@ bbfTree = testCase "bbfTree" $ do
                 :--:> ReturnT (tyvar Z ix1)
             )
         )
+
+bbfWeirderList :: TestTree
+bbfWeirderList = testCase "bbfWeirderList" $ do
+  let bbf = mkBBF weirderList
+  bbf' <- either (assertFailure . show) (maybe (assertFailure "no bbf for tree") pure) bbf
+  assertEqual "bbfWeirderTree" expectedWeirdBBF bbf'
+ where
+   -- forall a r. (Maybe (a,r) -> r) -> r
+   expectedWeirdBBF = ThunkT (
+     Comp2 (
+         ThunkT (Comp0 (
+             tyCon "Maybe" [tyCon "Pair" [tyvar (S Z) ix0, tyvar (S Z) ix1]]
+             :--:> ReturnT (tyvar (S Z) ix1)))
+         :--:> ReturnT (tyvar Z ix1 )
+                   )
+                             )
 
 -- Simple datatype unification unit test. Checks whether `data Unit = Unit` has the expected BB form
 testMonotypeBB :: TestTree

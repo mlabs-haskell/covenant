@@ -87,6 +87,7 @@ module Covenant.Type
 
     -- * for tests
     prettyStr,
+    tyCon,
   )
 where
 
@@ -418,3 +419,6 @@ countHelper expected (CompT actual xs) = do
   expectedCount <- preview intCount expected
   guard (expectedCount == actual)
   pure xs
+
+tyCon :: TyName -> [ValT a] -> ValT a
+tyCon tn args = Datatype tn (Vector.fromList args)
