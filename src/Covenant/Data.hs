@@ -245,7 +245,7 @@ mkBBF' (DataDeclaration tn numVars ctors _)
 
     fixArg :: ValT AbstractTy -> ExceptT BBFError Maybe (ValT AbstractTy)
     -- fixArg (Abstraction (BoundAt db indx)) = pure . Abstraction $ BoundAt Z indx
-    fixArg  arg = do
+    fixArg arg = do
       let isDirectRecursiveTy = runReader (isRecursiveChildOf tn arg) 0
       if isDirectRecursiveTy
         then pure $ Abstraction (BoundAt Z outIx)
@@ -253,8 +253,8 @@ mkBBF' (DataDeclaration tn numVars ctors _)
           Datatype tn' dtArgs
             | tn == tn' -> throwError $ InvalidRecursion tn arg
             | otherwise -> do
-               dtArgs' <- traverse fixArg dtArgs
-               pure . Datatype tn' $  dtArgs'
+                dtArgs' <- traverse fixArg dtArgs
+                pure . Datatype tn' $ dtArgs'
           _ -> pure arg
 
 {- Note (Sean, 14/05/25): Re  DeBruijn indices:

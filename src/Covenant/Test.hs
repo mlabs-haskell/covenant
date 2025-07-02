@@ -21,7 +21,7 @@ module Covenant.Test
     tyAppTestDatatypes,
     list,
     tree,
-    weirderList
+    weirderList,
   )
 where
 

@@ -8,7 +8,7 @@ module Covenant.Internal.Ledger
     pair,
     list,
     tree,
-    weirderList
+    weirderList,
   )
 where
 
@@ -669,6 +669,11 @@ tree :: DataDeclaration AbstractTy
 tree = mkDecl $ Decl "Tree" count1 [Ctor "Bin" [tycon "Tree" [a], tycon "Tree" [a]], Ctor "Tip" [a]] (PlutusData ConstrData)
 
 weirderList :: DataDeclaration AbstractTy
-weirderList = mkDecl $ Decl "WeirderList" count1
-  [Ctor "Uncons" [tycon "Maybe" [tycon "Pair" [a, tycon "WeirderList" [a]]]]
-  ] (PlutusData ConstrData)
+weirderList =
+  mkDecl $
+    Decl
+      "WeirderList"
+      count1
+      [ Ctor "Uncons" [tycon "Maybe" [tycon "Pair" [a, tycon "WeirderList" [a]]]]
+      ]
+      (PlutusData ConstrData)

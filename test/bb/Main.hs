@@ -18,7 +18,8 @@ import Covenant.Test
     list,
     prettyDeclSet,
     tree,
-    tyAppTestDatatypes, weirderList,
+    tyAppTestDatatypes,
+    weirderList,
   )
 import Covenant.Type
   ( AbstractTy (BoundAt),
@@ -28,7 +29,8 @@ import Covenant.Type
     renameCompT,
     renameValT,
     runRenameM,
-    tyvar, tyCon,
+    tyCon,
+    tyvar,
   )
 import Data.Map qualified as M
 import Data.Maybe (catMaybes, fromJust)
@@ -128,16 +130,20 @@ bbfWeirderList = testCase "bbfWeirderList" $ do
   let bbf = mkBBF weirderList
   bbf' <- either (assertFailure . show) (maybe (assertFailure "no bbf for tree") pure) bbf
   assertEqual "bbfWeirderTree" expectedWeirdBBF bbf'
- where
-   -- forall a r. (Maybe (a,r) -> r) -> r
-   expectedWeirdBBF = ThunkT (
-     Comp2 (
-         ThunkT (Comp0 (
-             tyCon "Maybe" [tyCon "Pair" [tyvar (S Z) ix0, tyvar (S Z) ix1]]
-             :--:> ReturnT (tyvar (S Z) ix1)))
-         :--:> ReturnT (tyvar Z ix1 )
-                   )
-                             )
+  where
+    -- forall a r. (Maybe (a,r) -> r) -> r
+    expectedWeirdBBF =
+      ThunkT
+        ( Comp2
+            ( ThunkT
+                ( Comp0
+                    ( tyCon "Maybe" [tyCon "Pair" [tyvar (S Z) ix0, tyvar (S Z) ix1]]
+                        :--:> ReturnT (tyvar (S Z) ix1)
+                    )
+                )
+                :--:> ReturnT (tyvar Z ix1)
+            )
+        )
 
 -- Simple datatype unification unit test. Checks whether `data Unit = Unit` has the expected BB form
 testMonotypeBB :: TestTree
