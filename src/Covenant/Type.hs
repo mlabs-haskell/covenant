@@ -83,6 +83,7 @@ module Covenant.Type
     -- * Datatype sanity checking
     cycleCheck,
     checkDataDecls,
+    checkEncodingArgs,
 
     -- * for tests
     prettyStr,
@@ -101,7 +102,7 @@ import Covenant.Index
     intCount,
   )
 -- re-export for tests
-import Covenant.Internal.KindCheck (checkDataDecls, cycleCheck)
+import Covenant.Internal.KindCheck (checkDataDecls, cycleCheck, checkEncodingArgs)
 import Covenant.Internal.PrettyPrint (prettyStr)
 import Covenant.Internal.Rename
   ( RenameError

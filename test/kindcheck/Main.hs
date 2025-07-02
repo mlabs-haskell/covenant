@@ -1,16 +1,17 @@
 module Main (main) where
 
-import Covenant.Index (count0, count1)
+import Covenant.Index (count0, count1,ix0)
 import Covenant.Test (ledgerTypes)
 import Covenant.Type
   ( BuiltinFlatT (IntegerT),
     Constructor (Constructor),
     DataDeclaration (DataDeclaration, OpaqueData),
-    DataEncoding (SOP),
+    DataEncoding (SOP,PlutusData),
     ValT (Abstraction, BuiltinFlat, Datatype),
     checkDataDecls,
-    cycleCheck,
-  )
+    cycleCheck, AbstractTy(BoundAt), PlutusDataStrategy(ConstrData), checkEncodingArgs,
+    )
+import Covenant.DeBruijn (DeBruijn(Z))
 import Data.Map qualified as M
 import Data.Vector qualified as V
 import Optics.Core (view)
@@ -24,7 +25,8 @@ main =
     [ testCase "singleNonRec" $ runCycleCheck [maybee],
       testCase "singleSelfRec" $ runCycleCheck [intList],
       expectFail $ testCase "mutRecShouldFail" (runCycleCheck [mutRec1, mutRec2]),
-      checkLedgerTypes
+      checkLedgerTypes,
+      shouldFailEncodingCheck
     ]
 
 checkLedgerTypes :: TestTree
@@ -35,7 +37,13 @@ checkLedgerTypes =
     . foldr (\x acc -> M.insert (view #datatypeName x) x acc) M.empty
     $ ledgerTypes
 
-runCycleCheck :: [DataDeclaration ()] -> IO ()
+shouldFailEncodingCheck :: TestTree
+shouldFailEncodingCheck = expectFail . testCase "encodingArgsShouldFail" $
+  either (assertFailure . show) pure $ checkEncodingArgs (view #datatypeEncoding) testTyDict encodingMismatch
+ where
+   testTyDict = foldr (\decl acc -> M.insert (view #datatypeName decl) decl acc) M.empty [maybee,intList]
+
+runCycleCheck :: [DataDeclaration AbstractTy] -> IO ()
 runCycleCheck decls = case cycleCheck declMap of
   Nothing -> pure ()
   Just err -> assertFailure $ show err
@@ -49,15 +57,15 @@ runCycleCheck decls = case cycleCheck declMap of
         M.empty
         decls
 
-maybee :: DataDeclaration ()
-maybee = DataDeclaration "Maybe" count1 (V.fromList ctors) SOP
+maybee :: DataDeclaration AbstractTy
+maybee = DataDeclaration "Maybe" count1 (V.fromList ctors) (PlutusData ConstrData)
   where
     ctors =
       [ Constructor "Nothing" V.empty,
-        Constructor "Just" (V.singleton (Abstraction ()))
+        Constructor "Just" (V.singleton (Abstraction $ BoundAt  Z ix0))
       ]
 
-intList :: DataDeclaration ()
+intList :: DataDeclaration AbstractTy
 intList = DataDeclaration "IntList" count0 (V.fromList ctors) SOP
   where
     ctors =
@@ -65,15 +73,18 @@ intList = DataDeclaration "IntList" count0 (V.fromList ctors) SOP
         Constructor "More" (V.fromList intListMore)
       ]
 
-    intListMore :: [ValT ()]
+    intListMore :: [ValT AbstractTy]
     intListMore = [BuiltinFlat IntegerT, Datatype "IntList" V.empty]
 
-mutRec1 :: DataDeclaration ()
+encodingMismatch :: ValT AbstractTy
+encodingMismatch = Datatype "Maybe" (V.fromList [Datatype "IntList" V.empty])
+
+mutRec1 :: DataDeclaration AbstractTy
 mutRec1 = DataDeclaration "MutRec1" count0 (V.fromList ctors) SOP
   where
     ctors = [Constructor "MutRec1" (V.singleton (Datatype "MutRec2" V.empty))]
 
-mutRec2 :: DataDeclaration ()
+mutRec2 :: DataDeclaration AbstractTy
 mutRec2 = DataDeclaration "MutRec2" count0 (V.fromList ctors) SOP
   where
     ctors = [Constructor "MutRec2" (V.fromList [Datatype "MutRec1" V.empty])]

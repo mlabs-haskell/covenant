@@ -116,6 +116,7 @@ import Covenant.Constant (AConstant, typeConstant)
 import Covenant.Data (DatatypeInfo)
 import Covenant.DeBruijn (DeBruijn, asInt)
 import Covenant.Index (Index, count0, intIndex)
+import Covenant.Internal.KindCheck (checkEncodingArgs)
 import Covenant.Internal.Rename
   ( RenameError
       ( InvalidAbstractionReference
@@ -157,7 +158,7 @@ import Covenant.Internal.Term
         ThunkError,
         ThunkValType,
         UnificationError,
-        WrongReturnType
+        WrongReturnType, EncodingError
       ),
     Id,
     Ref (AnArg, AnId),
@@ -620,6 +621,7 @@ app fId argRefs = do
         tyDict <- asks (view #datatypeInfo)
         result <- either (throwError . UnificationError) pure $ checkApp tyDict renamedFT (Vector.toList renamedArgs)
         let restored = undoRename result
+        checkEncodingWithInfo tyDict restored 
         refTo . AValNode restored . AppInternal fId $ argRefs
     ValNodeType t -> throwError . ApplyToValType $ t
     ErrorNodeType -> throwError ApplyToError
@@ -664,3 +666,12 @@ renameArg r =
       Left err' -> throwError . RenameArgumentFailed t $ err'
       Right renamed -> pure . Just $ renamed
     ErrorNodeType -> pure Nothing
+
+checkEncodingWithInfo :: forall (a :: Type) (m :: Type -> Type)
+                       . MonadError CovenantTypeError m
+                      => Map TyName (DatatypeInfo a)
+                      -> ValT AbstractTy
+                      -> m ()
+checkEncodingWithInfo  tyDict valT = case checkEncodingArgs (view (#originalDecl % #datatypeEncoding)) tyDict valT of
+  Left encErr -> throwError $ EncodingError encErr
+  Right{} -> pure ()
