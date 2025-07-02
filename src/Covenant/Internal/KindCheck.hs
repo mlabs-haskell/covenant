@@ -8,7 +8,7 @@
 --       - The "count" - the number of bound tyvars in the `ValT.Datatype` representation - may be incorrect (i.e. inconsistent with the count in the declaration)
 --
 --     The checks to detect these errors are entirely independent from the checks performed during typechecking or renaming, so we do them in a separate pass.
-module Covenant.Internal.KindCheck (checkDataDecls, checkValT, KindCheckError (..), EncodingArgErr(..), cycleCheck, checkEncodingArgs) where
+module Covenant.Internal.KindCheck (checkDataDecls, checkValT, KindCheckError (..), EncodingArgErr (..), cycleCheck, checkEncodingArgs) where
 
 import Control.Monad (unless)
 import Control.Monad.Except (ExceptT, MonadError (throwError), runExceptT)
@@ -21,10 +21,11 @@ import Covenant.Internal.Type
     CompTBody (CompTBody),
     Constructor (Constructor),
     DataDeclaration (DataDeclaration, OpaqueData),
+    DataEncoding (SOP),
     TyName,
     ValT (Abstraction, BuiltinFlat, Datatype, ThunkT),
     checkStrategy,
-    datatype, DataEncoding (SOP),
+    datatype,
   )
 import Data.Foldable (traverse_)
 import Data.Functor.Identity (Identity, runIdentity)
@@ -36,7 +37,7 @@ import Data.Set (Set)
 import Data.Set qualified as Set
 import Data.Vector (Vector)
 import Data.Vector qualified as V
-import Optics.Core (A_Lens, LabelOptic (labelOptic), lens, preview, review, to, view, (%), toListOf, folded)
+import Optics.Core (A_Lens, LabelOptic (labelOptic), folded, lens, preview, review, to, toListOf, view, (%))
 
 {- TODO: Explicitly separate the kind checker into two check functions:
      - One which kind checks `ValT`s to ensure:
@@ -158,7 +159,6 @@ cycleCheck' visited (DataDeclaration tn _ ctors _) = traverse_ (checkCtor visite
 
    Checks whether the arguments to type constructors (ValT 'Datatype's) conform with their encoding.
 
-
 -}
 
 -- First arg is the name of the type constructor w/ a bad argument, second arg is the bad argument.
@@ -168,15 +168,16 @@ data EncodingArgErr a = EncodingArgMismatch TyName (ValT a)
 -- NOTE: This assumes that we've already checked that all of the relevant types *exist* in the datatype context.
 --       So, if we use this to validate data declarations, we need to make sure it happens *after* the checks that
 --       ensure that.
-checkEncodingArgs :: forall (a :: Type) (info :: Type)
-                   . (info -> DataEncoding) -- this lets us not care about whether we're doing this w/ a DataDeclaration or DatatypeInfo
-                  -> Map TyName info
-                  -> ValT a
-                  -> Either (EncodingArgErr a) ()
+checkEncodingArgs ::
+  forall (a :: Type) (info :: Type).
+  (info -> DataEncoding) -> -- this lets us not care about whether we're doing this w/ a DataDeclaration or DatatypeInfo
+  Map TyName info ->
+  ValT a ->
+  Either (EncodingArgErr a) ()
 checkEncodingArgs getEncoding tyDict = \case
-  Abstraction{} -> pure ()
-  BuiltinFlat{} -> pure ()
-  ThunkT (CompT _ (CompTBody args)) -> traverse_ go  args
+  Abstraction {} -> pure ()
+  BuiltinFlat {} -> pure ()
+  ThunkT (CompT _ (CompTBody args)) -> traverse_ go args
   Datatype tn args -> do
     let encoding = getEncoding $ tyDict M.! tn
     case encoding of
@@ -186,26 +187,27 @@ checkEncodingArgs getEncoding tyDict = \case
       _ -> do
         traverse_ go args
         traverse_ (isValidDataArg tn) args
- where
-   go :: ValT a -> Either (EncodingArgErr a) ()
-   go = checkEncodingArgs getEncoding tyDict
+  where
+    go :: ValT a -> Either (EncodingArgErr a) ()
+    go = checkEncodingArgs getEncoding tyDict
 
-   isValidDataArg :: TyName -> ValT a -> Either (EncodingArgErr a) ()
-   isValidDataArg tn = \case
-     Abstraction{} -> pure ()
-     BuiltinFlat{} -> pure ()
-     thunk@ThunkT{} -> throwError $ EncodingArgMismatch tn thunk
-     dt@(Datatype tn' args') -> do
-       let encoding = getEncoding $ tyDict M.! tn'
-       case encoding of
-         SOP -> throwError $ EncodingArgMismatch tn dt
-         _ -> traverse_ go args'
+    isValidDataArg :: TyName -> ValT a -> Either (EncodingArgErr a) ()
+    isValidDataArg tn = \case
+      Abstraction {} -> pure ()
+      BuiltinFlat {} -> pure ()
+      thunk@ThunkT {} -> throwError $ EncodingArgMismatch tn thunk
+      dt@(Datatype tn' args') -> do
+        let encoding = getEncoding $ tyDict M.! tn'
+        case encoding of
+          SOP -> throwError $ EncodingArgMismatch tn dt
+          _ -> traverse_ go args'
 
 checkEncodingArgsInDataDecl :: DataDeclaration AbstractTy -> KindCheckM AbstractTy ()
-checkEncodingArgsInDataDecl decl = asks (view #kindCheckContext) >>= \tyDict ->
-  case traverse (checkEncodingArgs (view #datatypeEncoding) tyDict) allConstructorArgs of
-    Left encErr -> throwError $ EncodingMismatch encErr
-    Right _ -> pure ()
- where
-   allConstructorArgs :: Vector (ValT AbstractTy)
-   allConstructorArgs = V.concat $ toListOf (#datatypeConstructors % folded % #constructorArgs) decl
+checkEncodingArgsInDataDecl decl =
+  asks (view #kindCheckContext) >>= \tyDict ->
+    case traverse (checkEncodingArgs (view #datatypeEncoding) tyDict) allConstructorArgs of
+      Left encErr -> throwError $ EncodingMismatch encErr
+      Right _ -> pure ()
+  where
+    allConstructorArgs :: Vector (ValT AbstractTy)
+    allConstructorArgs = V.concat $ toListOf (#datatypeConstructors % folded % #constructorArgs) decl

@@ -1,17 +1,20 @@
 module Main (main) where
 
-import Covenant.Index (count0, count1,ix0)
+import Covenant.DeBruijn (DeBruijn (Z))
+import Covenant.Index (count0, count1, ix0)
 import Covenant.Test (ledgerTypes)
 import Covenant.Type
-  ( BuiltinFlatT (IntegerT),
+  ( AbstractTy (BoundAt),
+    BuiltinFlatT (IntegerT),
     Constructor (Constructor),
     DataDeclaration (DataDeclaration, OpaqueData),
-    DataEncoding (SOP,PlutusData),
+    DataEncoding (PlutusData, SOP),
+    PlutusDataStrategy (ConstrData),
     ValT (Abstraction, BuiltinFlat, Datatype),
     checkDataDecls,
-    cycleCheck, AbstractTy(BoundAt), PlutusDataStrategy(ConstrData), checkEncodingArgs,
-    )
-import Covenant.DeBruijn (DeBruijn(Z))
+    checkEncodingArgs,
+    cycleCheck,
+  )
 import Data.Map qualified as M
 import Data.Vector qualified as V
 import Optics.Core (view)
@@ -38,10 +41,12 @@ checkLedgerTypes =
     $ ledgerTypes
 
 shouldFailEncodingCheck :: TestTree
-shouldFailEncodingCheck = expectFail . testCase "encodingArgsShouldFail" $
-  either (assertFailure . show) pure $ checkEncodingArgs (view #datatypeEncoding) testTyDict encodingMismatch
- where
-   testTyDict = foldr (\decl acc -> M.insert (view #datatypeName decl) decl acc) M.empty [maybee,intList]
+shouldFailEncodingCheck =
+  expectFail . testCase "encodingArgsShouldFail" $
+    either (assertFailure . show) pure $
+      checkEncodingArgs (view #datatypeEncoding) testTyDict encodingMismatch
+  where
+    testTyDict = foldr (\decl acc -> M.insert (view #datatypeName decl) decl acc) M.empty [maybee, intList]
 
 runCycleCheck :: [DataDeclaration AbstractTy] -> IO ()
 runCycleCheck decls = case cycleCheck declMap of
@@ -62,7 +67,7 @@ maybee = DataDeclaration "Maybe" count1 (V.fromList ctors) (PlutusData ConstrDat
   where
     ctors =
       [ Constructor "Nothing" V.empty,
-        Constructor "Just" (V.singleton (Abstraction $ BoundAt  Z ix0))
+        Constructor "Just" (V.singleton (Abstraction $ BoundAt Z ix0))
       ]
 
 intList :: DataDeclaration AbstractTy

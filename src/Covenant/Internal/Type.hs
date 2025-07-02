@@ -51,8 +51,8 @@ import Covenant.Internal.Strategy
       ( InternalAssocMapStrat,
         InternalDataStrat,
         InternalListStrat,
-        InternalPairStrat,
-        InternalOpaqueStrat
+        InternalOpaqueStrat,
+        InternalPairStrat
       ),
     PlutusDataConstructor,
     PlutusDataStrategy
@@ -406,9 +406,8 @@ instance
   {-# INLINEABLE labelOptic #-}
   labelOptic =
     lens
-      (\case OpaqueData{} -> BuiltinStrategy InternalOpaqueStrat; DataDeclaration _ _ _ enc -> enc)
+      (\case OpaqueData {} -> BuiltinStrategy InternalOpaqueStrat; DataDeclaration _ _ _ enc -> enc)
       (\decl enc -> case decl of OpaqueData tn x -> OpaqueData tn x; DataDeclaration tn x y _ -> DataDeclaration tn x y enc)
-
 
 checkStrategy :: forall (a :: Type). DataDeclaration a -> Bool
 checkStrategy = \case

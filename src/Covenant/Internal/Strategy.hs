@@ -60,8 +60,8 @@ data InternalStrategy
   | InternalPairStrat
   | InternalDataStrat
   | InternalAssocMapStrat
-  -- This exists solely so I can get a 'DataEncoding' out of an opaque, it's not really used
-  | InternalOpaqueStrat
+  | -- This exists solely so I can get a 'DataEncoding' out of an opaque, it's not really used
+    InternalOpaqueStrat
   deriving stock
     ( -- | @since 1.1.0
       Show,

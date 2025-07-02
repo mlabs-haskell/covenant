@@ -144,6 +144,7 @@ import Covenant.Internal.Term
         ApplyToError,
         ApplyToValType,
         BrokenIdReference,
+        EncodingError,
         ForceCompType,
         ForceError,
         ForceNonThunk,
@@ -158,7 +159,7 @@ import Covenant.Internal.Term
         ThunkError,
         ThunkValType,
         UnificationError,
-        WrongReturnType, EncodingError
+        WrongReturnType
       ),
     Id,
     Ref (AnArg, AnId),
@@ -621,7 +622,7 @@ app fId argRefs = do
         tyDict <- asks (view #datatypeInfo)
         result <- either (throwError . UnificationError) pure $ checkApp tyDict renamedFT (Vector.toList renamedArgs)
         let restored = undoRename result
-        checkEncodingWithInfo tyDict restored 
+        checkEncodingWithInfo tyDict restored
         refTo . AValNode restored . AppInternal fId $ argRefs
     ValNodeType t -> throwError . ApplyToValType $ t
     ErrorNodeType -> throwError ApplyToError
@@ -667,11 +668,12 @@ renameArg r =
       Right renamed -> pure . Just $ renamed
     ErrorNodeType -> pure Nothing
 
-checkEncodingWithInfo :: forall (a :: Type) (m :: Type -> Type)
-                       . MonadError CovenantTypeError m
-                      => Map TyName (DatatypeInfo a)
-                      -> ValT AbstractTy
-                      -> m ()
-checkEncodingWithInfo  tyDict valT = case checkEncodingArgs (view (#originalDecl % #datatypeEncoding)) tyDict valT of
+checkEncodingWithInfo ::
+  forall (a :: Type) (m :: Type -> Type).
+  (MonadError CovenantTypeError m) =>
+  Map TyName (DatatypeInfo a) ->
+  ValT AbstractTy ->
+  m ()
+checkEncodingWithInfo tyDict valT = case checkEncodingArgs (view (#originalDecl % #datatypeEncoding)) tyDict valT of
   Left encErr -> throwError $ EncodingError encErr
-  Right{} -> pure ()
+  Right {} -> pure ()

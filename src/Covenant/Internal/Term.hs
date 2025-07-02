@@ -19,6 +19,7 @@ import Control.Monad.HashCons (MonadHashCons (lookupRef))
 import Covenant.Constant (AConstant)
 import Covenant.DeBruijn (DeBruijn)
 import Covenant.Index (Index)
+import Covenant.Internal.KindCheck (EncodingArgErr)
 import Covenant.Internal.Rename (RenameError)
 import Covenant.Internal.Type (AbstractTy, CompT, ValT)
 import Covenant.Internal.Unification (TypeAppError)
@@ -26,7 +27,6 @@ import Covenant.Prim (OneArgFunc, SixArgFunc, ThreeArgFunc, TwoArgFunc)
 import Data.Kind (Type)
 import Data.Vector (Vector)
 import Data.Word (Word64)
-import Covenant.Internal.KindCheck (EncodingArgErr)
 
 -- | An error that can arise during the construction of an ASG by programmatic
 -- means.
@@ -119,6 +119,7 @@ data CovenantTypeError
     -- @since 1.0.0
     WrongReturnType (ValT AbstractTy) (ValT AbstractTy)
   | -- @since 1.1.0
+
     -- | Wraps an encoding argument mismatch error from KindCheck
     EncodingError (EncodingArgErr AbstractTy)
   deriving stock
