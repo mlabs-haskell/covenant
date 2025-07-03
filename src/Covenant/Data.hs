@@ -244,7 +244,6 @@ mkBBF' (DataDeclaration tn numVars ctors _)
           pure . ThunkT . CompT count0 . CompTBody . flip NEV.snoc out $ elimArgs'
 
     fixArg :: ValT AbstractTy -> ExceptT BBFError Maybe (ValT AbstractTy)
-    -- fixArg (Abstraction (BoundAt db indx)) = pure . Abstraction $ BoundAt Z indx
     fixArg arg = do
       let isDirectRecursiveTy = runReader (isRecursiveChildOf tn arg) 0
       if isDirectRecursiveTy
