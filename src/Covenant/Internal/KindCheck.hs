@@ -87,9 +87,7 @@ lookupDeclaration tn = do
     Just decl -> pure decl
 
 {- This sanity checks datatype declarations using the criteria enumerated above.
-
 -}
-
 checkDataDecls :: Map TyName (DataDeclaration AbstractTy) -> Either KindCheckError ()
 checkDataDecls decls = runKindCheckM decls $ traverse_ checkDataDecl (M.elems decls)
 
@@ -137,7 +135,6 @@ cycleCheck decls = either Just (const Nothing) $ runKindCheckM decls go
 {- This is a bit odd b/c we don't want to fail for auto-recursive types, so we need to be careful
    *not* to mark the current decl being examined as "visited" until we've "descended" into the dependencies
    (I think?)
-
 -}
 cycleCheck' :: forall (a :: Type). (Ord a) => Set TyName -> DataDeclaration a -> KindCheckM a ()
 cycleCheck' _ OpaqueData {} = pure ()
@@ -182,7 +179,18 @@ checkEncodingArgs getEncoding tyDict = \case
     let encoding = getEncoding $ tyDict M.! tn
     case encoding of
       -- Might as well check all the way down
-      SOP -> traverse_ go args
+      SOP -> do
+        {- NOTE Sean 7/2/25: We are *temporarily* disallowing thunk arguments to SOPs to speed up development and
+                             create consistency. We disallow Thunk arguments to constructors in datatype declarations,
+                             and while we could very well allow them outside of those declarations, it creates a strange situation
+                             where the same function might be safe/unsafe depending on whether it is used on a ValT inside of a data
+                             declaration vs (e.g.) a type annotation in the ASG.
+
+                             To remove this restriction, delete the `traverse_ isValidSOPArg args` line below
+        -}
+        traverse_ go args
+        traverse_ (isValidSOPArg tn) args
+
       -- Both explicit data encodings and builtins should be "morally data encoded"
       _ -> do
         traverse_ go args
@@ -201,6 +209,13 @@ checkEncodingArgs getEncoding tyDict = \case
         case encoding of
           SOP -> throwError $ EncodingArgMismatch tn dt
           _ -> traverse_ go args'
+
+    isValidSOPArg :: TyName -> ValT a -> Either (EncodingArgErr a) ()
+    isValidSOPArg tn = \case
+      Abstraction{} -> pure ()
+      BuiltinFlat{} -> pure ()
+      thunk@ThunkT{} -> throwError $ EncodingArgMismatch tn thunk
+      Datatype tn' args' -> traverse_ (isValidSOPArg tn') args'
 
 checkEncodingArgsInDataDecl :: DataDeclaration AbstractTy -> KindCheckM AbstractTy ()
 checkEncodingArgsInDataDecl decl =
