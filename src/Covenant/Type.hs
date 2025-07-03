@@ -83,9 +83,11 @@ module Covenant.Type
     -- * Datatype sanity checking
     cycleCheck,
     checkDataDecls,
+    checkEncodingArgs,
 
     -- * for tests
     prettyStr,
+    tyCon,
   )
 where
 
@@ -101,7 +103,7 @@ import Covenant.Index
     intCount,
   )
 -- re-export for tests
-import Covenant.Internal.KindCheck (checkDataDecls, cycleCheck)
+import Covenant.Internal.KindCheck (checkDataDecls, checkEncodingArgs, cycleCheck)
 import Covenant.Internal.PrettyPrint (prettyStr)
 import Covenant.Internal.Rename
   ( RenameError
@@ -417,3 +419,6 @@ countHelper expected (CompT actual xs) = do
   expectedCount <- preview intCount expected
   guard (expectedCount == actual)
   pure xs
+
+tyCon :: TyName -> [ValT a] -> ValT a
+tyCon tn args = Datatype tn (Vector.fromList args)

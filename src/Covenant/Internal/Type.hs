@@ -51,6 +51,7 @@ import Covenant.Internal.Strategy
       ( InternalAssocMapStrat,
         InternalDataStrat,
         InternalListStrat,
+        InternalOpaqueStrat,
         InternalPairStrat
       ),
     PlutusDataConstructor,
@@ -397,6 +398,17 @@ instance
       DataDeclaration _ _ ctors _ -> Just ctors
       _ -> Nothing
 
+-- | @since 1.1.0
+instance
+  (k ~ A_Lens, a ~ DataEncoding, b ~ DataEncoding) =>
+  LabelOptic "datatypeEncoding" k (DataDeclaration c) (DataDeclaration c) a b
+  where
+  {-# INLINEABLE labelOptic #-}
+  labelOptic =
+    lens
+      (\case OpaqueData {} -> BuiltinStrategy InternalOpaqueStrat; DataDeclaration _ _ _ enc -> enc)
+      (\decl enc -> case decl of OpaqueData tn x -> OpaqueData tn x; DataDeclaration tn x y _ -> DataDeclaration tn x y enc)
+
 checkStrategy :: forall (a :: Type). DataDeclaration a -> Bool
 checkStrategy = \case
   OpaqueData _ _ -> True
@@ -407,6 +419,7 @@ checkStrategy = \case
       InternalPairStrat -> tn == "Pair"
       InternalDataStrat -> tn == "Data"
       InternalAssocMapStrat -> tn == "Map"
+      InternalOpaqueStrat -> False
     PlutusData plutusStrat -> case plutusStrat of
       ConstrData -> True
       EnumData -> all (\(Constructor _ args) -> null args) ctors
