@@ -1,4 +1,5 @@
 {-# OPTIONS_GHC -Wno-unrecognised-pragmas #-}
+
 {-# HLINT ignore "Use camelCase" #-}
 module Main (main) where
 
@@ -6,22 +7,22 @@ import Covenant.DeBruijn (DeBruijn (Z))
 import Covenant.Index (count0, count1, ix0)
 import Covenant.Test (ledgerTypes)
 import Covenant.Type
-    ( AbstractTy(BoundAt),
-      BuiltinFlatT(IntegerT),
-      Constructor(Constructor),
-      DataDeclaration(DataDeclaration, OpaqueData),
-      DataEncoding(PlutusData, SOP),
-      PlutusDataStrategy(ConstrData),
-      ValT(Abstraction, BuiltinFlat, Datatype, ThunkT),
-      CompT(Comp1),
-      checkDataDecls,
-      checkEncodingArgs,
-      cycleCheck,
-      TyName,
-      tyvar,
-      tyCon,
-      CompTBody((:--:>)),
-      CompTBody(ReturnT) )
+  ( AbstractTy (BoundAt),
+    BuiltinFlatT (IntegerT),
+    CompT (Comp1),
+    CompTBody (ReturnT, (:--:>)),
+    Constructor (Constructor),
+    DataDeclaration (DataDeclaration, OpaqueData),
+    DataEncoding (PlutusData, SOP),
+    PlutusDataStrategy (ConstrData),
+    TyName,
+    ValT (Abstraction, BuiltinFlat, Datatype, ThunkT),
+    checkDataDecls,
+    checkEncodingArgs,
+    cycleCheck,
+    tyCon,
+    tyvar,
+  )
 import Data.Map qualified as M
 import Data.Vector qualified as V
 import Optics.Core (view)
@@ -39,7 +40,7 @@ main =
       simpleEncodingMismatch,
       nestedThunkArg,
       noThunkArgsToSOPTyCons_for_now,
-      goodSOPArg 
+      goodSOPArg
     ]
 
 checkLedgerTypes :: TestTree
@@ -50,17 +51,17 @@ checkLedgerTypes =
     . foldr (\x acc -> M.insert (view #datatypeName x) x acc) M.empty
     $ ledgerTypes
 
-
 encodingCheck :: String -> [DataDeclaration AbstractTy] -> ValT AbstractTy -> TestTree
-encodingCheck testNm tyDict valT = testCase testNm  $
+encodingCheck testNm tyDict valT =
+  testCase testNm $
     either (assertFailure . show) pure $
       checkEncodingArgs (view #datatypeEncoding) (mkTyDict tyDict) valT
 
 shouldFailEncodingCheck :: String -> [DataDeclaration AbstractTy] -> ValT AbstractTy -> TestTree
-shouldFailEncodingCheck tnm tyDict valT = expectFail $  encodingCheck tnm tyDict valT
+shouldFailEncodingCheck tnm tyDict valT = expectFail $ encodingCheck tnm tyDict valT
 
 simpleEncodingMismatch :: TestTree
-simpleEncodingMismatch = shouldFailEncodingCheck  "simpleEncodingMismatch" [maybee,intList] encodingMismatch
+simpleEncodingMismatch = shouldFailEncodingCheck "simpleEncodingMismatch" [maybee, intList] encodingMismatch
 
 noThunkArgsToSOPTyCons_for_now :: TestTree
 noThunkArgsToSOPTyCons_for_now = shouldFailEncodingCheck "no thunk args to SOP tycons (for now)" [maybeSOP] badSOPThunk
@@ -104,7 +105,6 @@ maybeSOP = DataDeclaration "MaybeSOP" count1 (V.fromList ctors) SOP
         Constructor "Just" (V.singleton (Abstraction $ BoundAt Z ix0))
       ]
 
-
 intList :: DataDeclaration AbstractTy
 intList = DataDeclaration "IntList" count0 (V.fromList ctors) SOP
   where
@@ -128,7 +128,7 @@ identitee = ThunkT $ Comp1 (tyvar Z ix0 :--:> ReturnT (tyvar Z ix0))
 -- DATA ENCODED MAYBE
 -- Maybe (Maybe (forall a. a -> a))
 badThunkArg :: ValT AbstractTy
-badThunkArg =  tyCon "Maybe" [tyCon "Maybe" [identitee]]
+badThunkArg = tyCon "Maybe" [tyCon "Maybe" [identitee]]
 
 -- SOP ENCODED MAYBE
 -- Maybe (Maybe (Maybe Integer))

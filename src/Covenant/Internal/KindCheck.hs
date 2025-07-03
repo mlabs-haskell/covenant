@@ -212,9 +212,9 @@ checkEncodingArgs getEncoding tyDict = \case
 
     isValidSOPArg :: TyName -> ValT a -> Either (EncodingArgErr a) ()
     isValidSOPArg tn = \case
-      Abstraction{} -> pure ()
-      BuiltinFlat{} -> pure ()
-      thunk@ThunkT{} -> throwError $ EncodingArgMismatch tn thunk
+      Abstraction {} -> pure ()
+      BuiltinFlat {} -> pure ()
+      thunk@ThunkT {} -> throwError $ EncodingArgMismatch tn thunk
       Datatype tn' args' -> traverse_ (isValidSOPArg tn') args'
 
 checkEncodingArgsInDataDecl :: DataDeclaration AbstractTy -> KindCheckM AbstractTy ()
