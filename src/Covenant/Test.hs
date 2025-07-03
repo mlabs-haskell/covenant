@@ -21,6 +21,7 @@ module Covenant.Test
     tyAppTestDatatypes,
     list,
     tree,
+    weirderList,
   )
 where
 
@@ -50,7 +51,7 @@ import Covenant.Index
     ix0,
     ix1,
   )
-import Covenant.Internal.Ledger (CtorBuilder (Ctor), DeclBuilder (Decl), ledgerTypes, list, maybeT, mkDecl, pair, tree)
+import Covenant.Internal.Ledger (CtorBuilder (Ctor), DeclBuilder (Decl), ledgerTypes, list, maybeT, mkDecl, pair, tree, weirderList)
 import Covenant.Internal.PrettyPrint (ScopeBoundary, prettyStr)
 import Covenant.Internal.Rename (renameDataDecl, renameValT)
 import Covenant.Internal.Type
