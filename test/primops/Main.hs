@@ -9,20 +9,21 @@ import Covenant.Prim
         FstPair,
         HeadList,
         IData,
-        --         ListData,
-        --        MapData,
+        ListData,
+        MapData,
         NullList,
-        -- SerialiseData,
+        SerialiseData,
         SndPair,
-        TailList
-        -- UnBData
-        -- UnConstrData,
-        -- UnIData
-        -- UnListData
-        -- UnMapData
+        TailList,
+        UnBData,
+        UnConstrData,
+        UnIData,
+        UnListData,
+        UnMapData
       ),
+    SixArgFunc (CaseData, ChooseData),
     ThreeArgFunc (CaseList, ChooseList),
-    TwoArgFunc (MkCons),
+    TwoArgFunc (ConstrData, EqualsData, MkCons, MkPairData),
     typeOneArgFunc,
     typeSixArgFunc,
     typeThreeArgFunc,
@@ -88,25 +89,33 @@ main =
               testCase "HeadList" unitHeadList,
               testCase "TailList" unitTailList,
               testCase "NullList" unitNullList,
-              --              testCase "MapData" unitMapData,
-              -- testCase "ListData" unitListData,
+              testCase "MapData" unitMapData,
+              testCase "ListData" unitListData,
               testCase "IData" unitIData,
-              testCase "BData" unitBData
-              -- testCase "UnConstrData" unitUnConstrData,
-              -- testCase "UnMapData" unitUnMapData,
-              -- testCase "UnListData" unitUnListData,
-              -- testCase "UnIData" unitUnIData,
-              -- testCase "UnBData" unitUnBData,
-              -- testCase "SerialiseData" unitSerialiseData
+              testCase "BData" unitBData,
+              testCase "UnConstrData" unitUnConstrData,
+              testCase "UnMapData" unitUnMapData,
+              testCase "UnListData" unitUnListData,
+              testCase "UnIData" unitUnIData,
+              testCase "UnBData" unitUnBData,
+              testCase "SerialiseData" unitSerialiseData
             ],
           testGroup
             "Two arguments"
-            [ testCase "MkCons" unitMkCons
+            [ testCase "MkCons" unitMkCons,
+              testCase "ConstrData" unitConstrData,
+              testCase "EqualsData" unitEqualsData,
+              testCase "MkPairData" unitMkPairData
             ],
           testGroup
             "Three arguments"
             [ testCase "ChooseList" unitChooseList,
               testCase "CaseList" unitCaseList
+            ],
+          testGroup
+            "Six arguments"
+            [ testCase "ChooseData" unitChooseData,
+              testCase "CaseData" unitCaseData
             ]
         ]
     ]
@@ -162,20 +171,16 @@ unitNullList = withRenamedComp (typeOneArgFunc NullList) $ \renamedFunT ->
   withRenamedVals [Datatype "List" . Vector.singleton $ integerT] $
     tryAndApply boolT renamedFunT
 
-{-
 unitMapData :: IO ()
 unitMapData = withRenamedComp (typeOneArgFunc MapData) $ \renamedFunT ->
   let pairDataT = Datatype "Pair" . Vector.fromList $ [dataT, dataT]
-   in withRenamedVals (Identity . Datatype "List" . Vector.singleton $ pairDataT) $ \(Identity renamedArgT) ->
-        tryAndApply1 dataT renamedFunT renamedArgT
--}
+   in withRenamedVals [Datatype "List" . Vector.singleton $ pairDataT] $
+        tryAndApply dataT renamedFunT
 
-{-
 unitListData :: IO ()
 unitListData = withRenamedComp (typeOneArgFunc ListData) $ \renamedFunT ->
-  withRenamedVals (Identity . Datatype "List" . Vector.singleton $ dataT) $ \(Identity renamedArgT) ->
-    tryAndApply1 dataT renamedFunT renamedArgT
--}
+  withRenamedVals [Datatype "List" . Vector.singleton $ dataT] $
+    tryAndApply dataT renamedFunT
 
 unitIData :: IO ()
 unitIData = withRenamedComp (typeOneArgFunc IData) $ \renamedFunT ->
@@ -185,56 +190,55 @@ unitBData :: IO ()
 unitBData = withRenamedComp (typeOneArgFunc BData) $ \renamedFunT ->
   withRenamedVals [byteStringT] $ tryAndApply dataT renamedFunT
 
-{-
 unitUnConstrData :: IO ()
 unitUnConstrData = withRenamedComp (typeOneArgFunc UnConstrData) $ \renamedFunT ->
   withRenamedVals (Identity dataT) $ \(Identity renamedArgT) ->
     let listDataT = Datatype "List" . Vector.singleton $ dataT
         returnT = Datatype "Pair" . Vector.fromList $ [integerT, listDataT]
-     in tryAndApply1 returnT renamedFunT renamedArgT
--}
+     in tryAndApply returnT renamedFunT [renamedArgT]
 
-{-
 unitUnMapData :: IO ()
 unitUnMapData = withRenamedComp (typeOneArgFunc UnMapData) $ \renamedFunT ->
   withRenamedVals (Identity dataT) $ \(Identity renamedArgT) ->
     let pairDataT = Datatype "Pair" . Vector.fromList $ [dataT, dataT]
         listPairDataT = Datatype "List" . Vector.singleton $ pairDataT
-     in tryAndApply1 listPairDataT renamedFunT renamedArgT
--}
+     in tryAndApply listPairDataT renamedFunT [renamedArgT]
 
-{-
 unitUnListData :: IO ()
 unitUnListData = withRenamedComp (typeOneArgFunc UnListData) $ \renamedFunT ->
-  withRenamedVals (Identity dataT) $ \(Identity renamedArgT) ->
-    tryAndApply1 (Datatype "List" . Vector.singleton $ dataT) renamedFunT renamedArgT
--}
+  withRenamedVals [dataT] $
+    tryAndApply (Datatype "List" . Vector.singleton $ dataT) renamedFunT
 
-{-
 unitUnIData :: IO ()
 unitUnIData = withRenamedComp (typeOneArgFunc UnIData) $ \renamedFunT ->
-  withRenamedVals (Identity dataT) $ \(Identity renamedArgT) ->
-    tryAndApply1 integerT renamedFunT renamedArgT
--}
+  withRenamedVals [dataT] $ tryAndApply integerT renamedFunT
 
-{-
 unitUnBData :: IO ()
 unitUnBData = withRenamedComp (typeOneArgFunc UnBData) $ \renamedFunT ->
-  withRenamedVals (Identity dataT) $ \(Identity renamedArgT) ->
-    tryAndApply1 byteStringT renamedFunT renamedArgT
--}
+  withRenamedVals [dataT] $ tryAndApply byteStringT renamedFunT
 
-{-
 unitSerialiseData :: IO ()
 unitSerialiseData = withRenamedComp (typeOneArgFunc SerialiseData) $ \renamedFunT ->
-  withRenamedVals (Identity dataT) $ \(Identity renamedArgT) ->
-    tryAndApply1 byteStringT renamedFunT renamedArgT
--}
+  withRenamedVals [dataT] $ tryAndApply byteStringT renamedFunT
 
 unitMkCons :: IO ()
 unitMkCons = withRenamedComp (typeTwoArgFunc MkCons) $ \renamedFunT ->
   let listT = Datatype "List" . Vector.singleton $ integerT
    in withRenamedVals [integerT, listT] $ tryAndApply listT renamedFunT
+
+unitConstrData :: IO ()
+unitConstrData = withRenamedComp (typeTwoArgFunc ConstrData) $ \renamedFunT ->
+  let listT = Datatype "List" . Vector.singleton $ dataT
+   in withRenamedVals [integerT, listT] $ tryAndApply dataT renamedFunT
+
+unitEqualsData :: IO ()
+unitEqualsData = withRenamedComp (typeTwoArgFunc EqualsData) $ \renamedFunT ->
+  withRenamedVals [dataT, dataT] $ tryAndApply boolT renamedFunT
+
+unitMkPairData :: IO ()
+unitMkPairData = withRenamedComp (typeTwoArgFunc MkPairData) $ \renamedFunT ->
+  let pairDataT = Datatype "Pair" . Vector.fromList $ [dataT, dataT]
+   in withRenamedVals [dataT, dataT] $ tryAndApply pairDataT renamedFunT
 
 unitChooseList :: IO ()
 unitChooseList = withRenamedComp (typeThreeArgFunc ChooseList) $ \renamedFunT ->
@@ -248,6 +252,24 @@ unitCaseList = withRenamedComp (typeThreeArgFunc CaseList) $ \renamedFunT ->
       thunkT = ThunkT $ Comp0 $ integerT :--:> listT :--:> ReturnT byteStringT
    in withRenamedVals [byteStringT, thunkT, listT] $
         tryAndApply byteStringT renamedFunT
+
+unitChooseData :: IO ()
+unitChooseData = withRenamedComp (typeSixArgFunc ChooseData) $ \renamedFunT ->
+  withRenamedVals [dataT, integerT, integerT, integerT, integerT, integerT] $
+    tryAndApply integerT renamedFunT
+
+unitCaseData :: IO ()
+unitCaseData = withRenamedComp (typeSixArgFunc CaseData) $ \renamedFunT ->
+  let listDataT = Datatype "List" . Vector.singleton $ dataT
+      pairDataT = Datatype "Pair" . Vector.fromList $ [dataT, dataT]
+      listPairDataT = Datatype "List" . Vector.singleton $ pairDataT
+      constrThunkT = ThunkT $ Comp0 $ integerT :--:> listDataT :--:> ReturnT integerT
+      mapThunkT = ThunkT $ Comp0 $ listPairDataT :--:> ReturnT integerT
+      listThunkT = ThunkT $ Comp0 $ listDataT :--:> ReturnT integerT
+      integerThunkT = ThunkT $ Comp0 $ integerT :--:> ReturnT integerT
+      byteStringThunkT = ThunkT $ Comp0 $ byteStringT :--:> ReturnT integerT
+   in withRenamedVals [constrThunkT, mapThunkT, listThunkT, integerThunkT, byteStringThunkT, dataT] $
+        tryAndApply integerT renamedFunT
 
 -- Helpers
 

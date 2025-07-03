@@ -50,28 +50,29 @@ data TypeAppError
     LeakingWildcard Word64 Int (Index "tyvar")
   | -- | We were given too many arguments.
     ExcessArgs (CompT Renamed) (Vector (Maybe (ValT Renamed)))
-  | -- \| We weren't given enough arguments.
-
-    -- | @since 1.1.0
+  | -- | We weren't given enough arguments.
+    --
+    -- @since 1.1.0
     InsufficientArgs Int (CompT Renamed) [Maybe (ValT Renamed)]
   | -- | The expected type (first field) and actual type (second field) do not
     -- unify.
     DoesNotUnify (ValT Renamed) (ValT Renamed)
-  | -- \| No datatype info associated with requested TyName
-
-    -- | @since 1.1.0
+  | -- | No datatype info associated with requested TyName
+    --
+    -- @since 1.1.0
     NoDatatypeInfo TyName
-  | -- | No BB form. The only datatypes which should lack one are those isomorphic to `Void`
+  | -- | No BB form. The only datatypes which should lack one are those isomorphic to `Void`.
+    --
     -- @since 1.1.0
     NoBBForm TyName
-  | -- \| Datatype renaming failed.
-
-    -- | @since 1.1.0
+  | -- | Datatype renaming failed.
+    --
+    -- @since 1.1.0
     DatatypeInfoRenameFailed TyName RenameError
-  | -- \| Something happened that definitely should not have. For right now, this means: The BB form of a datatype isn't a thunk
-    --   (but it might be useful to keep this around as a catchall for things that really shouldn't happen)
-
-    -- | @since 1.1.0
+  | -- | Something happened that definitely should not have. For right now, this means: The BB form of a datatype isn't a thunk
+    --   (but it might be useful to keep this around as a catchall for things that really shouldn't happen).
+    --
+    -- @since 1.1.0
     ImpossibleHappened Text
   deriving stock
     ( -- | @since 1.0.0
@@ -309,7 +310,6 @@ unify expected actual =
           then noSubUnify
           else unificationError
       _ -> unificationError
-
     expectDatatype :: TyName -> Vector (ValT Renamed) -> UnifyM (Map (Index "tyvar") (ValT Renamed))
     -- Datatypes unify with wildcards or unifiables, or other "suitable" instances of the same datatype.
     -- Suitability with other datatypes is determined by converting to BB form, then concretifying
@@ -328,20 +328,16 @@ unify expected actual =
               bbFormConcreteA <- concretify bbForm args'
               unify bbFormConcreteE bbFormConcreteA
         _ -> unificationError
-
     concretify :: ValT Renamed -> Vector (ValT Renamed) -> UnifyM (ValT Renamed)
     concretify (ThunkT (CompT count (CompTBody fn))) args = fixUp $ ThunkT (CompT count (CompTBody newFn))
       where
         indexedArgs :: [(Index "tyvar", ValT Renamed)]
         indexedArgs = Vector.toList $ Vector.imap (\i x -> (fromJust . preview intIndex $ i, x)) args
-
         newFn :: NonEmptyVector (ValT Renamed)
         newFn = go indexedArgs <$> fn
-
         go :: [(Index "tyvar", ValT Renamed)] -> ValT Renamed -> ValT Renamed
         go subs arg = foldl' (\val (i, concrete) -> substitute i concrete val) arg subs
     concretify _ _ = throwError $ ImpossibleHappened "bbForm is not a thunk"
-
     reconcile ::
       Map (Index "tyvar") (ValT Renamed) ->
       Map (Index "tyvar") (ValT Renamed) ->
