@@ -21,7 +21,12 @@ import Covenant.DeBruijn (DeBruijn)
 import Covenant.Index (Index)
 import Covenant.Internal.KindCheck (EncodingArgErr)
 import Covenant.Internal.Rename (RenameError)
-import Covenant.Internal.Type (AbstractTy, CompT, ValT)
+import Covenant.Internal.Type
+  ( AbstractTy,
+    BuiltinFlatT,
+    CompT,
+    ValT,
+  )
 import Covenant.Internal.Unification (TypeAppError)
 import Covenant.Prim (OneArgFunc, SixArgFunc, ThreeArgFunc, TwoArgFunc)
 import Data.Kind (Type)
@@ -118,6 +123,28 @@ data CovenantTypeError
     --
     -- @since 1.0.0
     WrongReturnType (ValT AbstractTy) (ValT AbstractTy)
+  | -- | The first argument to a catamorphism wasn't an algebra.
+    --
+    -- @since 1.1.0
+    CataNotAnAlgebra ASGNodeType
+  | -- | The second argument to a catamorphism wasn't a value type.
+    --
+    -- @since 1.1.0
+    CataApplyToNonValT ASGNodeType
+  | -- | The second argument to a catamorphism is a builtin type, but not one
+    -- we can eliminate with a catamorphism.
+    --
+    -- @since 1.1.0
+    CataWrongBuiltinType BuiltinFlatT
+  | -- | The second argument to a catamorphism is a value type, but not one we
+    -- can eliminate with a catamorphism. Usually, this means it's a variable.
+    --
+    -- @since 1.1.0
+    CataWrongValT (ValT AbstractTy)
+  | -- | The provided algebra is not suitable for the given type.
+    --
+    -- @since 1.1.0
+    CataUnsuitable (CompT AbstractTy) (ValT AbstractTy)
   | -- @since 1.1.0
 
     -- | Wraps an encoding argument mismatch error from KindCheck
@@ -239,6 +266,8 @@ data ValNodeInfo
   = LitInternal AConstant
   | AppInternal Id (Vector Ref)
   | ThunkInternal Id
+  | -- | @sicne 1.1.0
+    CataInternal Ref Ref
   deriving stock
     ( -- | @since 1.0.0
       Eq,
