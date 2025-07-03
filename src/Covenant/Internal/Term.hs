@@ -19,6 +19,7 @@ import Control.Monad.HashCons (MonadHashCons (lookupRef))
 import Covenant.Constant (AConstant)
 import Covenant.DeBruijn (DeBruijn)
 import Covenant.Index (Index)
+import Covenant.Internal.KindCheck (EncodingArgErr)
 import Covenant.Internal.Rename (RenameError)
 import Covenant.Internal.Type
   ( AbstractTy,
@@ -144,6 +145,10 @@ data CovenantTypeError
     --
     -- @since 1.1.0
     CataUnsuitable (CompT AbstractTy) (ValT AbstractTy)
+  | -- @since 1.1.0
+
+    -- | Wraps an encoding argument mismatch error from KindCheck
+    EncodingError (EncodingArgErr AbstractTy)
   deriving stock
     ( -- | @since 1.0.0
       Eq,

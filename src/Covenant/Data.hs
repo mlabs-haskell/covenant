@@ -238,21 +238,22 @@ mkBBF' (DataDeclaration tn numVars ctors _)
     mkBBCtor (Constructor _ args)
       | V.null args = pure topLevelOut
       | otherwise = do
-          elimArgs <- traverse fixArg args
+          elimArgs <- fmap incAbstractionDB <$> traverse fixArg args
           elimArgs' <- lift . NEV.fromVector $ elimArgs
           let out = Abstraction $ BoundAt (S Z) outIx
           pure . ThunkT . CompT count0 . CompTBody . flip NEV.snoc out $ elimArgs'
 
     fixArg :: ValT AbstractTy -> ExceptT BBFError Maybe (ValT AbstractTy)
-    fixArg (Abstraction (BoundAt db indx)) = pure . Abstraction $ BoundAt (S db) indx
     fixArg arg = do
       let isDirectRecursiveTy = runReader (isRecursiveChildOf tn arg) 0
       if isDirectRecursiveTy
-        then pure $ Abstraction (BoundAt (S Z) outIx)
+        then pure $ Abstraction (BoundAt Z outIx)
         else case arg of
           Datatype tn' dtArgs
             | tn == tn' -> throwError $ InvalidRecursion tn arg
-            | otherwise -> pure . Datatype tn' $ incAbstractionDB <$> dtArgs
+            | otherwise -> do
+                dtArgs' <- traverse fixArg dtArgs
+                pure . Datatype tn' $ dtArgs'
           _ -> pure arg
 
 {- Note (Sean, 14/05/25): Re  DeBruijn indices:
