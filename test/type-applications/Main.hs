@@ -88,7 +88,8 @@ main =
           testCase "nested datatypes" unitNestedDatatypes,
           testProperty "thunk with datatype argument" propThunkWithDatatype,
           testProperty "concrete thunk with datatype argument" propConcreteThunkWithDatatype,
-          testProperty "thunk with unifiable and datatype argument" propThunkUnifiableWithDatatype
+          testProperty "thunk with unifiable and datatype argument" propThunkUnifiableWithDatatype,
+          testProperty "thunk with unifiable datatype" propThunkUnifiableDatatype
         ]
     ]
   where
@@ -515,6 +516,23 @@ propThunkUnifiableWithDatatype = forAllShrink arbitrary shrink $ \(Concrete aT, 
       funThunkArg = ThunkT $ Comp1 $ tyvar (S Z) ix0 :--:> maybeT :--:> ReturnT aT
       funT = Comp1 $ funThunkArg :--:> ReturnT aT
       thunkT = ThunkT $ Comp0 $ aT :--:> maybeT :--:> ReturnT aT
+   in withRenamedComp funT $ \f ->
+        withRenamedVals (Identity thunkT) $ \(Identity argT) ->
+          withRenamedVals (Identity aT) $ \(Identity aT') ->
+            let expected = Right aT'
+                actual = checkApp tyAppTestDatatypes f [Just argT]
+             in expected === actual
+
+-- Randomly pick concrete type A, then try to apply to `forall a . ((Maybe A ->
+-- !a) -> !a)` the argument `(Maybe A -> !A)`. Result should unify and produce
+-- `A`.
+propThunkUnifiableDatatype :: Property
+propThunkUnifiableDatatype = forAllShrink arbitrary shrink $ \(Concrete aT) ->
+  let -- maybeTUnifiable = Datatype "Maybe" . Vector.singleton $ tyvar (S Z) ix0
+      maybeTConcrete = Datatype "Maybe" . Vector.singleton $ aT
+      funThunkArg = ThunkT $ Comp0 $ maybeTConcrete :--:> ReturnT (tyvar (S Z) ix0)
+      funT = Comp1 $ funThunkArg :--:> ReturnT (tyvar Z ix0)
+      thunkT = ThunkT $ Comp0 $ maybeTConcrete :--:> ReturnT aT
    in withRenamedComp funT $ \f ->
         withRenamedVals (Identity thunkT) $ \(Identity argT) ->
           withRenamedVals (Identity aT) $ \(Identity aT') ->
