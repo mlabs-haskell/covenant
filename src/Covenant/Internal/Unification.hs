@@ -353,4 +353,13 @@ unify expected actual =
       Merge.mergeA
         Merge.preserveMissing
         Merge.preserveMissing
-        (Merge.zipWithAMatched $ \_ l r -> l <$ unless (l == r) unificationError)
+        (Merge.zipWithAMatched combineBindings)
+    combineBindings :: Index "tyvar" -> ValT Renamed -> ValT Renamed -> UnifyM (ValT Renamed)
+    combineBindings _ old new =
+      if old == new
+        then pure old
+        else case old of
+          Abstraction (Unifiable _) -> pure new
+          _ -> case new of
+            Abstraction (Unifiable _) -> pure old
+            _ -> unificationError
