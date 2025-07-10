@@ -1,15 +1,28 @@
 {-# LANGUAGE ViewPatterns #-}
 
+-- |
+-- Module: Covenant.Data
+-- Copyright: (C) MLabs 2025
+-- License: Apache 2.0
+-- Maintainer: koz@mlabs.city, sean@mlabs.city
+--
+-- Information about datatype definitions, and various ways to interact with
+-- them. Most of the useful functionality is in 'DatatypeInfo' and its optics.
+--
+-- @since 1.1.0
 module Covenant.Data
-  ( mkBaseFunctor,
+  ( -- * Types
+    DatatypeInfo (DatatypeInfo),
+
+    -- * Functions
+    mkDatatypeInfo,
+    mkBaseFunctor,
     isRecursiveChildOf,
     allComponentTypes,
     hasRecursive,
     mkBBF,
     noPhantomTyVars,
     everythingOf,
-    DatatypeInfo (DatatypeInfo),
-    mkDatatypeInfo,
   )
 where
 
@@ -273,10 +286,13 @@ mkBBF' (DataDeclaration tn numVars ctors _)
 {- Here for lack of a better place to put it (has to be available to Unification and ASG)
 -}
 
--- | Packages up all of the relevation datatype information needed
--- for the ASGBuilder. Note that only certain datatypes have a BB or BB/BF form
--- (we do not generate forms that are "useless")
--- NOTE: `var` should either be `AbstractTy` or `Renamed` in normal usage
+-- | Contains essential information about datatype definitions. Most of the
+-- time, you want to use this type via its optics, rather than directly.
+--
+-- In pretty much any case imaginable, the @var@ type variable will be one of
+-- 'AbstractTy' or 'Renamed'.
+--
+-- @since 1.1.0
 data DatatypeInfo (var :: Type)
   = DatatypeInfo
   { _originalDecl :: DataDeclaration var,
@@ -291,17 +307,9 @@ data DatatypeInfo (var :: Type)
       Show
     )
 
-mkDatatypeInfo :: DataDeclaration AbstractTy -> Either BBFError (DatatypeInfo AbstractTy)
-mkDatatypeInfo decl = DatatypeInfo decl <$> baseFStuff <*> mkBBF decl
-  where
-    -- baseFStuff :: Either BBFError (Maybe (DataDeclaration AbstractTy, ValT AbstractTy))
-    baseFStuff =
-      let baseFDecl = runReader (mkBaseFunctor decl) 0
-          baseBBF = case baseFDecl of
-            Nothing -> Right Nothing
-            Just d -> mkBBF d
-       in (bisequence . (baseFDecl,) <$> baseBBF)
-
+-- | The original declaration of the data type.
+--
+-- @since 1.1.0
 instance
   (k ~ A_Lens, a ~ DataDeclaration var, b ~ DataDeclaration var) =>
   LabelOptic "originalDecl" k (DatatypeInfo var) (DatatypeInfo var) a b
@@ -312,6 +320,10 @@ instance
       (\(DatatypeInfo ogDecl _ _) -> ogDecl)
       (\(DatatypeInfo _ b c) ogDecl -> DatatypeInfo ogDecl b c)
 
+-- | The base functor for this data type, if it exists. Types which are not
+-- self-recursive lack base functors.
+--
+-- @since 1.1.0
 instance
   (k ~ A_Lens, a ~ Maybe (DataDeclaration var, ValT var), b ~ Maybe (DataDeclaration var, ValT var)) =>
   LabelOptic "baseFunctor" k (DatatypeInfo var) (DatatypeInfo var) a b
@@ -322,6 +334,11 @@ instance
       (\(DatatypeInfo _ baseF _) -> baseF)
       (\(DatatypeInfo a _ c) baseF -> DatatypeInfo a baseF c)
 
+-- | The Boehm-Berrarducci form of this type, if it exists. Types with no
+-- constructors (that is, types without inhabitants) lack Boehm-Berrarducci
+-- forms.
+--
+-- @since 1.1.0
 instance
   (k ~ A_Lens, a ~ Maybe (ValT var), b ~ Maybe (ValT var)) =>
   LabelOptic "bbForm" k (DatatypeInfo var) (DatatypeInfo var) a b
@@ -332,9 +349,30 @@ instance
       (\(DatatypeInfo _ _ bb) -> bb)
       (\(DatatypeInfo a b _) bb -> DatatypeInfo a b bb)
 
+-- | The base functor Boehm-Berrarducci form of this type, if it exists. A type
+-- must have both a base functor and a Boehm-Berrarducci form to have a base
+-- functor Boehm-Berrarducci form. In other words, they must have at least one
+-- constructor and be self-recursive.
+--
+-- @since 1.1.0
 instance
   (k ~ A_Fold, a ~ ValT var, b ~ ValT var) =>
   LabelOptic "bbBaseF" k (DatatypeInfo var) (DatatypeInfo var) a b
   where
   {-# INLINEABLE labelOptic #-}
   labelOptic = #baseFunctor % folded % _2
+
+-- | Given a declaration of a datatype, either produce its datatype info, or
+-- fail.
+--
+-- @since 1.1.0
+mkDatatypeInfo :: DataDeclaration AbstractTy -> Either BBFError (DatatypeInfo AbstractTy)
+mkDatatypeInfo decl = DatatypeInfo decl <$> baseFStuff <*> mkBBF decl
+  where
+    baseFStuff :: Either BBFError (Maybe (DataDeclaration AbstractTy, ValT AbstractTy))
+    baseFStuff =
+      let baseFDecl = runReader (mkBaseFunctor decl) 0
+          baseBBF = case baseFDecl of
+            Nothing -> Right Nothing
+            Just d -> mkBBF d
+       in (bisequence . (baseFDecl,) <$> baseBBF)

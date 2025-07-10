@@ -3,9 +3,10 @@
 {-# HLINT ignore "Use camelCase" #-}
 module Main (main) where
 
+import Covenant.ASG (defaultDatatypes)
+import Covenant.Data ()
 import Covenant.DeBruijn (DeBruijn (Z))
 import Covenant.Index (count0, count1, ix0)
-import Covenant.Test (ledgerTypes)
 import Covenant.Type
   ( AbstractTy (BoundAt),
     BuiltinFlatT (IntegerT),
@@ -23,7 +24,7 @@ import Covenant.Type
     tyCon,
     tyvar,
   )
-import Data.Map qualified as M
+import Data.Map.Strict qualified as M
 import Data.Vector qualified as V
 import Optics.Core (view)
 import Test.Tasty (TestTree, defaultMain, testGroup)
@@ -48,8 +49,8 @@ checkLedgerTypes =
   testCase "kindCheckLedgerTypes"
     . either (assertFailure . show) pure
     . checkDataDecls
-    . foldr (\x acc -> M.insert (view #datatypeName x) x acc) M.empty
-    $ ledgerTypes
+    . fmap (view #originalDecl)
+    $ defaultDatatypes
 
 encodingCheck :: String -> [DataDeclaration AbstractTy] -> ValT AbstractTy -> TestTree
 encodingCheck testNm tyDict valT =

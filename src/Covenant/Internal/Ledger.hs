@@ -88,6 +88,13 @@ ledgerTypes =
 
 -- Builtins. These aren't "real" ADTs and their unique encoding strategies indicate special handling
 
+-- Note (Koz, 11/07/25): This has a Haddock, and is versioned, because
+-- Covenant.Test exposes it. If we ever stop doing this, we can remove this
+-- Haddock.
+
+-- | The onchain list type.
+--
+-- @since 1.1.0
 list :: DataDeclaration AbstractTy
 list =
   mkDecl $
@@ -665,9 +672,29 @@ b = Abstraction (BoundAt Z ix1)
 
 -- For tests, much easier to define this here w/ the helpers
 
-tree :: DataDeclaration AbstractTy
-tree = mkDecl $ Decl "Tree" count1 [Ctor "Bin" [tycon "Tree" [a], tycon "Tree" [a]], Ctor "Tip" [a]] (PlutusData ConstrData)
+-- Note (Koz, 11/07/25): Same as for `list`.
 
+-- | A datatype equivalent to
+--
+-- @data Tree a = Bin (Tree a) (Tree a) | Tip a@
+--
+-- @since 1.1.0
+tree :: DataDeclaration AbstractTy
+tree =
+  mkDecl $
+    Decl
+      "Tree"
+      count1
+      [ Ctor "Bin" [tycon "Tree" [a], tycon "Tree" [a]],
+        Ctor "Tip" [a]
+      ]
+      (PlutusData ConstrData)
+
+-- | A datatype equivalent to
+--
+-- @data WeirderList a = Uncons (Maybe (a, WeirderList a))@
+--
+-- @since 1.1.0
 weirderList :: DataDeclaration AbstractTy
 weirderList =
   mkDecl $

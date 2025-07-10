@@ -1,22 +1,36 @@
 {-# LANGUAGE CPP #-}
 {-# LANGUAGE PolyKinds #-}
 
+-- |
+-- Module: Covenant.Test
+-- Copyright: (C) MLabs 2025
+-- License: Apache 2.0
+-- Maintainer: koz@mlabs.city, sean@mlabs.city
+--
+-- Various utilities designed to help test Covenant.
+--
+-- = Note
+--
+-- This is probably not that useful to end users of Covenant, but needs to be
+-- exposed so the tests can use this functionality.
+--
+-- @since 1.0.0
 module Covenant.Test
-  ( Concrete (Concrete),
-    DataDeclSet (DataDeclSet),
+  ( -- * QuickCheck data wrappers
+    Concrete (Concrete),
     DataDeclFlavor (ConcreteDecl, ConcreteNestedDecl, SimpleRecursive, Poly1, Poly1PolyThunks),
+    DataDeclSet (DataDeclSet),
+
+    -- * Functions
+
+    -- ** Lifted QuickCheck functions
     chooseInt,
     scale,
-    testConcrete,
-    testNested,
-    testRecConcrete,
-    testPoly1,
-    testBaseF,
-    testNonConcrete,
+
+    -- ** 'DataDeclSet' functionality
     prettyDeclSet,
-    testBBF,
-    testDatatypes,
-    ledgerTypes,
+
+    -- ** Test helpers
     failLeft,
     tyAppTestDatatypes,
     list,
@@ -29,9 +43,7 @@ where
 import Data.Foldable (foldl')
 #endif
 import Control.Applicative ((<|>))
-import Control.Exception (throwIO)
 import Control.Monad (void)
-import Control.Monad.Reader (MonadTrans (lift), runReader)
 import Control.Monad.State.Strict
   ( MonadState (get, put),
     State,
@@ -39,7 +51,12 @@ import Control.Monad.State.Strict
     gets,
     modify,
   )
-import Covenant.Data (DatatypeInfo, mkBBF, mkBaseFunctor, mkDatatypeInfo, noPhantomTyVars)
+import Control.Monad.Trans (MonadTrans (lift))
+import Covenant.Data
+  ( DatatypeInfo,
+    mkDatatypeInfo,
+    noPhantomTyVars,
+  )
 import Covenant.DeBruijn (DeBruijn (Z), asInt)
 import Covenant.Index
   ( Count,
@@ -51,9 +68,18 @@ import Covenant.Index
     ix0,
     ix1,
   )
-import Covenant.Internal.Ledger (CtorBuilder (Ctor), DeclBuilder (Decl), ledgerTypes, list, maybeT, mkDecl, pair, tree, weirderList)
+import Covenant.Internal.Ledger
+  ( CtorBuilder (Ctor),
+    DeclBuilder (Decl),
+    list,
+    maybeT,
+    mkDecl,
+    pair,
+    tree,
+    weirderList,
+  )
 import Covenant.Internal.PrettyPrint (ScopeBoundary, prettyStr)
-import Covenant.Internal.Rename (renameDataDecl, renameValT)
+import Covenant.Internal.Rename (renameDataDecl)
 import Covenant.Internal.Type
   ( Constructor (Constructor),
     ConstructorName (ConstructorName),
@@ -83,7 +109,6 @@ import Covenant.Type
     runRenameM,
   )
 import Data.Coerce (coerce)
-import Data.Foldable (forM_)
 import Data.Kind (Type)
 import Data.Map.Strict (Map)
 import Data.Map.Strict qualified as M
@@ -96,16 +121,25 @@ import Data.Vector (Vector)
 import Data.Vector qualified as Vector
 import GHC.Exts (fromListN)
 import GHC.Word (Word32)
-import Optics.Core (A_Lens, LabelOptic (labelOptic), folded, lens, over, preview, review, set, toListOf, view, (%))
-import Prettyprinter (hardline, pretty)
-import Prettyprinter.Render.Text (putDoc)
+import Optics.Core
+  ( A_Lens,
+    LabelOptic (labelOptic),
+    folded,
+    lens,
+    over,
+    preview,
+    review,
+    set,
+    toListOf,
+    view,
+    (%),
+  )
 import Test.QuickCheck
   ( Arbitrary (arbitrary, shrink),
     Arbitrary1 (liftArbitrary, liftShrink),
     Gen,
     elements,
     frequency,
-    generate,
     sized,
     suchThat,
     vectorOf,
@@ -162,8 +196,6 @@ instance Arbitrary Concrete where
                 (10, pure . BuiltinFlat $ BLS12_381_G2_ElementT),
                 (10, pure . BuiltinFlat $ BLS12_381_MlResultT),
                 (2, ThunkT . Comp0 <$> (ArgsAndResult <$> liftArbitrary (go (size `quot` 4)) <*> go (size `quot` 4)))
-                -- This is probably right but things will break if we generate datatypes at this stage
-                -- ,  Datatype <$> arbitrary <*> pure count0 <*> liftArbitrary (go (size `quot` 4))
               ]
   {-# INLINEABLE shrink #-}
   shrink (Concrete v) =
@@ -179,11 +211,120 @@ instance Arbitrary Concrete where
           pure (ArgsAndResult args' result) <|> pure (ArgsAndResult args result')
       -- Can't shrink this
       BuiltinFlat _ -> []
-      -- NOTE @Koz: I need this here to write some other instances even though `Concrete` can't generate this
       Datatype tn args ->
         Datatype tn <$> do
           let argsList = Vector.toList args
           (fmap (Vector.fromList . coerce) . shrink . fmap Concrete) argsList
+
+-- | A \'description type\' designed for use with 'DataDeclSet' to describe what
+-- kind of types it contains.
+--
+-- @since 1.1.0
+data DataDeclFlavor
+  = -- | All constructor arguments are concrete and the declaration is monomorphic.
+    --
+    -- @since 1.1.0
+    ConcreteDecl
+  | -- | As 'ConcreteDecl', but can re-use already generated concrete declarations
+    -- in the context to make nested types.
+    --
+    -- @since 1.1.0
+    ConcreteNestedDecl
+  | -- | Recursive, monomorphic type (such as @data IntList = End | More Int IntList@).
+    --
+    -- @since 1.1.0
+    SimpleRecursive
+  | -- | Polymorphic types in one variable, which may or may not be recursive.
+    --
+    -- @since 1.1.0
+    Poly1
+  | -- | As 'Poly1', but may have further polymorphism via thunks.
+    --
+    -- @since 1.1.0
+    Poly1PolyThunks
+
+-- | Helper type to generate datatype definitions. Specifically, this stores
+-- already-generated datatype declarations for our (re)use when generating.
+--
+-- @since 1.1.0
+newtype DataDeclSet (flavor :: DataDeclFlavor) = DataDeclSet [DataDeclaration AbstractTy]
+
+-- @since 1.1.0
+instance Arbitrary (DataDeclSet 'ConcreteDecl) where
+  arbitrary = coerce $ genDataList genConcreteDataDecl
+  shrink = coerce . shrinkDataDecls . coerce
+
+-- @since 1.1.0
+instance Arbitrary (DataDeclSet 'ConcreteNestedDecl) where
+  arbitrary = coerce $ genDataList genNestedConcrete
+  shrink = coerce . shrinkDataDecls . coerce
+
+-- @since 1.1.0
+instance Arbitrary (DataDeclSet 'SimpleRecursive) where
+  arbitrary = coerce $ genDataList genArbitraryRecursive
+  shrink = coerce . shrinkDataDecls . coerce
+
+-- @since 1.1.0
+instance Arbitrary (DataDeclSet 'Poly1) where
+  arbitrary = coerce $ genDataList genPolymorphic1Decl
+  shrink = coerce . shrinkDataDecls . coerce
+
+instance Arbitrary (DataDeclSet 'Poly1PolyThunks) where
+  arbitrary = coerce . runDataGenM $ do
+    -- If we don't have this we can't generate ctor args of the sort we want here.
+    -- I *think* we're very unlikely to get 10 unsuitable decls out of this
+    void $ GT.vectorOf 10 genPolymorphic1Decl
+    void $ GT.listOf genNonConcreteDecl
+    decls <- M.elems <$> gets (view #decls) -- simpler to just pluck them from the monadic context
+    pure $ filter noPhantomTyVars decls -- TODO/FIXME: We shouldn't have to filter here, better to catch things earlier
+  shrink = coerce . shrinkDataDecls . coerce
+
+-- | Prettyprinter for 'DataDeclSet'.
+--
+-- @since 1.1.0
+prettyDeclSet :: forall (a :: DataDeclFlavor). DataDeclSet a -> String
+prettyDeclSet (DataDeclSet decls) =
+  concatMap (\x -> (prettyStr . unsafeRename . renameDataDecl $ x) <> "\n\n") decls
+
+-- | The same as 'QC.chooseInt', but lifted to work in any 'MonadGen'.
+--
+-- @since 1.1.0
+chooseInt ::
+  forall (m :: Type -> Type).
+  (MonadGen m) => (Int, Int) -> m Int
+chooseInt bounds = GT.liftGen $ QC.chooseInt bounds
+
+-- | The same as 'QC.scale', but lifted to work in any 'MonadGen'.
+--
+-- @since 1.1.0
+scale ::
+  forall (m :: Type -> Type) (a :: Type).
+  (MonadGen m) => (Int -> Int) -> m a -> m a
+scale f g = GT.sized (\n -> GT.resize (f n) g)
+
+-- | If the argument is a 'Right', pass the assertion; otherwise, fail the
+-- assertion.
+--
+-- @since 1.1.0
+failLeft ::
+  forall (a :: Type) (b :: Type).
+  (Show a) =>
+  Either a b ->
+  IO b
+failLeft = either (assertFailure . show) pure
+
+-- | Small collection of datatypes needed to test type application logic.
+--
+-- @since 1.1.0
+tyAppTestDatatypes :: M.Map TyName (DatatypeInfo AbstractTy)
+tyAppTestDatatypes =
+  foldl' (\acc decl -> M.insert (view #datatypeName decl) (unsafeMkDatatypeInfo decl) acc) M.empty testDatatypes
+  where
+    unsafeMkDatatypeInfo d = case mkDatatypeInfo d of
+      Left err -> error (show err)
+      Right res -> res
+
+-- Helpers
 
 {- The state used by our datatype generators.
 -}
@@ -278,9 +419,6 @@ withBoundVars count act = do
 runDataGenM :: forall (a :: Type). DataGenM a -> Gen a
 runDataGenM (DataGenM ma) = (\x -> evalState x (DataGen M.empty Set.empty 0 M.empty M.empty)) <$> GT.runGenT ma
 
-chooseInt :: forall (m :: Type -> Type). (MonadGen m) => (Int, Int) -> m Int
-chooseInt bounds = GT.liftGen $ QC.chooseInt bounds
-
 -- Stupid helper, saves us from forgetting to update part of the state
 returnDecl :: DataDeclaration AbstractTy -> DataGenM (DataDeclaration AbstractTy)
 returnDecl od@(OpaqueData tn _) = modify (over #decls (M.insert tn od)) >> pure od
@@ -288,9 +426,6 @@ returnDecl decl@(DataDeclaration tyNm arity _ _) = do
   modify $ over #decls (M.insert tyNm decl)
   logArity tyNm arity
   pure decl
-
-scale :: forall (m :: Type -> Type) (a :: Type). (MonadGen m) => (Int -> Int) -> m a -> m a
-scale f g = GT.sized (\n -> GT.resize (f n) g)
 
 {- We need this outside of `returnDecl` to construct recursive polymorphic types, i.e. types where an argument to
    a constructor is the parent type applied to the type variables bound at the start of the declaration.
@@ -599,20 +734,7 @@ genNonConcreteDecl = flip GT.suchThat noPhantomTyVars . withBoundVars count1 $ d
    Misc Helpers and the Arbitrary instances
 -}
 
-{- This saves us from having to write *another* newtype for each set of a "flavor" of datatypes and doesn't have any real drawbacks -}
--- @since 1.1.0
-data DataDeclFlavor
-  = ConcreteDecl -- all ctor arguments are fully concrete and the declaration is monomorphic
-  | ConcreteNestedDecl -- all ctor arguments are fully concrete & declaration is monomorphic, but can reuse already-generated concrete decls present in the monadic context
-  | SimpleRecursive -- recursive but not polymorphic (e.g. data IntList = End | More Int IntList)
-  | Poly1 -- polymorphic 1 variable datatypes which may (or may not be) recursive
-  | Poly1PolyThunks -- Generates a polymorphic 1 variable datatypes which may contain other polymorphic arguments inside ThunkT args to the ctors
-  -- (Poly1 will always yield concrete ThunkT arguments, it's a subtle difference but relevant for base functor testing)
-  -- @since 1.1.0
-
-newtype DataDeclSet (flavor :: DataDeclFlavor) = DataDeclSet [DataDeclaration AbstractTy]
-
-{- NOTE @Koz: This is supposed to be a "generic" shrinker for datatypes. It *should* return two paths:
+{- NOTE: This is supposed to be a "generic" shrinker for datatypes. It *should* return two paths:
                 - One that shrinks the number of constructors
                 - One that shrinks the constructors
 
@@ -662,131 +784,14 @@ nonEmptySubVectors v = case Vector.uncons v of
 shrinkDataDecls :: [DataDeclaration AbstractTy] -> [[DataDeclaration AbstractTy]]
 shrinkDataDecls decls = liftShrink shrinkDataDecl decls <|> (shrinkDataDecl <$> decls)
 
-genDataN :: forall (a :: Type). Int -> DataGenM a -> Gen [a]
-genDataN n act = runDataGenM (GT.vectorOf n act)
-
 genDataList :: forall (a :: Type). DataGenM a -> Gen [a]
 genDataList = runDataGenM . GT.listOf
-
--- @since 1.1.0
-instance Arbitrary (DataDeclSet 'ConcreteDecl) where
-  arbitrary = coerce $ genDataList genConcreteDataDecl
-
-  shrink = coerce . shrinkDataDecls . coerce
-
--- @since 1.1.0
-instance Arbitrary (DataDeclSet 'ConcreteNestedDecl) where
-  arbitrary = coerce $ genDataList genNestedConcrete
-
-  shrink = coerce . shrinkDataDecls . coerce
-
--- @since 1.1.0
-instance Arbitrary (DataDeclSet 'SimpleRecursive) where
-  arbitrary = coerce $ genDataList genArbitraryRecursive
-
-  shrink = coerce . shrinkDataDecls . coerce
-
--- @since 1.1.0
-instance Arbitrary (DataDeclSet 'Poly1) where
-  arbitrary = coerce $ genDataList genPolymorphic1Decl
-
-  shrink = coerce . shrinkDataDecls . coerce
-
-instance Arbitrary (DataDeclSet 'Poly1PolyThunks) where
-  arbitrary = coerce . runDataGenM $ do
-    -- If we don't have this we can't generate ctor args of the sort we want here.
-    -- I *think* we're very unlikely to get 10 unsuitable decls out of this
-    void $ GT.vectorOf 10 genPolymorphic1Decl
-    void $ GT.listOf genNonConcreteDecl
-    decls <- M.elems <$> gets (view #decls) -- simpler to just pluck them from the monadic context
-    pure $ filter noPhantomTyVars decls -- TODO/FIXME: We shouldn't have to filter here, better to catch things earlier
-  shrink = coerce . shrinkDataDecls . coerce
-
-prettyDeclSet :: forall (a :: DataDeclFlavor). DataDeclSet a -> String
-prettyDeclSet (DataDeclSet decls) = concatMap (\x -> (prettyStr . unsafeRename . renameDataDecl $ x) <> "\n\n") decls
-
-{- Misc Repl testing utilities. I'd like to leave these here because I can't exactly have a test suite
-   to validate test generators, so inspection may be necessary if something goes wrong.
--}
-
--- Prettifies and prints n generated datatypes using the supplied generator.
-genPrettyDataN :: Int -> DataGenM (DataDeclaration AbstractTy) -> IO ()
-genPrettyDataN n dg = goPrint =<< generate (genDataN n dg)
-  where
-    goPrint :: [DataDeclaration AbstractTy] -> IO ()
-    goPrint [] = pure ()
-    goPrint (x : xs) = do
-      let x' = unsafeRename (renameDataDecl x)
-      putDoc $ pretty x' <> hardline <> hardline
-      goPrint xs
-
-testConcrete :: Int -> IO ()
-testConcrete n = genPrettyDataN n (coerce <$> genConcreteDataDecl)
-
-testNested :: Int -> IO ()
-testNested n = genPrettyDataN n (coerce <$> genNestedConcrete)
-
-testRecConcrete :: Int -> IO ()
-testRecConcrete n = genPrettyDataN n (coerce <$> genArbitraryRecursive)
-
-testPoly1 :: Int -> IO ()
-testPoly1 n = genPrettyDataN n (coerce <$> genPolymorphic1Decl)
-
-testNonConcrete :: Int -> IO ()
-testNonConcrete n = do
-  res <- generate $ runDataGenM (prep >> go n)
-  finalizeAndPrint res
-  where
-    prep :: DataGenM ()
-    prep = void $ GT.vectorOf 10 genPolymorphic1Decl
-
-    go :: Int -> DataGenM [DataDeclaration AbstractTy]
-    go n'
-      | n' <= 0 = M.elems <$> gets (view #decls)
-      | otherwise = genNonConcreteDecl >> go (n' - 1)
-
-    finalizeAndPrint :: [DataDeclaration AbstractTy] -> IO ()
-    finalizeAndPrint [] = pure ()
-    finalizeAndPrint (x : xs) = do
-      let x' = unsafeRename (renameDataDecl x)
-      putDoc $ pretty x' <> hardline <> hardline
-      finalizeAndPrint xs
 
 -- For convenience. Don't remove this, necessary for efficient development on future work
 unsafeRename :: forall (a :: Type). RenameM a -> a
 unsafeRename act = case runRenameM act of
   Left err -> error $ show err
   Right res -> res
-
--- crude base functor repl test, should be removed eventually in favor of a real test
-testBaseF :: IO ()
-testBaseF = do
-  samples <- generate $ genDataN 10 (coerce <$> genPolymorphic1Decl)
-  forM_ samples $ \decl -> do
-    let prettyIn = pretty $ unsafeRename (renameDataDecl decl)
-    putDoc $ hardline <> "INPUT:" <> hardline <> hardline <> prettyIn <> hardline <> hardline
-    let output = runReader (mkBaseFunctor decl) 0
-    case output of
-      Nothing -> putDoc "OUTPUT: Nothing (base functor not needed)"
-      Just outDecl -> do
-        let prettyOut = pretty $ unsafeRename (renameDataDecl outDecl)
-        putDoc $ "OUTPUT: " <> hardline <> hardline <> prettyOut <> hardline <> "-------------" <> hardline
-
-testBBF :: IO ()
-testBBF = do
-  DataDeclSet inputs <- generate (arbitrary @(DataDeclSet 'Poly1))
-  forM_ inputs $ \inp -> do
-    let inpPretty = pretty $ unsafeRename (renameDataDecl inp)
-    putDoc $ hardline <> "INPUT:" <> hardline <> hardline <> inpPretty <> hardline
-    case mkBBF inp of
-      Left err -> throwIO . userError . show $ err
-      Right res -> case res of
-        Nothing -> putDoc $ hardline <> "OUTPUT: Nothing (Empty datatype)"
-        Just out -> do
-          let outPretty = pretty $ unsafeRename (renameValT out)
-          putDoc $ hardline <> "OUTPUT:" <> hardline <> hardline <> outPretty <> hardline
-
--- Datatypes for testing
 
 eitherT :: DataDeclaration AbstractTy
 eitherT =
@@ -810,17 +815,3 @@ unitT =
 
 testDatatypes :: [DataDeclaration AbstractTy]
 testDatatypes = [maybeT, eitherT, unitT, pair]
-
-failLeft ::
-  forall (a :: Type) (b :: Type).
-  (Show a) =>
-  Either a b ->
-  IO b
-failLeft = either (assertFailure . show) pure
-
-tyAppTestDatatypes :: M.Map TyName (DatatypeInfo AbstractTy)
-tyAppTestDatatypes = foldl' (\acc decl -> M.insert (view #datatypeName decl) (unsafeMkDatatypeInfo decl) acc) M.empty testDatatypes
-  where
-    unsafeMkDatatypeInfo d = case mkDatatypeInfo d of
-      Left err -> error (show err)
-      Right res -> res
