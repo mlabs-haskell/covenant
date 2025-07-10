@@ -9,19 +9,31 @@
 -- Information about datatype definitions, and various ways to interact with
 -- them. Most of the useful functionality is in 'DatatypeInfo' and its optics.
 --
+-- = Note
+--
+-- Some of the low-level functions in the module make use of @ScopeBoundary@.
+-- This is mostly an artifact of needing this for tests; if you ever need their
+-- functionality, assume that the only sensible value is @0@, which will work
+-- via its overloaded number syntax.
+--
 -- @since 1.1.0
 module Covenant.Data
   ( -- * Types
-    DatatypeInfo (DatatypeInfo),
+    BBFError (..),
+    DatatypeInfo (..),
 
     -- * Functions
+
+    -- ** Datatype-related
     mkDatatypeInfo,
-    mkBaseFunctor,
-    isRecursiveChildOf,
     allComponentTypes,
-    hasRecursive,
     mkBBF,
     noPhantomTyVars,
+
+    -- ** Lower-level
+    mkBaseFunctor,
+    isRecursiveChildOf,
+    hasRecursive,
     everythingOf,
   )
 where
@@ -52,239 +64,23 @@ import Data.Vector.NonEmpty qualified as NEV
 import Optics.Core (A_Lens, LabelOptic (labelOptic), folded, lens, preview, review, toListOf, view, (%), _2)
 import Optics.Indexed.Core (A_Fold)
 
-{- NOTE: For the purposes of base functor transformation, we follow the pattern established by Edward Kmett's
-         'recursion-schemes' library. That is, we regard a datatype as "recursive" if and only if at least one
-         argument to a constructor contains "the exact same thing as we find to the left of the =". Dunno how to
-         describe it more precisely, but the general idea is that things like these ARE recursive for us:
-
-           data Foo = End Int | More Foo Int -- contains 'Foo' as a ctor arg
-
-           data Bar a = Beep | Boom a (Bar a) -- contains 'Bar a'
-
-         but things like this are NOT recursive by our reckoning (even though in some sense they might be considered as such):
-
-           data FunL a b = Done b | Go (FunL b a) a -- `FunL b a` isn't `FunL a b` so it's not literally recursive
-
-         Obviously we're working with DeBruijn indices so the letters are more-or-less fictitious, but hopefully
-         these examples nonetheless get the point across.
--}
-
--- TODO: Rewrite this as `mapMValT`. The change to a `Reader` below makes this unusable, but we can
---       write the non-monadic version as a special case of the monadic version and it is *highly* likely
---       we will need both going forward.
-mapValT :: forall (a :: Type). (ValT a -> ValT a) -> ValT a -> ValT a
-mapValT f = \case
-  -- for terminal nodes we just apply the function
-  absr@(Abstraction {}) -> f absr
-  bif@BuiltinFlat {} -> f bif
-  -- For CompT and Datatype we apply the function to the components and then to the top level
-  ThunkT (CompT cnt (CompTBody compTargs)) -> f (ThunkT $ CompT cnt (CompTBody (mapValT f <$> compTargs)))
-  Datatype tn args -> f $ Datatype tn (mapValT f <$> args)
-
--- Did in fact need it
-foldValT :: forall (a :: Type) (b :: Type). (b -> ValT a -> b) -> b -> ValT a -> b
-foldValT f e = \case
-  absr@(Abstraction {}) -> f e absr
-  bif@(BuiltinFlat {}) -> f e bif
-  thk@(ThunkT (CompT _ (CompTBody compTArgs))) ->
-    let e' = NEV.foldl' f e compTArgs
-     in f e' thk
-  dt@(Datatype _ args) ->
-    let e' = V.foldl' f e args
-     in f e' dt
-
-everythingOf :: forall (a :: Type). (Ord a) => ValT a -> Set (ValT a)
-everythingOf = foldValT (flip Set.insert) Set.empty
-
-noPhantomTyVars :: DataDeclaration AbstractTy -> Bool
-noPhantomTyVars OpaqueData {} = True
-noPhantomTyVars decl@(DataDeclaration _ numVars _ _) =
-  let allChildren = allComponentTypes decl
-      allResolved = Set.unions $ runReader (traverse allResolvedTyVars' allChildren) 0
-      indices :: [Index "tyvar"]
-      indices = fromJust . preview intIndex <$> [0 .. (review intCount numVars - 1)]
-      declaredTyVars = BoundAt Z <$> indices
-   in all (`Set.member` allResolved) declaredTyVars
-
-allResolvedTyVars' :: ValT AbstractTy -> Reader Int (Set AbstractTy)
-allResolvedTyVars' = \case
-  Abstraction (BoundAt db argpos) -> do
-    here <- ask
-    let db' = fromJust . preview asInt $ review asInt db - here
-    pure . Set.singleton $ BoundAt db' argpos
-  ThunkT (CompT _ (CompTBody nev)) -> local (+ 1) $ do
-    Set.unions <$> traverse allResolvedTyVars' nev
-  BuiltinFlat {} -> pure Set.empty
-  Datatype _ args -> Set.unions <$> traverse allResolvedTyVars' args
-
--- This tells us whether the ValT *is* a recursive child of the parent type
-isRecursiveChildOf :: TyName -> ValT AbstractTy -> Reader ScopeBoundary Bool
-isRecursiveChildOf tn = \case
-  Datatype tn' args
-    | tn' == tn -> V.ifoldM checkArgsIsRec' True args
-    | otherwise -> pure False
-  _ -> pure False
-  where
-    checkArgsIsRec' :: Bool -> Int -> ValT AbstractTy -> Reader ScopeBoundary Bool
-    checkArgsIsRec' acc n = \case
-      Abstraction (BoundAt db varIx) -> do
-        ScopeBoundary here <- ask
-        let dbInt = review asInt db
-        -- Explanation: A component ValT is only a recursive instance of the parent type if
-        --              the DeBruijn index of its type variables points to Z (and the other conditions obtain)
-        if dbInt - here == 0 && review intIndex varIx == n
-          then pure acc
-          else pure False
-      _ -> pure False
-
-allComponentTypes :: DataDeclaration AbstractTy -> [ValT AbstractTy]
-allComponentTypes = toListOf (#datatypeConstructors % folded % #constructorArgs % folded)
-
--- This tells us whether a ValT *contains* a direct recursive type. I.e it tells us whether we need to construct a base functor
-hasRecursive :: TyName -> ValT AbstractTy -> Reader ScopeBoundary Bool
-hasRecursive tn = \case
-  Abstraction {} -> pure False
-  BuiltinFlat {} -> pure False
-  -- NOTE: This assumes that we've forbidden higher rank arguments to constructors (i.e. we can ignore the scope here)
-  ThunkT (CompT _ (CompTBody (NEV.toList -> compTArgs))) -> local (+ 1) $ do
-    or <$> traverse (hasRecursive tn) compTArgs
-  dt@(Datatype _ args) -> do
-    thisTypeIsRecursive <- isRecursiveChildOf tn dt
-    aComponentIsRecursive <- or <$> traverse (hasRecursive tn) args
-    pure $ thisTypeIsRecursive || aComponentIsRecursive
-
--- | Constructs a base functor from a suitable data declaration, returning 'Nothing' if the input is not a recursive type
-mkBaseFunctor :: DataDeclaration AbstractTy -> Reader ScopeBoundary (Maybe (DataDeclaration AbstractTy))
-mkBaseFunctor OpaqueData {} = pure Nothing
-mkBaseFunctor (DataDeclaration tn numVars ctors strat) = do
-  anyRecComponents <- or <$> traverse (hasRecursive tn) allCtorArgs
-  if null ctors || not anyRecComponents
-    then pure Nothing
-    else do
-      baseCtors <- traverse mkBaseCtor ctors
-      pure . Just $ DataDeclaration baseFName baseFNumVars baseCtors strat
-  where
-    -- TODO: I think we were going to make this "illegal" so users can't use it directly but I forget the legality rules
-    baseFName = case tn of
-      TyName tyNameInner -> TyName (tyNameInner <> "_F")
-
-    baseFNumVars :: Count "tyvar"
-    baseFNumVars = fromJust . preview intCount $ review intCount numVars + 1
-
-    -- The argument position of the new type variable parameter (typically `r`).
-    -- A count represents the number of variables, but indices for those variables start at 0,
-    -- so an additional tyvar will always have an index == the old count
-    rIndex :: Index "tyvar"
-    rIndex = fromJust . preview intIndex $ review intCount numVars
-
-    -- Replace recursive children with a DeBruijn index & position index that points at the top-level binding context
-    -- (technically the top level binding context is the ONLY admissable binding context if we forbid higher-rank types,
-    -- but we still have to regard a computation type that binds 0 variables as having a scope boundary)
-    replaceWithR :: ValT AbstractTy -> Reader ScopeBoundary (ValT AbstractTy)
-    replaceWithR vt =
-      isRecursive vt >>= \case
-        True -> do
-          ScopeBoundary here <- ask -- this should be the distance from the initial binding context (which is what we want)
-          let db = fromJust $ preview asInt here
-          pure $ Abstraction (BoundAt db rIndex)
-        False -> pure vt
-
-    -- TODO: This should be refactored with `mapMValT`, which I will do after I write it :P
-    replaceAllRecursive :: ValT AbstractTy -> Reader ScopeBoundary (ValT AbstractTy)
-    replaceAllRecursive = \case
-      abst@Abstraction {} -> pure abst
-      bif@BuiltinFlat {} -> pure bif
-      ThunkT (CompT cnt (CompTBody compTargs)) ->
-        local (+ 1) $ ThunkT . CompT cnt . CompTBody <$> traverse replaceAllRecursive compTargs
-      Datatype tx args -> (replaceWithR . Datatype tx =<< traverse replaceAllRecursive args)
-
-    mkBaseCtor :: Constructor AbstractTy -> Reader ScopeBoundary (Constructor AbstractTy)
-    mkBaseCtor (Constructor ctorNm ctorArgs) = Constructor (baseFCtorName ctorNm) <$> traverse replaceAllRecursive ctorArgs
-      where
-        baseFCtorName :: ConstructorName -> ConstructorName
-        baseFCtorName (ConstructorName nm) = ConstructorName (nm <> "_F")
-
-    allCtorArgs :: [ValT AbstractTy]
-    allCtorArgs = concatMap (V.toList . view #constructorArgs) ctors
-
-    -- This tells us whether the ValT *is* a recursive child of the parent type
-    isRecursive :: ValT AbstractTy -> Reader ScopeBoundary Bool
-    isRecursive = isRecursiveChildOf tn
-
-incAbstractionDB :: ValT AbstractTy -> ValT AbstractTy
-incAbstractionDB = mapValT $ \case
-  Abstraction (BoundAt db indx) ->
-    let db' = fromJust . preview asInt $ review asInt db + 1
-     in Abstraction (BoundAt db' indx)
-  other -> other
-
--- | @since 1.1.0
--- The name of the type and the invalid recursive argument to a ctor
-data BBFError = InvalidRecursion TyName (ValT AbstractTy)
+-- | All possible errors that could arise when constructing a Boehm-Berrarducci
+-- form.
+--
+-- @since 1.1.0
+data BBFError
+  = -- | The type is recursive in a prohibited way. Typically, this means
+    -- contravariant recursion. This gives the type name and the invalid
+    -- recursive constructor argument.
+    --
+    -- @since 1.1.0
+    InvalidRecursion TyName (ValT AbstractTy)
   deriving stock
     ( -- | @since 1.1.0
       Show,
       -- | @since 1.1.0
       Eq
     )
-
-mkBBF :: DataDeclaration AbstractTy -> Either BBFError (Maybe (ValT AbstractTy))
-mkBBF decl = sequence . runExceptT $ mkBBF' decl
-
--- Only returns `Nothing` if there are no Constructors or the type is Opaque
-mkBBF' :: DataDeclaration AbstractTy -> ExceptT BBFError Maybe (ValT AbstractTy)
-mkBBF' OpaqueData {} = lift Nothing
-mkBBF' (DataDeclaration tn numVars ctors _)
-  | V.null ctors = lift Nothing
-  | otherwise = do
-      ctors' <- traverse mkBBCtor ctors
-      lift $ ThunkT . CompT bbfCount . CompTBody . flip NEV.snoc topLevelOut <$> NEV.fromVector ctors'
-  where
-    topLevelOut = Abstraction $ BoundAt Z outIx
-
-    outIx :: Index "tyvar"
-    outIx = fromJust . preview intIndex $ review intCount numVars
-
-    bbfCount = fromJust . preview intCount $ review intCount numVars + 1
-
-    mkBBCtor :: Constructor AbstractTy -> ExceptT BBFError Maybe (ValT AbstractTy)
-    mkBBCtor (Constructor _ args)
-      | V.null args = pure topLevelOut
-      | otherwise = do
-          elimArgs <- fmap incAbstractionDB <$> traverse fixArg args
-          elimArgs' <- lift . NEV.fromVector $ elimArgs
-          let out = Abstraction $ BoundAt (S Z) outIx
-          pure . ThunkT . CompT count0 . CompTBody . flip NEV.snoc out $ elimArgs'
-
-    fixArg :: ValT AbstractTy -> ExceptT BBFError Maybe (ValT AbstractTy)
-    fixArg arg = do
-      let isDirectRecursiveTy = runReader (isRecursiveChildOf tn arg) 0
-      if isDirectRecursiveTy
-        then pure $ Abstraction (BoundAt Z outIx)
-        else case arg of
-          Datatype tn' dtArgs
-            | tn == tn' -> throwError $ InvalidRecursion tn arg
-            | otherwise -> do
-                dtArgs' <- traverse fixArg dtArgs
-                pure . Datatype tn' $ dtArgs'
-          _ -> pure arg
-
-{- Note (Sean, 14/05/25): Re  DeBruijn indices:
-
-     - None of the existing variable DeBruijn or position indices change at all b/c the binding context of the
-       `forall` we're introducing replaces the binding context of the datatype declaration and only extends it.
-
-     - The only special thing we have to keep track of is the (DeBruijn) index of the `out` variable, but this doesn't require
-       any fancy scope tracking: It will always be Z for the top-level result and `S Z` wherever it occurs in a
-       transformed constructor. It won't ever occur any "deeper" than that (because we don't nest these, and a constructor gets exactly one
-       `out`)
-
-     - Actually this is slightly false, we need to "bump" all of the indices inside constructor arms by one (because
-       they now occur within a Thunk), but after that bump everything is stable as indicated above.
--}
-
-{- Here for lack of a better place to put it (has to be available to Unification and ASG)
--}
 
 -- | Contains essential information about datatype definitions. Most of the
 -- time, you want to use this type via its optics, rather than directly.
@@ -376,3 +172,246 @@ mkDatatypeInfo decl = DatatypeInfo decl <$> baseFStuff <*> mkBBF decl
             Nothing -> Right Nothing
             Just d -> mkBBF d
        in (bisequence . (baseFDecl,) <$> baseBBF)
+
+-- | Returns all datatype constructors used as any argument to the datatype
+-- defined by the first argument.
+--
+-- @since 1.1.0
+allComponentTypes :: DataDeclaration AbstractTy -> [ValT AbstractTy]
+allComponentTypes = toListOf (#datatypeConstructors % folded % #constructorArgs % folded)
+
+-- | Constructs a base functor from a suitable data declaration, returning
+-- 'Nothing' if the input is not a recursive type.
+--
+-- @since 1.1.0
+mkBaseFunctor :: DataDeclaration AbstractTy -> Reader ScopeBoundary (Maybe (DataDeclaration AbstractTy))
+mkBaseFunctor OpaqueData {} = pure Nothing
+mkBaseFunctor (DataDeclaration tn numVars ctors strat) = do
+  anyRecComponents <- or <$> traverse (hasRecursive tn) allCtorArgs
+  if null ctors || not anyRecComponents
+    then pure Nothing
+    else do
+      baseCtors <- traverse mkBaseCtor ctors
+      pure . Just $ DataDeclaration baseFName baseFNumVars baseCtors strat
+  where
+    baseFName :: TyName
+    baseFName = case tn of
+      TyName tyNameInner -> TyName (tyNameInner <> "_F")
+    baseFNumVars :: Count "tyvar"
+    baseFNumVars = fromJust . preview intCount $ review intCount numVars + 1
+    -- The argument position of the new type variable parameter (typically `r`).
+    -- A count represents the number of variables, but indices for those variables start at 0,
+    -- so an additional tyvar will always have an index == the old count
+    rIndex :: Index "tyvar"
+    rIndex = fromJust . preview intIndex $ review intCount numVars
+    -- Replace recursive children with a DeBruijn index & position index that points at the top-level binding context
+    -- (technically the top level binding context is the ONLY admissable binding context if we forbid higher-rank types,
+    -- but we still have to regard a computation type that binds 0 variables as having a scope boundary)
+    replaceWithR :: ValT AbstractTy -> Reader ScopeBoundary (ValT AbstractTy)
+    replaceWithR vt =
+      isRecursive vt >>= \case
+        True -> do
+          ScopeBoundary here <- ask -- this should be the distance from the initial binding context (which is what we want)
+          let db = fromJust $ preview asInt here
+          pure $ Abstraction (BoundAt db rIndex)
+        False -> pure vt
+    -- TODO: This should be refactored with `mapMValT`, which I will do after I write it :P
+    replaceAllRecursive :: ValT AbstractTy -> Reader ScopeBoundary (ValT AbstractTy)
+    replaceAllRecursive = \case
+      abst@Abstraction {} -> pure abst
+      bif@BuiltinFlat {} -> pure bif
+      ThunkT (CompT cnt (CompTBody compTargs)) ->
+        local (+ 1) $ ThunkT . CompT cnt . CompTBody <$> traverse replaceAllRecursive compTargs
+      Datatype tx args -> (replaceWithR . Datatype tx =<< traverse replaceAllRecursive args)
+    mkBaseCtor :: Constructor AbstractTy -> Reader ScopeBoundary (Constructor AbstractTy)
+    mkBaseCtor (Constructor ctorNm ctorArgs) = Constructor (baseFCtorName ctorNm) <$> traverse replaceAllRecursive ctorArgs
+      where
+        baseFCtorName :: ConstructorName -> ConstructorName
+        baseFCtorName (ConstructorName nm) = ConstructorName (nm <> "_F")
+    allCtorArgs :: [ValT AbstractTy]
+    allCtorArgs = concatMap (V.toList . view #constructorArgs) ctors
+    -- This tells us whether the ValT *is* a recursive child of the parent type
+    isRecursive :: ValT AbstractTy -> Reader ScopeBoundary Bool
+    isRecursive = isRecursiveChildOf tn
+
+-- | Returns 'True' if the second argument is a recursive child of the datatype
+-- named by the first argument.
+--
+-- @since 1.1.0
+isRecursiveChildOf :: TyName -> ValT AbstractTy -> Reader ScopeBoundary Bool
+isRecursiveChildOf tn = \case
+  Datatype tn' args
+    | tn' == tn -> V.ifoldM checkArgsIsRec' True args
+    | otherwise -> pure False
+  _ -> pure False
+  where
+    checkArgsIsRec' :: Bool -> Int -> ValT AbstractTy -> Reader ScopeBoundary Bool
+    checkArgsIsRec' acc n = \case
+      Abstraction (BoundAt db varIx) -> do
+        ScopeBoundary here <- ask
+        let dbInt = review asInt db
+        -- Explanation: A component ValT is only a recursive instance of the parent type if
+        --              the DeBruijn index of its type variables points to Z (and the other conditions obtain)
+        if dbInt - here == 0 && review intIndex varIx == n
+          then pure acc
+          else pure False
+      _ -> pure False
+
+-- | Determines whether the type represented by the second argument and named by
+-- the first requires a base functor.
+--
+-- @since 1.1.0
+hasRecursive :: TyName -> ValT AbstractTy -> Reader ScopeBoundary Bool
+hasRecursive tn = \case
+  Abstraction {} -> pure False
+  BuiltinFlat {} -> pure False
+  -- NOTE: This assumes that we've forbidden higher rank arguments to constructors (i.e. we can ignore the scope here)
+  ThunkT (CompT _ (CompTBody (NEV.toList -> compTArgs))) -> local (+ 1) $ do
+    or <$> traverse (hasRecursive tn) compTArgs
+  dt@(Datatype _ args) -> do
+    thisTypeIsRecursive <- isRecursiveChildOf tn dt
+    aComponentIsRecursive <- or <$> traverse (hasRecursive tn) args
+    pure $ thisTypeIsRecursive || aComponentIsRecursive
+
+-- | Constructs a base functor Boehm-Berrarducci form for the given datatype.
+-- Returns 'Nothing' if the type is not self-recursive.
+--
+-- @since 1.1.0
+mkBBF :: DataDeclaration AbstractTy -> Either BBFError (Maybe (ValT AbstractTy))
+mkBBF decl = sequence . runExceptT $ mkBBF' decl
+
+-- | Verifies that all type variables declared by the given datatype have a
+-- corresponding value in some \'arm\'.
+--
+-- @since 1.1.0
+noPhantomTyVars :: DataDeclaration AbstractTy -> Bool
+noPhantomTyVars OpaqueData {} = True
+noPhantomTyVars decl@(DataDeclaration _ numVars _ _) =
+  let allChildren = allComponentTypes decl
+      allResolved = Set.unions $ runReader (traverse allResolvedTyVars' allChildren) 0
+      indices :: [Index "tyvar"]
+      indices = fromJust . preview intIndex <$> [0 .. (review intCount numVars - 1)]
+      declaredTyVars = BoundAt Z <$> indices
+   in all (`Set.member` allResolved) declaredTyVars
+
+-- | Collect all (other) value types a given value type refers to.
+--
+-- @since 1.1.0
+everythingOf :: forall (a :: Type). (Ord a) => ValT a -> Set (ValT a)
+everythingOf = foldValT (flip Set.insert) Set.empty
+
+-- Helpers
+
+{- NOTE: For the purposes of base functor transformation, we follow the pattern established by Edward Kmett's
+         'recursion-schemes' library. That is, we regard a datatype as "recursive" if and only if at least one
+         argument to a constructor contains "the exact same thing as we find to the left of the =". Dunno how to
+         describe it more precisely, but the general idea is that things like these ARE recursive for us:
+
+           data Foo = End Int | More Foo Int -- contains 'Foo' as a ctor arg
+
+           data Bar a = Beep | Boom a (Bar a) -- contains 'Bar a'
+
+         but things like this are NOT recursive by our reckoning (even though in some sense they might be considered as such):
+
+           data FunL a b = Done b | Go (FunL b a) a -- `FunL b a` isn't `FunL a b` so it's not literally recursive
+
+         Obviously we're working with DeBruijn indices so the letters are more-or-less fictitious, but hopefully
+         these examples nonetheless get the point across.
+-}
+
+-- TODO: Rewrite this as `mapMValT`. The change to a `Reader` below makes this unusable, but we can
+--       write the non-monadic version as a special case of the monadic version and it is *highly* likely
+--       we will need both going forward.
+mapValT :: forall (a :: Type). (ValT a -> ValT a) -> ValT a -> ValT a
+mapValT f = \case
+  -- for terminal nodes we just apply the function
+  absr@(Abstraction {}) -> f absr
+  bif@BuiltinFlat {} -> f bif
+  -- For CompT and Datatype we apply the function to the components and then to the top level
+  ThunkT (CompT cnt (CompTBody compTargs)) -> f (ThunkT $ CompT cnt (CompTBody (mapValT f <$> compTargs)))
+  Datatype tn args -> f $ Datatype tn (mapValT f <$> args)
+
+-- Did in fact need it
+foldValT :: forall (a :: Type) (b :: Type). (b -> ValT a -> b) -> b -> ValT a -> b
+foldValT f e = \case
+  absr@(Abstraction {}) -> f e absr
+  bif@(BuiltinFlat {}) -> f e bif
+  thk@(ThunkT (CompT _ (CompTBody compTArgs))) ->
+    let e' = NEV.foldl' f e compTArgs
+     in f e' thk
+  dt@(Datatype _ args) ->
+    let e' = V.foldl' f e args
+     in f e' dt
+
+allResolvedTyVars' :: ValT AbstractTy -> Reader Int (Set AbstractTy)
+allResolvedTyVars' = \case
+  Abstraction (BoundAt db argpos) -> do
+    here <- ask
+    let db' = fromJust . preview asInt $ review asInt db - here
+    pure . Set.singleton $ BoundAt db' argpos
+  ThunkT (CompT _ (CompTBody nev)) -> local (+ 1) $ do
+    Set.unions <$> traverse allResolvedTyVars' nev
+  BuiltinFlat {} -> pure Set.empty
+  Datatype _ args -> Set.unions <$> traverse allResolvedTyVars' args
+
+incAbstractionDB :: ValT AbstractTy -> ValT AbstractTy
+incAbstractionDB = mapValT $ \case
+  Abstraction (BoundAt db indx) ->
+    let db' = fromJust . preview asInt $ review asInt db + 1
+     in Abstraction (BoundAt db' indx)
+  other -> other
+
+-- Only returns `Nothing` if there are no Constructors or the type is Opaque
+mkBBF' :: DataDeclaration AbstractTy -> ExceptT BBFError Maybe (ValT AbstractTy)
+mkBBF' OpaqueData {} = lift Nothing
+mkBBF' (DataDeclaration tn numVars ctors _)
+  | V.null ctors = lift Nothing
+  | otherwise = do
+      ctors' <- traverse mkBBCtor ctors
+      lift $ ThunkT . CompT bbfCount . CompTBody . flip NEV.snoc topLevelOut <$> NEV.fromVector ctors'
+  where
+    topLevelOut = Abstraction $ BoundAt Z outIx
+
+    outIx :: Index "tyvar"
+    outIx = fromJust . preview intIndex $ review intCount numVars
+
+    bbfCount = fromJust . preview intCount $ review intCount numVars + 1
+
+    mkBBCtor :: Constructor AbstractTy -> ExceptT BBFError Maybe (ValT AbstractTy)
+    mkBBCtor (Constructor _ args)
+      | V.null args = pure topLevelOut
+      | otherwise = do
+          elimArgs <- fmap incAbstractionDB <$> traverse fixArg args
+          elimArgs' <- lift . NEV.fromVector $ elimArgs
+          let out = Abstraction $ BoundAt (S Z) outIx
+          pure . ThunkT . CompT count0 . CompTBody . flip NEV.snoc out $ elimArgs'
+
+    fixArg :: ValT AbstractTy -> ExceptT BBFError Maybe (ValT AbstractTy)
+    fixArg arg = do
+      let isDirectRecursiveTy = runReader (isRecursiveChildOf tn arg) 0
+      if isDirectRecursiveTy
+        then pure $ Abstraction (BoundAt Z outIx)
+        else case arg of
+          Datatype tn' dtArgs
+            | tn == tn' -> throwError $ InvalidRecursion tn arg
+            | otherwise -> do
+                dtArgs' <- traverse fixArg dtArgs
+                pure . Datatype tn' $ dtArgs'
+          _ -> pure arg
+
+{- Note (Sean, 14/05/25): Re  DeBruijn indices:
+
+     - None of the existing variable DeBruijn or position indices change at all b/c the binding context of the
+       `forall` we're introducing replaces the binding context of the datatype declaration and only extends it.
+
+     - The only special thing we have to keep track of is the (DeBruijn) index of the `out` variable, but this doesn't require
+       any fancy scope tracking: It will always be Z for the top-level result and `S Z` wherever it occurs in a
+       transformed constructor. It won't ever occur any "deeper" than that (because we don't nest these, and a constructor gets exactly one
+       `out`)
+
+     - Actually this is slightly false, we need to "bump" all of the indices inside constructor arms by one (because
+       they now occur within a Thunk), but after that bump everything is stable as indicated above.
+-}
+
+{- Here for lack of a better place to put it (has to be available to Unification and ASG)
+-}
