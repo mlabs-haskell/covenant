@@ -15,7 +15,8 @@ where
 import Covenant.DeBruijn (DeBruijn (Z))
 import Covenant.Index (Count, count0, count1, count2, ix0, ix1)
 import Covenant.Internal.Strategy
-  ( InternalStrategy (InternalAssocMapStrat, InternalDataStrat, InternalListStrat, InternalPairStrat),
+  ( DataEncoding (BuiltinStrategy, PlutusData),
+    InternalStrategy (InternalAssocMapStrat, InternalDataStrat, InternalListStrat, InternalPairStrat),
     PlutusDataStrategy (ConstrData, NewtypeData),
   )
 import Covenant.Internal.Type
@@ -24,7 +25,6 @@ import Covenant.Internal.Type
     Constructor (Constructor),
     ConstructorName (ConstructorName),
     DataDeclaration (DataDeclaration),
-    DataEncoding (BuiltinStrategy, PlutusData),
     TyName (TyName),
     ValT (Abstraction, BuiltinFlat, Datatype),
   )

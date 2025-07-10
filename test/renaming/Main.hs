@@ -8,7 +8,13 @@ import Covenant.Index
   ( ix0,
     ix1,
   )
-import Covenant.Test (Concrete (Concrete))
+import Covenant.Test
+  ( Concrete (Concrete),
+    RenameError (InvalidAbstractionReference),
+    renameCompT,
+    renameValT,
+    runRenameM,
+  )
 import Covenant.Type
   ( BuiltinFlatT
       ( BLS12_381_G1_ElementT,
@@ -21,14 +27,8 @@ import Covenant.Type
         UnitT
       ),
     CompT (Comp1, Comp2),
-    RenameError
-      ( InvalidAbstractionReference
-      ),
     Renamed (Unifiable, Wildcard),
     ValT (Abstraction, BuiltinFlat, ThunkT),
-    renameCompT,
-    renameValT,
-    runRenameM,
     tyvar,
     pattern ReturnT,
     pattern (:--:>),

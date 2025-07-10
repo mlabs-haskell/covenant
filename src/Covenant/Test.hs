@@ -31,11 +31,32 @@ module Covenant.Test
     prettyDeclSet,
 
     -- ** Test helpers
+    checkApp,
     failLeft,
     tyAppTestDatatypes,
     list,
     tree,
     weirderList,
+    unsafeTyCon,
+
+    -- ** Datatype checks
+    cycleCheck,
+    checkDataDecls,
+    checkEncodingArgs,
+
+    -- ** Renaming
+
+    -- *** Types
+    RenameError (..),
+    RenameM,
+
+    -- *** Introduction
+    renameValT,
+    renameCompT,
+    renameDataDecl,
+
+    -- *** Elimination
+    runRenameM,
   )
 where
 
@@ -68,6 +89,11 @@ import Covenant.Index
     ix0,
     ix1,
   )
+import Covenant.Internal.KindCheck
+  ( checkDataDecls,
+    checkEncodingArgs,
+    cycleCheck,
+  )
 import Covenant.Internal.Ledger
   ( CtorBuilder (Ctor),
     DeclBuilder (Decl),
@@ -78,18 +104,20 @@ import Covenant.Internal.Ledger
     tree,
     weirderList,
   )
-import Covenant.Internal.PrettyPrint (ScopeBoundary, prettyStr)
-import Covenant.Internal.Rename (renameDataDecl)
-import Covenant.Internal.Type
-  ( Constructor (Constructor),
-    ConstructorName (ConstructorName),
-    DataDeclaration (DataDeclaration, OpaqueData),
-    DataEncoding (SOP),
-    TyName (TyName),
-    ValT (Abstraction, BuiltinFlat, Datatype, ThunkT),
-    runConstructorName,
+import Covenant.Internal.PrettyPrint (ScopeBoundary)
+import Covenant.Internal.Rename
+  ( RenameError (InvalidAbstractionReference),
+    RenameM,
+    renameCompT,
+    renameDataDecl,
+    renameValT,
+    runRenameM,
   )
-import Covenant.Type
+import Covenant.Internal.Strategy
+  ( DataEncoding (PlutusData, SOP),
+    PlutusDataStrategy (ConstrData),
+  )
+import Covenant.Internal.Type
   ( AbstractTy (BoundAt),
     BuiltinFlatT
       ( BLS12_381_G1_ElementT,
@@ -101,13 +129,19 @@ import Covenant.Type
         StringT,
         UnitT
       ),
-    CompT (Comp0, CompN),
-    CompTBody (ArgsAndResult),
-    DataEncoding (PlutusData),
-    PlutusDataStrategy (ConstrData),
-    RenameM,
-    runRenameM,
+    Constructor (Constructor),
+    ConstructorName (ConstructorName),
+    DataDeclaration (DataDeclaration, OpaqueData),
+    TyName (TyName),
+    ValT (Abstraction, BuiltinFlat, Datatype, ThunkT),
+    runConstructorName,
   )
+import Covenant.Internal.Unification (checkApp)
+import Covenant.Type
+  ( CompT (Comp0, CompN),
+    CompTBody (ArgsAndResult),
+  )
+import Covenant.Util (prettyStr)
 import Data.Coerce (coerce)
 import Data.Kind (Type)
 import Data.Map.Strict (Map)
@@ -323,6 +357,13 @@ tyAppTestDatatypes =
     unsafeMkDatatypeInfo d = case mkDatatypeInfo d of
       Left err -> error (show err)
       Right res -> res
+
+-- | Helper for tests to quickly construct 'Datatype's. This is unsafe, as it
+-- allows construction of nonsensical renamings.
+--
+-- @since 1.1.0
+unsafeTyCon :: TyName -> [ValT a] -> ValT a
+unsafeTyCon tn args = Datatype tn (Vector.fromList args)
 
 -- Helpers
 

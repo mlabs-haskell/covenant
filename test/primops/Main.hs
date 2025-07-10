@@ -29,6 +29,12 @@ import Covenant.Prim
     typeThreeArgFunc,
     typeTwoArgFunc,
   )
+import Covenant.Test
+  ( checkApp,
+    renameCompT,
+    renameValT,
+    runRenameM,
+  )
 import Covenant.Type
   ( AbstractTy (BoundAt),
     CompT (Comp0),
@@ -37,11 +43,7 @@ import Covenant.Type
     arity,
     boolT,
     byteStringT,
-    checkApp,
     integerT,
-    renameCompT,
-    renameValT,
-    runRenameM,
     pattern ReturnT,
     pattern (:--:>),
   )

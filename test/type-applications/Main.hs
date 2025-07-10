@@ -4,6 +4,13 @@ module Main (main) where
 
 import Control.Applicative ((<|>))
 import Control.Monad (guard)
+import Covenant.ASG
+  ( TypeAppError
+      ( DoesNotUnify,
+        ExcessArgs,
+        InsufficientArgs
+      ),
+  )
 import Covenant.DeBruijn (DeBruijn (S, Z), asInt)
 import Covenant.Index
   ( Index,
@@ -11,24 +18,27 @@ import Covenant.Index
     ix1,
     ix2,
   )
-import Covenant.Test (Concrete (Concrete), failLeft, tyAppTestDatatypes)
+import Covenant.Test
+  ( Concrete (Concrete),
+    checkApp,
+    failLeft,
+    renameCompT,
+    renameValT,
+    runRenameM,
+    tyAppTestDatatypes,
+  )
 import Covenant.Type
   ( AbstractTy,
     BuiltinFlatT (BoolT, IntegerT, UnitT),
     CompT (Comp0, Comp1, Comp2, Comp3),
     Renamed (Rigid, Unifiable, Wildcard),
-    TypeAppError (DoesNotUnify, ExcessArgs, InsufficientArgs),
     ValT (Abstraction, BuiltinFlat, Datatype, ThunkT),
-    checkApp,
     integerT,
-    prettyStr,
-    renameCompT,
-    renameValT,
-    runRenameM,
     tyvar,
     pattern ReturnT,
     pattern (:--:>),
   )
+import Covenant.Util (prettyStr)
 import Data.Coerce (coerce)
 import Data.Functor.Identity (Identity (Identity))
 import Data.Kind (Type)

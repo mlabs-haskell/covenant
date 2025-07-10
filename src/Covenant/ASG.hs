@@ -52,30 +52,9 @@ module Covenant.ASG
     CovenantError (..),
     ScopeInfo,
     ASGBuilder,
-    CovenantTypeError
-      ( BrokenIdReference,
-        ForceCompType,
-        ForceNonThunk,
-        ForceError,
-        ThunkValType,
-        ThunkError,
-        ApplyToValType,
-        ApplyToError,
-        ApplyCompType,
-        RenameFunctionFailed,
-        RenameArgumentFailed,
-        NoSuchArgument,
-        ReturnCompType,
-        LambdaResultsInValType,
-        LambdaResultsInNonReturn,
-        ReturnWrapsError,
-        ReturnWrapsCompType,
-        WrongReturnType,
-        UnificationError
-      ),
-    RenameError
-      ( InvalidAbstractionReference
-      ),
+    TypeAppError (..),
+    RenameError (..),
+    CovenantTypeError (..),
 
     -- ** Introducers
     arg,
@@ -183,7 +162,20 @@ import Covenant.Internal.Type
     TyName,
     ValT (ThunkT),
   )
-import Covenant.Internal.Unification (checkApp)
+import Covenant.Internal.Unification
+  ( TypeAppError
+      ( DatatypeInfoRenameFailed,
+        DoesNotUnify,
+        ExcessArgs,
+        ImpossibleHappened,
+        InsufficientArgs,
+        LeakingUnifiable,
+        LeakingWildcard,
+        NoBBForm,
+        NoDatatypeInfo
+      ),
+    checkApp,
+  )
 import Covenant.Prim
   ( OneArgFunc,
     SixArgFunc,

@@ -8,20 +8,35 @@
 --       - The "count" - the number of bound tyvars in the `ValT.Datatype` representation - may be incorrect (i.e. inconsistent with the count in the declaration)
 --
 --     The checks to detect these errors are entirely independent from the checks performed during typechecking or renaming, so we do them in a separate pass.
-module Covenant.Internal.KindCheck (checkDataDecls, checkValT, KindCheckError (..), EncodingArgErr (..), cycleCheck, checkEncodingArgs) where
+module Covenant.Internal.KindCheck
+  ( checkDataDecls,
+    checkValT,
+    KindCheckError (..),
+    EncodingArgErr (..),
+    cycleCheck,
+    checkEncodingArgs,
+  )
+where
 
 import Control.Monad (unless)
 import Control.Monad.Except (ExceptT, MonadError (throwError), runExceptT)
-import Control.Monad.Reader (MonadReader (local), ReaderT (ReaderT), asks, runReaderT)
+import Control.Monad.Reader
+  ( MonadReader (local),
+    ReaderT (ReaderT),
+    asks,
+    runReaderT,
+  )
 import Covenant.Data (everythingOf)
 import Covenant.Index (Count, intCount)
+import Covenant.Internal.Strategy
+  ( DataEncoding (SOP),
+  )
 import Covenant.Internal.Type
   ( AbstractTy,
     CompT (CompT),
     CompTBody (CompTBody),
     Constructor (Constructor),
     DataDeclaration (DataDeclaration, OpaqueData),
-    DataEncoding (SOP),
     TyName,
     ValT (Abstraction, BuiltinFlat, Datatype, ThunkT),
     checkStrategy,
@@ -88,6 +103,17 @@ lookupDeclaration tn = do
 
 {- This sanity checks datatype declarations using the criteria enumerated above.
 -}
+
+-- | Checks that all the data declarations in the argument \'make sense\'.
+-- Specifically:
+--
+-- * The strategy declared for the datatype is valid for it
+-- * There are no mutually recursive datatype declarations
+-- * Constructor arguments are not thunks
+-- * The number of type variables in any constructor isn't greater than we
+-- expect
+--
+-- @since 1.1.0
 checkDataDecls :: Map TyName (DataDeclaration AbstractTy) -> Either KindCheckError ()
 checkDataDecls decls = runKindCheckM decls $ traverse_ checkDataDecl (M.elems decls)
 
@@ -124,7 +150,9 @@ checkKinds mode = \case
 checkValT :: Map TyName (DataDeclaration AbstractTy) -> ValT AbstractTy -> Maybe KindCheckError
 checkValT dtypes = either Just (const Nothing) . runKindCheckM dtypes . checkKinds CheckValT
 
--- Ensures that we don't have any *mutually* recursive datatypes (which we don't want b/c they mess with data encoding strategies)
+-- | Verifies that no types in the argument are mutually recursive.
+--
+-- @since 1.1.0
 cycleCheck :: forall (a :: Type). (Ord a) => Map TyName (DataDeclaration a) -> Maybe KindCheckError
 cycleCheck decls = either Just (const Nothing) $ runKindCheckM decls go
   where
@@ -162,9 +190,16 @@ cycleCheck' visited (DataDeclaration tn _ ctors _) = traverse_ (checkCtor visite
 data EncodingArgErr a = EncodingArgMismatch TyName (ValT a)
   deriving stock (Show, Eq)
 
--- NOTE: This assumes that we've already checked that all of the relevant types *exist* in the datatype context.
---       So, if we use this to validate data declarations, we need to make sure it happens *after* the checks that
---       ensure that.
+-- | Verifies that a datatype (third argument) is valid according to its stated
+-- encoding, as provided by the first two arguments (projection and metadata).
+--
+-- = Note
+--
+-- If the datatype being validated refers to other datatypes, we assume that
+-- they exist in the metadata 'Map'. Thus, we must ensure this holds or the
+-- check will fail.
+--
+-- @since 1.1.0
 checkEncodingArgs ::
   forall (a :: Type) (info :: Type).
   (info -> DataEncoding) -> -- this lets us not care about whether we're doing this w/ a DataDeclaration or DatatypeInfo
