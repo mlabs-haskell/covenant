@@ -8,7 +8,7 @@ module Covenant.Internal.Unification
     unify,
     reconcile,
     substitute,
-    fixUp
+    fixUp,
   )
 where
 
@@ -362,13 +362,13 @@ reconcile =
     Merge.preserveMissing
     Merge.preserveMissing
     (Merge.zipWithAMatched combineBindings)
- where
-  combineBindings :: Index "tyvar" -> ValT Renamed -> ValT Renamed -> UnifyM (ValT Renamed)
-  combineBindings i old new =
-   if old == new
-     then pure old
-     else case old of
-       Abstraction (Unifiable _) -> pure new
-       _ -> case new of
-         Abstraction (Unifiable _) -> pure old
-         _ -> throwError $ CouldNotReconcile i old new
+  where
+    combineBindings :: Index "tyvar" -> ValT Renamed -> ValT Renamed -> UnifyM (ValT Renamed)
+    combineBindings i old new =
+      if old == new
+        then pure old
+        else case old of
+          Abstraction (Unifiable _) -> pure new
+          _ -> case new of
+            Abstraction (Unifiable _) -> pure old
+            _ -> throwError $ CouldNotReconcile i old new

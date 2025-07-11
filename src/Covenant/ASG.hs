@@ -84,7 +84,7 @@ module Covenant.ASG
   )
 where
 
-import Control.Monad (unless, zipWithM, foldM)
+import Control.Monad (foldM, unless, zipWithM)
 import Control.Monad.Except
   ( ExceptT,
     MonadError (throwError),
@@ -104,7 +104,7 @@ import Control.Monad.Reader
 import Covenant.Constant (AConstant, typeConstant)
 import Covenant.Data (DatatypeInfo, mkDatatypeInfo)
 import Covenant.DeBruijn (DeBruijn, asInt)
-import Covenant.Index (Index, count0, intIndex, intCount, Count)
+import Covenant.Index (Count, Index, count0, intCount, intIndex)
 import Covenant.Internal.KindCheck (checkEncodingArgs)
 import Covenant.Internal.Ledger (ledgerTypes)
 import Covenant.Internal.Rename
@@ -112,9 +112,10 @@ import Covenant.Internal.Rename
       ( InvalidAbstractionReference
       ),
     renameCompT,
+    renameDatatypeInfo,
     renameValT,
     runRenameM,
-    undoRename, renameDatatypeInfo,
+    undoRename,
   )
 import Covenant.Internal.Term
   ( ASGNode (ACompNode, AValNode, AnError),
@@ -139,10 +140,14 @@ import Covenant.Internal.Term
         CataUnsuitable,
         CataWrongBuiltinType,
         CataWrongValT,
+        ConstructorDoesNotExistForType,
+        DatatypeInfoRenameError,
         EncodingError,
         ForceCompType,
         ForceError,
         ForceNonThunk,
+        IntroFormErrorNodeField,
+        IntroFormWrongNumArgs,
         LambdaResultsInNonReturn,
         LambdaResultsInValType,
         NoSuchArgument,
@@ -153,12 +158,13 @@ import Covenant.Internal.Term
         ReturnWrapsError,
         ThunkError,
         ThunkValType,
+        TypeDoesNotExist,
         UnificationError,
-        WrongReturnType, TypeDoesNotExist, DatatypeInfoRenameError, ConstructorDoesNotExistForType, IntroFormWrongNumArgs, IntroFormErrorNodeField
+        WrongReturnType
       ),
     Id,
     Ref (AnArg, AnId),
-    ValNodeInfo (AppInternal, CataInternal, LitInternal, ThunkInternal, DataConstructorInternal),
+    ValNodeInfo (AppInternal, CataInternal, DataConstructorInternal, LitInternal, ThunkInternal),
     typeASGNode,
     typeId,
     typeRef,
@@ -168,13 +174,15 @@ import Covenant.Internal.Type
     BuiltinFlatT (ByteStringT, IntegerT),
     CompT (CompT),
     CompTBody (CompTBody),
+    Constructor,
+    ConstructorName,
     DataDeclaration (DataDeclaration, OpaqueData),
     Renamed (Unifiable),
     TyName,
-    ValT (BuiltinFlat, Datatype, ThunkT, Abstraction),
-    arity, ConstructorName, Constructor,
+    ValT (Abstraction, BuiltinFlat, Datatype, ThunkT),
+    arity,
   )
-import Covenant.Internal.Unification (checkApp, runUnifyM, unify, reconcile, substitute, fixUp, UnifyM)
+import Covenant.Internal.Unification (UnifyM, checkApp, fixUp, reconcile, runUnifyM, substitute, unify)
 import Covenant.Prim
   ( OneArgFunc,
     SixArgFunc,
@@ -185,11 +193,13 @@ import Covenant.Prim
     typeThreeArgFunc,
     typeTwoArgFunc,
   )
+import Covenant.Type (CompT (Comp0), CompTBody (ReturnT), PlutusDataConstructor)
 import Data.Bimap (Bimap)
 import Data.Bimap qualified as Bimap
 import Data.Coerce (coerce)
 import Data.Functor.Identity (Identity, runIdentity)
 import Data.Kind (Type)
+import Data.List (find)
 import Data.Map.Strict (Map)
 import Data.Map.Strict qualified as Map
 import Data.Maybe (fromJust)
@@ -201,16 +211,16 @@ import Optics.Core
   ( A_Lens,
     LabelOptic (labelOptic),
     at,
+    folded,
     ix,
     lens,
     over,
     preview,
     review,
+    toListOf,
     view,
-    (%), toListOf, folded,
+    (%),
   )
-import Data.List (find)
-import Covenant.Type (CompT(Comp0), CompTBody (ReturnT), PlutusDataConstructor)
 
 -- | A fully-assembled Covenant ASG.
 --
@@ -678,9 +688,13 @@ dataConstructor tyName ctorName fields = do
       -- First we check that the arity of the constructor is equal to the number of fields in the decl.
       checkFieldArity (Vector.length fields) thisTyInfo
       -- Then we resolve the supplied field Refs, rename, and throw an error if we're passed an error node.
-      renamedFieldTypes <- traverse renameArg fields >>= (\case
-                            Nothing -> throwError $ IntroFormErrorNodeField tyName ctorName fields
-                            Just ok -> pure ok) . sequence
+      renamedFieldTypes <-
+        traverse renameArg fields
+          >>= ( \case
+                  Nothing -> throwError $ IntroFormErrorNodeField tyName ctorName fields
+                  Just ok -> pure ok
+              )
+            . sequence
       -- Then we construct the return type.
       resultThunk <- mkResultThunk count ctors renamedFieldTypes
       -- Then we undo the renaming.
@@ -690,88 +704,91 @@ dataConstructor tyName ctorName fields = do
       -- Finally, if nothing has thrown an error, we return a reference to our result node, decorated with the
       -- return type we constructed.
       refTo $ AValNode restored (DataConstructorInternal tyName ctorName fields)
- where
-   {- Constructs the result type of the introduction form. Arguments are:
-        1. The count (number of tyvars) from the data declaration.
-        2. The vector of constructors from the data declaration.
-        3. The (renamed and resolved) vector of supplied arguments.
+  where
+    {- Constructs the result type of the introduction form. Arguments are:
+         1. The count (number of tyvars) from the data declaration.
+         2. The vector of constructors from the data declaration.
+         3. The (renamed and resolved) vector of supplied arguments.
 
-      The procedure goes like:
-        1. Extract the argument types from the constructor in the declaration. Any tyvars here
-           *have* to be Unifiable (unless something has slipped past the kind checker).
-        2. Unify those with the actual, supplied field types, yielding a set of substitutions.
-        3. Construct a fully abstract (i.e. parameterized only by unifiable type variables) representation of the
-           type constructor.
-        4. Apply those substitutions to the abstract type constructor.
-        5. Wrap the "concretified" type constructor in a thunk and use `fixUp` to sort out the `Count` and
-           indices.
-   -}
-   mkResultThunk :: Count "tyvar" -> Vector (Constructor Renamed) -> Vector (ValT Renamed) -> m (ValT Renamed)
-   mkResultThunk (review intCount -> count) declCtors (Vector.toList -> fieldArgs) = do
-     declCtorFields <- Vector.toList . view #constructorArgs <$> findConstructor declCtors
-     subs <- unifyFields declCtorFields fieldArgs
-     let tyConAbstractArgs
-           | count == 0 = []
-           | otherwise = Abstraction . Unifiable . fromJust . preview intIndex <$> [0..(count-1)]
-         tyConAbstract = Datatype tyName (Vector.fromList tyConAbstractArgs)
-     let tyConConcrete = Map.foldlWithKey' (\acc i t -> substitute i t acc) tyConAbstract subs
-     liftUnifyM . fixUp . ThunkT . Comp0 . ReturnT $ tyConConcrete
+       The procedure goes like:
+         1. Extract the argument types from the constructor in the declaration. Any tyvars here
+            *have* to be Unifiable (unless something has slipped past the kind checker).
+         2. Unify those with the actual, supplied field types, yielding a set of substitutions.
+         3. Construct a fully abstract (i.e. parameterized only by unifiable type variables) representation of the
+            type constructor.
+         4. Apply those substitutions to the abstract type constructor.
+         5. Wrap the "concretified" type constructor in a thunk and use `fixUp` to sort out the `Count` and
+            indices.
+    -}
+    mkResultThunk :: Count "tyvar" -> Vector (Constructor Renamed) -> Vector (ValT Renamed) -> m (ValT Renamed)
+    mkResultThunk (review intCount -> count) declCtors (Vector.toList -> fieldArgs) = do
+      declCtorFields <- Vector.toList . view #constructorArgs <$> findConstructor declCtors
+      subs <- unifyFields declCtorFields fieldArgs
+      let tyConAbstractArgs
+            | count == 0 = []
+            | otherwise = Abstraction . Unifiable . fromJust . preview intIndex <$> [0 .. (count - 1)]
+          tyConAbstract = Datatype tyName (Vector.fromList tyConAbstractArgs)
+      let tyConConcrete = Map.foldlWithKey' (\acc i t -> substitute i t acc) tyConAbstract subs
+      liftUnifyM . fixUp . ThunkT . Comp0 . ReturnT $ tyConConcrete
 
-   {- Unifies the declaration fields (which may be abstract) with the supplied fields
-      (which will be "concrete", in the sense that "they have to be rigid if they're tyvars").
+    {- Unifies the declaration fields (which may be abstract) with the supplied fields
+       (which will be "concrete", in the sense that "they have to be rigid if they're tyvars").
 
-      Returns a (reconciled) set of substitutions which can be applied to a fully-abstract (i.e.
-      parameterized only by Unifiable tyVars) to yield the concrete, applied type constructor.
-   -}
-   unifyFields :: [ValT Renamed] -> [ValT Renamed] -> m (Map (Index "tyvar") (ValT Renamed))
-   unifyFields declFields suppliedFields = liftUnifyM $ do
-     rawSubs <- zipWithM unify declFields suppliedFields
-     foldM reconcile Map.empty rawSubs
+       Returns a (reconciled) set of substitutions which can be applied to a fully-abstract (i.e.
+       parameterized only by Unifiable tyVars) to yield the concrete, applied type constructor.
+    -}
+    unifyFields :: [ValT Renamed] -> [ValT Renamed] -> m (Map (Index "tyvar") (ValT Renamed))
+    unifyFields declFields suppliedFields = liftUnifyM $ do
+      rawSubs <- zipWithM unify declFields suppliedFields
+      foldM reconcile Map.empty rawSubs
 
-   {- Checks that the number of fields supplied as arguments is equal to the
-      number of fields in the corresponding constructor of the data declaration.
+    {- Checks that the number of fields supplied as arguments is equal to the
+       number of fields in the corresponding constructor of the data declaration.
 
-      This is needed because `zipWithM unifyFields` won't throw an error in the case that they are not equal.
-   -}
-   checkFieldArity :: Int -> DatatypeInfo Renamed -> m ()
-   checkFieldArity actualNumFields dtInfo = do
-     let ctors = toListOf  (#originalDecl % #datatypeConstructors % folded) dtInfo
-     expectedNumFields <- Vector.length . view #constructorArgs <$> findConstructor ctors
-     unless (actualNumFields == expectedNumFields) $
-       throwError $ IntroFormWrongNumArgs tyName ctorName actualNumFields
+       This is needed because `zipWithM unifyFields` won't throw an error in the case that they are not equal.
+    -}
+    checkFieldArity :: Int -> DatatypeInfo Renamed -> m ()
+    checkFieldArity actualNumFields dtInfo = do
+      let ctors = toListOf (#originalDecl % #datatypeConstructors % folded) dtInfo
+      expectedNumFields <- Vector.length . view #constructorArgs <$> findConstructor ctors
+      unless (actualNumFields == expectedNumFields) $
+        throwError $
+          IntroFormWrongNumArgs tyName ctorName actualNumFields
 
-   checkOpaqueArgs :: Set.Set PlutusDataConstructor -> m ()
-   checkOpaqueArgs = error "TODO: Implement 'checkOpaqueArgs'"
+    checkOpaqueArgs :: Set.Set PlutusDataConstructor -> m ()
+    checkOpaqueArgs = error "TODO: Implement 'checkOpaqueArgs'"
 
-   -- convenience helpers
+    -- convenience helpers
 
-   -- Looks up a constructor in a foldable container of constructors (which is probably always a vector but w/e)
-   -- Exists to avoid duplicating this code in a few places.
-   findConstructor :: forall (t :: Type -> Type) (a :: Type)
-                    . Foldable t
-                   => t (Constructor a)
-                   -> m (Constructor a)
-   findConstructor xs = case find (\x -> view #constructorName x == ctorName) xs of
-     Nothing -> throwError $ ConstructorDoesNotExistForType tyName ctorName
-     Just ctor -> pure ctor
+    -- Looks up a constructor in a foldable container of constructors (which is probably always a vector but w/e)
+    -- Exists to avoid duplicating this code in a few places.
+    findConstructor ::
+      forall (t :: Type -> Type) (a :: Type).
+      (Foldable t) =>
+      t (Constructor a) ->
+      m (Constructor a)
+    findConstructor xs = case find (\x -> view #constructorName x == ctorName) xs of
+      Nothing -> throwError $ ConstructorDoesNotExistForType tyName ctorName
+      Just ctor -> pure ctor
 
-   -- Looks up the DatatypeInfo for the type argument supplied
-   -- and also renames (and rethrows the rename error if renaming fails)
-   lookupDatatypeInfo ::  m (DatatypeInfo Renamed)
-   lookupDatatypeInfo = asks (preview (#datatypeInfo % ix tyName)) >>= \case
-     Nothing -> throwError $ TypeDoesNotExist tyName
-     Just infoAbstract -> case  renameDatatypeInfo infoAbstract of
-       Left e -> throwError $ DatatypeInfoRenameError e
-       Right infoRenamed -> pure infoRenamed
+    -- Looks up the DatatypeInfo for the type argument supplied
+    -- and also renames (and rethrows the rename error if renaming fails)
+    lookupDatatypeInfo :: m (DatatypeInfo Renamed)
+    lookupDatatypeInfo =
+      asks (preview (#datatypeInfo % ix tyName)) >>= \case
+        Nothing -> throwError $ TypeDoesNotExist tyName
+        Just infoAbstract -> case renameDatatypeInfo infoAbstract of
+          Left e -> throwError $ DatatypeInfoRenameError e
+          Right infoRenamed -> pure infoRenamed
 
-   -- Runs a UnifyM computation in our abstract monad. Again, largely to avoid superfluous code
-   -- duplication.
-   liftUnifyM :: forall a. UnifyM a -> m a
-   liftUnifyM act = do
-     tyDict <- asks (view #datatypeInfo)
-     case runUnifyM tyDict act of
-       Left e -> throwError $ UnificationError e
-       Right res -> pure res
+    -- Runs a UnifyM computation in our abstract monad. Again, largely to avoid superfluous code
+    -- duplication.
+    liftUnifyM :: forall a. UnifyM a -> m a
+    liftUnifyM act = do
+      tyDict <- asks (view #datatypeInfo)
+      case runUnifyM tyDict act of
+        Left e -> throwError $ UnificationError e
+        Right res -> pure res
 
 -- | Construct a node corresponding to the given constant.
 --
@@ -889,7 +906,9 @@ checkEncodingWithInfo tyDict valT = case checkEncodingArgs (view (#originalDecl 
 tryApply ::
   forall (m :: Type -> Type).
   (MonadError CovenantTypeError m, MonadReader ASGEnv m) =>
-  CompT AbstractTy -> ValT AbstractTy -> m (ValT AbstractTy)
+  CompT AbstractTy ->
+  ValT AbstractTy ->
+  m (ValT AbstractTy)
 tryApply algebraT argT = case runRenameM . renameCompT $ algebraT of
   Left err' -> throwError . RenameFunctionFailed algebraT $ err'
   Right renamedAlgebraT -> case runRenameM . renameValT $ argT of

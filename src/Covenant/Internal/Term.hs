@@ -25,7 +25,9 @@ import Covenant.Internal.Type
   ( AbstractTy,
     BuiltinFlatT,
     CompT,
-    ValT, ConstructorName, TyName,
+    ConstructorName,
+    TyName,
+    ValT,
   )
 import Covenant.Internal.Unification (TypeAppError)
 import Covenant.Prim (OneArgFunc, SixArgFunc, ThreeArgFunc, TwoArgFunc)
@@ -149,27 +151,27 @@ data CovenantTypeError
     --
     -- @since 1.1.0
     CataUnsuitable (CompT AbstractTy) (ValT AbstractTy)
-    -- | We tried to lookup the DatatypeInfo corresponding to a TyName and came up empty handed
+  | -- | We tried to lookup the DatatypeInfo corresponding to a TyName and came up empty handed
     -- @since 1.2.0
-  | TypeDoesNotExist TyName
-    -- | We tried to rename a DatatypeInfo and failed. For now, only Intro Form helpers throw this but
+    TypeDoesNotExist TyName
+  | -- | We tried to rename a DatatypeInfo and failed. For now, only Intro Form helpers throw this but
     --   something else might in the future so I'm keeping the name generic.
     -- @since 1.2.0
-  | DatatypeInfoRenameError RenameError
-    -- | We tried to lookup a constructor for a given type. The type exists, but the constructor does not.
+    DatatypeInfoRenameError RenameError
+  | -- | We tried to lookup a constructor for a given type. The type exists, but the constructor does not.
     -- @since 1.2.0
-  | ConstructorDoesNotExistForType TyName ConstructorName
-    -- | When using the helper function to construct an introduction form, the type and constructor exist but the
+    ConstructorDoesNotExistForType TyName ConstructorName
+  | -- | When using the helper function to construct an introduction form, the type and constructor exist but the
     --   number of fields provided as an argument does not match the number of declared fields.
     --   The `Int` is the *incorrect* number of *supplied* fields
     -- @since 1.2.0
-  | IntroFormWrongNumArgs TyName ConstructorName Int
-    -- | The user passed an error node as an argument to a datatype into form.
+    IntroFormWrongNumArgs TyName ConstructorName Int
+  | -- | The user passed an error node as an argument to a datatype into form.
     --   While we could theoretically handle this, there doesn't seem to be a good reason to do so, and passing
     --   such a node is almost certainly a mistake.
     --   We just return the arguments to `dataConstructor` since that's all we can really do.
     -- @since 1.2.0
-  | IntroFormErrorNodeField TyName ConstructorName (Vector Ref)
+    IntroFormErrorNodeField TyName ConstructorName (Vector Ref)
   deriving stock
     ( -- | @since 1.0.0
       Eq,
@@ -290,7 +292,6 @@ data ValNodeInfo
   | -- | @since 1.2.0
     CataInternal Ref Ref
   | DataConstructorInternal TyName ConstructorName (Vector Ref)
-
   deriving stock
     ( -- | @since 1.0.0
       Eq,
