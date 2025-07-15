@@ -17,8 +17,12 @@ import Covenant.Test
     failLeft,
     list,
     prettyDeclSet,
+    renameCompT,
+    renameValT,
+    runRenameM,
     tree,
     tyAppTestDatatypes,
+    unsafeTyCon,
     weirderList,
   )
 import Covenant.Type
@@ -26,10 +30,6 @@ import Covenant.Type
     CompT (Comp0, Comp1, Comp2),
     CompTBody (ReturnT, (:--:>)),
     ValT (Abstraction, ThunkT),
-    renameCompT,
-    renameValT,
-    runRenameM,
-    tyCon,
     tyvar,
   )
 import Data.Map qualified as M
@@ -137,7 +137,7 @@ bbfWeirderList = testCase "bbfWeirderList" $ do
         ( Comp2
             ( ThunkT
                 ( Comp0
-                    ( tyCon "Maybe" [tyCon "Pair" [tyvar (S Z) ix0, tyvar (S Z) ix1]]
+                    ( unsafeTyCon "Maybe" [unsafeTyCon "Pair" [tyvar (S Z) ix0, tyvar (S Z) ix1]]
                         :--:> ReturnT (tyvar (S Z) ix1)
                     )
                 )

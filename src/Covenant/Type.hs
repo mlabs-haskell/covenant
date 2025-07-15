@@ -36,29 +36,16 @@ module Covenant.Type
     mlResultT,
     unitT,
 
-    -- * Renaming
-
-    -- ** Types
-    RenameError (..),
-    RenameM,
-
-    -- ** Introduction
-    renameValT,
-    renameCompT,
-    renameDataDecl,
-
-    -- ** Elimination
-    runRenameM,
-
-    -- * Type application
-    TypeAppError (..),
-    checkApp,
-    runUnifyM,
-    -- Data declarations & friends
-    DataDeclaration (DataDeclaration, OpaqueData),
-    Constructor (Constructor),
+    -- * Data declarations
     TyName (TyName),
     ConstructorName (ConstructorName),
+    Constructor (Constructor),
+    PlutusDataStrategy
+      ( EnumData,
+        ProductListData,
+        ConstrData,
+        NewtypeData
+      ),
     DataEncoding (SOP, PlutusData, BuiltinStrategy),
     PlutusDataConstructor
       ( PlutusI,
@@ -67,27 +54,7 @@ module Covenant.Type
         PlutusList,
         PlutusMap
       ),
-    PlutusDataStrategy
-      ( EnumData,
-        ProductListData,
-        ConstrData,
-        NewtypeData
-      ),
-    InternalStrategy
-      ( InternalListStrat,
-        InternalPairStrat,
-        InternalDataStrat,
-        InternalAssocMapStrat
-      ),
-
-    -- * Datatype sanity checking
-    cycleCheck,
-    checkDataDecls,
-    checkEncodingArgs,
-
-    -- * for tests
-    prettyStr,
-    tyCon,
+    DataDeclaration (DataDeclaration, OpaqueData),
   )
 where
 
@@ -102,26 +69,8 @@ import Covenant.Index
     count3,
     intCount,
   )
--- re-export for tests
-import Covenant.Internal.KindCheck (checkDataDecls, checkEncodingArgs, cycleCheck)
-import Covenant.Internal.PrettyPrint (prettyStr)
-import Covenant.Internal.Rename
-  ( RenameError
-      ( InvalidAbstractionReference
-      ),
-    RenameM,
-    renameCompT,
-    renameDataDecl,
-    renameValT,
-    runRenameM,
-  )
 import Covenant.Internal.Strategy
-  ( InternalStrategy
-      ( InternalAssocMapStrat,
-        InternalDataStrat,
-        InternalListStrat,
-        InternalPairStrat
-      ),
+  ( DataEncoding (BuiltinStrategy, PlutusData, SOP),
     PlutusDataConstructor
       ( PlutusB,
         PlutusConstr,
@@ -153,22 +102,10 @@ import Covenant.Internal.Type
     Constructor (Constructor),
     ConstructorName (ConstructorName),
     DataDeclaration (DataDeclaration, OpaqueData),
-    DataEncoding (BuiltinStrategy, PlutusData, SOP),
     Renamed (Rigid, Unifiable, Wildcard),
     TyName (TyName),
     ValT (Abstraction, BuiltinFlat, Datatype, ThunkT),
     arity,
-  )
-import Covenant.Internal.Unification
-  ( TypeAppError
-      ( DoesNotUnify,
-        ExcessArgs,
-        InsufficientArgs,
-        LeakingUnifiable,
-        LeakingWildcard
-      ),
-    checkApp,
-    runUnifyM,
   )
 import Data.Coerce (coerce)
 import Data.Kind (Type)
@@ -413,6 +350,3 @@ countHelper expected (CompT actual xs) = do
   expectedCount <- preview intCount expected
   guard (expectedCount == actual)
   pure xs
-
-tyCon :: TyName -> [ValT a] -> ValT a
-tyCon tn args = Datatype tn (Vector.fromList args)

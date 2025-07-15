@@ -52,10 +52,9 @@ module Covenant.ASG
     CovenantError (..),
     ScopeInfo,
     ASGBuilder,
+    TypeAppError (..),
+    RenameError (..),
     CovenantTypeError (..),
-    RenameError
-      ( InvalidAbstractionReference
-      ),
 
     -- ** Introducers
     arg,
@@ -172,7 +171,20 @@ import Covenant.Internal.Type
     ValT (BuiltinFlat, Datatype, ThunkT),
     arity,
   )
-import Covenant.Internal.Unification (checkApp)
+import Covenant.Internal.Unification
+  ( TypeAppError
+      ( DatatypeInfoRenameFailed,
+        DoesNotUnify,
+        ExcessArgs,
+        ImpossibleHappened,
+        InsufficientArgs,
+        LeakingUnifiable,
+        LeakingWildcard,
+        NoBBForm,
+        NoDatatypeInfo
+      ),
+    checkApp,
+  )
 import Covenant.Prim
   ( OneArgFunc,
     SixArgFunc,

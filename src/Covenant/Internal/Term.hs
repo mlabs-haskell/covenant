@@ -245,8 +245,7 @@ data CompNodeInfo
   = Builtin1Internal OneArgFunc
   | Builtin2Internal TwoArgFunc
   | Builtin3Internal ThreeArgFunc
-  | -- | @since 1.1.0
-    Builtin6Internal SixArgFunc
+  | Builtin6Internal SixArgFunc
   | LamInternal Id
   | ForceInternal Ref
   | ReturnInternal Ref

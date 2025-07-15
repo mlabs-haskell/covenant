@@ -9,12 +9,16 @@
 module Covenant.Util
   ( pattern NilV,
     pattern ConsV,
+    prettyStr,
   )
 where
 
 import Data.Kind (Type)
+import Data.Text qualified as Text
 import Data.Vector.Generic (Vector)
 import Data.Vector.Generic qualified as Vector
+import Prettyprinter (Pretty (pretty), defaultLayoutOptions, layoutPretty)
+import Prettyprinter.Render.Text (renderStrict)
 
 -- | A pattern matching helper for vectors (of all types), corresponding to @[]@
 -- for lists. This pattern is bidirectional, which means it can be used just
@@ -43,3 +47,14 @@ pattern ConsV ::
 pattern ConsV x xs <- (Vector.uncons -> Just (x, xs))
 
 {-# COMPLETE NilV, ConsV #-}
+
+-- | Shorthand to transform any 'Pretty' into a 'String' using the default
+-- layout.
+--
+-- @since 1.1.0
+prettyStr :: forall (a :: Type). (Pretty a) => a -> String
+prettyStr =
+  Text.unpack
+    . renderStrict
+    . layoutPretty defaultLayoutOptions
+    . pretty

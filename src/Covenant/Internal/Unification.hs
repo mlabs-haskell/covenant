@@ -42,7 +42,9 @@ import Data.Vector.NonEmpty qualified as NonEmpty
 import Data.Word (Word64)
 import Optics.Core (ix, preview, view)
 
--- | @since 1.0.0
+-- | Possible errors resulting from applications of arguments to functions.
+--
+-- @since 1.0.0
 data TypeAppError
   = -- | The final type after all arguments are applied is @forall a . a@.
     LeakingUnifiable (Index "tyvar")
@@ -110,6 +112,11 @@ lookupBBForm tn =
     Nothing -> throwError $ NoBBForm tn
     Just bbForm -> pure bbForm
 
+-- | Given information about in-scope datatypes, a computation type, and a list
+-- of arguments (some of which may be errors), try to construct the type of the
+-- result of the application of those arguments to the computation.
+--
+-- @since 1.0.0
 checkApp ::
   Map TyName (DatatypeInfo AbstractTy) ->
   CompT Renamed ->
@@ -117,7 +124,6 @@ checkApp ::
   Either TypeAppError (ValT Renamed)
 checkApp tyDict f args = runUnifyM tyDict $ checkApp' f args
 
--- | @since 1.1.0
 checkApp' ::
   CompT Renamed ->
   [Maybe (ValT Renamed)] ->

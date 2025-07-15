@@ -12,7 +12,6 @@ module Covenant.Internal.Type
     ValT (..),
     BuiltinFlatT (..),
     TyName (..),
-    DataEncoding (..),
     runConstructorName,
     abstraction,
     thunkT,
@@ -323,7 +322,7 @@ newtype ConstructorName = ConstructorName Text
 runConstructorName :: ConstructorName -> Text
 runConstructorName (ConstructorName nm) = nm
 
--- | A single constructor of a data type.
+-- | A single constructor of a data type, with its fields.
 --
 -- @since 1.1.0
 data Constructor (a :: Type)
@@ -360,8 +359,15 @@ instance
 --
 -- @since 1.1.0
 data DataDeclaration a
-  = DataDeclaration TyName (Count "tyvar") (Vector (Constructor a)) DataEncoding
-  | OpaqueData TyName (Set PlutusDataConstructor)
+  = -- | A \'standard\' datatype, with its constructors and encoding.
+    --
+    -- @since 1.1.0
+    DataDeclaration TyName (Count "tyvar") (Vector (Constructor a)) DataEncoding
+  | -- | An \'opaque\' datatype, with the permitted constructors of
+    -- @Data@ we can use to build and tear it down.
+    --
+    -- @since 1.1.0
+    OpaqueData TyName (Set PlutusDataConstructor)
   deriving stock
     ( -- | @since 1.1.0
       Show,
