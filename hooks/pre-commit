@@ -4,6 +4,6 @@
 set -euxo pipefail
 
 # Word splitting here is intentional
-ormolu --mode=inplace $(find src test -name "*.hs")
+ormolu --mode=check $(find src test -name "*.hs")
 
-cabal-gild --io=covenant.cabal
+cabal-gild --mode=check --io=covenant.cabal
