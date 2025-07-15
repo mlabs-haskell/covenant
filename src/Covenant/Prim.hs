@@ -7,12 +7,6 @@
 -- Contains definitions relating to Plutus primitive functions in Covenant
 -- programs.
 --
--- = Note
---
--- In the 1.0.0 release, we didn't include non-flat builtin types, specifically
--- pairs, lists and @Data@. Thus, the primops that operate on, or produce, these
--- are not currently included.
---
 -- @since 1.0.0
 module Covenant.Prim
   ( OneArgFunc (..),
@@ -58,10 +52,7 @@ import Test.QuickCheck (Arbitrary (arbitrary), elements)
 -- to directly \'lift\' empty list constants into itself. Secondly, while these
 -- primitives /could/ still be used instead of direct lifts, there is never a
 -- reason to prefer them, as they are less efficient than embedding a constant
--- directly. Thirdly, their naive typings would end up with overdetermined type
--- variables - consider the typing of @MkNilData@:
---
--- @forall a . () -> ![a]@
+-- directly.
 --
 -- For all of these reasons, we do not represent these primitives in the ASG.
 --
@@ -73,21 +64,36 @@ data OneArgFunc
   | Blake2b_256
   | EncodeUtf8
   | DecodeUtf8
-  | FstPair
-  | SndPair
-  | HeadList
-  | TailList
-  | NullList
-  | MapData
-  | ListData
-  | IData
-  | BData
-  | UnConstrData
-  | UnMapData
-  | UnListData
-  | UnIData
-  | UnBData
-  | SerialiseData
+  | -- | @since 1.1.0
+    FstPair
+  | -- | @since 1.1.0
+    SndPair
+  | -- | @since 1.1.0
+    HeadList
+  | -- | @since 1.1.0
+    TailList
+  | -- | @since 1.1.0
+    NullList
+  | -- | @since 1.1.0
+    MapData
+  | -- | @since 1.1.0
+    ListData
+  | -- | @since 1.1.0
+    IData
+  | -- | @since 1.1.0
+    BData
+  | -- | @since 1.1.0
+    UnConstrData
+  | -- | @since 1.1.0
+    UnMapData
+  | -- | @since 1.1.0
+    UnListData
+  | -- | @since 1.1.0
+    UnIData
+  | -- | @since 1.1.0
+    UnBData
+  | -- | @since 1.1.0
+    SerialiseData
   | BLS12_381_G1_neg
   | BLS12_381_G1_compress
   | BLS12_381_G1_uncompress
@@ -217,10 +223,14 @@ data TwoArgFunc
   | EqualsString
   | ChooseUnit
   | Trace
-  | MkCons
-  | ConstrData
-  | EqualsData
-  | MkPairData
+  | -- | @since 1.1.0
+    MkCons
+  | -- | @since 1.1.0
+    ConstrData
+  | -- | @since 1.1.0
+    EqualsData
+  | -- | @since 1.1.0
+    MkPairData
   | BLS12_381_G1_add
   | BLS12_381_G1_scalarMul
   | BLS12_381_G1_equal
@@ -354,8 +364,10 @@ data ThreeArgFunc
   | VerifyEcdsaSecp256k1Signature
   | VerifySchnorrSecp256k1Signature
   | IfThenElse
-  | ChooseList
-  | CaseList
+  | -- | @since 1.1.0
+    ChooseList
+  | -- | @since 1.1.0
+    CaseList
   | IntegerToByteString
   | AndByteString
   | OrByteString

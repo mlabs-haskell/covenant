@@ -6,7 +6,6 @@ module Covenant.Internal.PrettyPrint
     bindVars,
     mkForall,
     lookupAbstraction,
-    prettyStr,
   )
 where
 
@@ -25,7 +24,6 @@ import Covenant.Index
 import Data.Kind (Type)
 import Data.Map.Strict (Map)
 import Data.Map.Strict qualified as Map
-import Data.Text qualified as T
 import Data.Vector (Vector)
 import Data.Vector qualified as Vector
 import GHC.Exts (fromListN)
@@ -45,15 +43,9 @@ import Optics.Core
 import Prettyprinter
   ( Doc,
     Pretty (pretty),
-    defaultLayoutOptions,
     hsep,
-    layoutPretty,
     (<+>),
   )
-import Prettyprinter.Render.Text (renderStrict)
-
-prettyStr :: forall (a :: Type). (Pretty a) => a -> String
-prettyStr = T.unpack . renderStrict . layoutPretty defaultLayoutOptions . pretty
 
 newtype ScopeBoundary = ScopeBoundary Int
   deriving (Show, Eq, Ord, Num, Real, Enum, Integral) via Int

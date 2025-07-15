@@ -1,11 +1,15 @@
-{-# OPTIONS_GHC -Wno-unrecognised-pragmas #-}
-
-{-# HLINT ignore "Use camelCase" #-}
 module Main (main) where
 
+import Covenant.ASG (defaultDatatypes)
+import Covenant.Data ()
 import Covenant.DeBruijn (DeBruijn (Z))
 import Covenant.Index (count0, count1, ix0)
-import Covenant.Test (ledgerTypes)
+import Covenant.Test
+  ( checkDataDecls,
+    checkEncodingArgs,
+    cycleCheck,
+    unsafeTyCon,
+  )
 import Covenant.Type
   ( AbstractTy (BoundAt),
     BuiltinFlatT (IntegerT),
@@ -17,13 +21,9 @@ import Covenant.Type
     PlutusDataStrategy (ConstrData),
     TyName,
     ValT (Abstraction, BuiltinFlat, Datatype, ThunkT),
-    checkDataDecls,
-    checkEncodingArgs,
-    cycleCheck,
-    tyCon,
     tyvar,
   )
-import Data.Map qualified as M
+import Data.Map.Strict qualified as M
 import Data.Vector qualified as V
 import Optics.Core (view)
 import Test.Tasty (TestTree, defaultMain, testGroup)
@@ -39,7 +39,7 @@ main =
       checkLedgerTypes,
       simpleEncodingMismatch,
       nestedThunkArg,
-      noThunkArgsToSOPTyCons_for_now,
+      noThunkArgsToSOPTyCons,
       goodSOPArg
     ]
 
@@ -48,8 +48,8 @@ checkLedgerTypes =
   testCase "kindCheckLedgerTypes"
     . either (assertFailure . show) pure
     . checkDataDecls
-    . foldr (\x acc -> M.insert (view #datatypeName x) x acc) M.empty
-    $ ledgerTypes
+    . fmap (view #originalDecl)
+    $ defaultDatatypes
 
 encodingCheck :: String -> [DataDeclaration AbstractTy] -> ValT AbstractTy -> TestTree
 encodingCheck testNm tyDict valT =
@@ -63,8 +63,9 @@ shouldFailEncodingCheck tnm tyDict valT = expectFail $ encodingCheck tnm tyDict 
 simpleEncodingMismatch :: TestTree
 simpleEncodingMismatch = shouldFailEncodingCheck "simpleEncodingMismatch" [maybee, intList] encodingMismatch
 
-noThunkArgsToSOPTyCons_for_now :: TestTree
-noThunkArgsToSOPTyCons_for_now = shouldFailEncodingCheck "no thunk args to SOP tycons (for now)" [maybeSOP] badSOPThunk
+noThunkArgsToSOPTyCons :: TestTree
+noThunkArgsToSOPTyCons =
+  shouldFailEncodingCheck "no thunk args to SOP tycons (for now)" [maybeSOP] badSOPThunk
 
 nestedThunkArg :: TestTree
 nestedThunkArg = shouldFailEncodingCheck "nestedThunkArg" [maybee] badThunkArg
@@ -128,12 +129,16 @@ identitee = ThunkT $ Comp1 (tyvar Z ix0 :--:> ReturnT (tyvar Z ix0))
 -- DATA ENCODED MAYBE
 -- Maybe (Maybe (forall a. a -> a))
 badThunkArg :: ValT AbstractTy
-badThunkArg = tyCon "Maybe" [tyCon "Maybe" [identitee]]
+badThunkArg = unsafeTyCon "Maybe" [unsafeTyCon "Maybe" [identitee]]
 
 -- SOP ENCODED MAYBE
 -- Maybe (Maybe (Maybe Integer))
 goodSOP :: ValT AbstractTy
-goodSOP = tyCon "MaybeSOP" [tyCon "MaybeSOP" [tyCon "MaybeSOP" [BuiltinFlat IntegerT]]]
+goodSOP =
+  unsafeTyCon
+    "MaybeSOP"
+    [ unsafeTyCon "MaybeSOP" [unsafeTyCon "MaybeSOP" [BuiltinFlat IntegerT]]
+    ]
 
 -- NOTE Sean 7/2/2025: We are *temporarily* forbidding thunk arguments even to SOP encoded type constructors.
 --                     This is not strictly necessary, and we can go back and change that if we have time, but it
@@ -141,7 +146,7 @@ goodSOP = tyCon "MaybeSOP" [tyCon "MaybeSOP" [tyCon "MaybeSOP" [BuiltinFlat Inte
 -- SOP ENCODED MAYBE
 -- Maybe (forall a. a -> a)
 badSOPThunk :: ValT AbstractTy
-badSOPThunk = tyCon "MaybeSOP" [identitee]
+badSOPThunk = unsafeTyCon "MaybeSOP" [identitee]
 
 mutRec1 :: DataDeclaration AbstractTy
 mutRec1 = DataDeclaration "MutRec1" count0 (V.fromList ctors) SOP
