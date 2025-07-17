@@ -3,8 +3,10 @@ module Covenant.Internal.Rename
     RenameError (..),
     runRenameM,
     renameValT,
+    renameDataDecl,
     renameCompT,
     undoRename,
+    renameDatatypeInfo,
   )
 where
 
@@ -26,15 +28,19 @@ import Control.Monad.State.Strict
     gets,
     modify,
   )
+import Covenant.Data (DatatypeInfo (DatatypeInfo))
 import Covenant.DeBruijn (DeBruijn (S, Z), asInt)
 import Covenant.Index (Count, Index, intCount, intIndex)
 import Covenant.Internal.Type
   ( AbstractTy (BoundAt),
     CompT (CompT),
     CompTBody (CompTBody),
+    Constructor (Constructor),
+    DataDeclaration (DataDeclaration, OpaqueData),
     Renamed (Rigid, Unifiable, Wildcard),
-    ValT (Abstraction, BuiltinFlat, ThunkT),
+    ValT (Abstraction, BuiltinFlat, Datatype, ThunkT),
   )
+import Data.Bitraversable (Bitraversable (bitraverse))
 import Data.Coerce (coerce)
 import Data.Kind (Type)
 import Data.Tuple.Optics (_1)
@@ -107,7 +113,7 @@ instance
 
 -- | Ways in which the renamer can fail.
 --
--- @since 1.0.0
+-- @since 1.1.0
 data RenameError
   = -- | An attempt to reference an abstraction in a scope where this
     -- abstraction doesn't exist. First field is the true level, second is
@@ -115,18 +121,6 @@ data RenameError
     --
     -- @since 1.0.0
     InvalidAbstractionReference Int (Index "tyvar")
-  | -- | A value type specifies an abstraction that never gets used
-    -- anywhere. For example, the type @forall a b . [a]@ has @b@
-    -- irrelevant.
-    --
-    -- @since 1.0.0
-    IrrelevantAbstraction
-  | -- | A computation type specifies an abstraction which is not used
-    -- by any argument. For example, the type @forall a b . a -> !(b -> !a)@
-    -- has @b@ undetermined.
-    --
-    -- @since 1.0.0
-    UndeterminedAbstraction (Vector (ValT AbstractTy)) (Vector (ValT Renamed))
   deriving stock (Eq, Show)
 
 -- | A \'renaming monad\' which allows us to convert type representations from
@@ -183,9 +177,6 @@ renameCompT (CompT abses (CompTBody xs)) = RenameM $ do
     Vector.generateM
       (NonEmpty.length xs - 1)
       (\i -> coerce . renameValT $ xs NonEmpty.! i)
-  -- Check that we don't overdetermine anything
-  ourAbstractions <- gets (view (#tracker % to Vector.head % _1))
-  unless (Vector.and ourAbstractions) (throwError $ UndeterminedAbstraction (NonEmpty.toVector xs) renamedArgs)
   -- Check result type
   renamedResult <- coerce . renameValT . NonEmpty.last $ xs
   -- Roll back state
@@ -201,6 +192,31 @@ renameValT = \case
   Abstraction t -> Abstraction <$> renameAbstraction t
   ThunkT t -> ThunkT <$> renameCompT t
   BuiltinFlat t -> pure . BuiltinFlat $ t
+  -- Assumes kind-checking has occurred
+  Datatype tn xs -> RenameM $ do
+    -- We don't step or un-step the scope here b/c a TyCon which appears as a ValT _cannot_ bind variables.
+    -- This Vector here doesn't represent a function, but a product, so we there is no "return" type to treat specially (I think!)
+    renamedXS <- Vector.mapM (coerce . renameValT) xs
+    pure $ Datatype tn renamedXS
+
+-- @since 1.1.0
+renameDataDecl :: DataDeclaration AbstractTy -> RenameM (DataDeclaration Renamed)
+renameDataDecl (OpaqueData tn manual) = pure $ OpaqueData tn manual
+renameDataDecl (DataDeclaration tn cnt ctors strat) = RenameM $ do
+  modify (stepUpScope cnt)
+  renamedCtors <- Vector.mapM (coerce . renameCtor) ctors
+  modify dropDownScope
+  pure $ DataDeclaration tn cnt renamedCtors strat
+  where
+    renameCtor :: Constructor AbstractTy -> RenameM (Constructor Renamed)
+    renameCtor (Constructor cn args) = Constructor cn <$> traverse renameValT args
+
+renameDatatypeInfo :: DatatypeInfo AbstractTy -> Either RenameError (DatatypeInfo Renamed)
+renameDatatypeInfo (DatatypeInfo ogDecl baseFStuff bb) = runRenameM $ do
+  ogDecl' <- renameDataDecl ogDecl
+  baseFStuff' <- traverse (bitraverse renameDataDecl renameValT) baseFStuff
+  bb' <- traverse renameValT bb
+  pure $ DatatypeInfo ogDecl' baseFStuff' bb'
 
 -- A way of 'undoing' the renaming process. This is meant to be used only after
 -- applications, and assumes that what is being un-renamed is the result of a
@@ -218,6 +234,7 @@ undoRename t = runReader (go t) 1
       ThunkT (CompT abses (CompTBody xs)) ->
         ThunkT . CompT abses . CompTBody <$> local (+ 1) (traverse go xs)
       BuiltinFlat t' -> pure . BuiltinFlat $ t'
+      Datatype tn args -> Datatype tn <$> traverse go args
 
 -- Helpers
 
@@ -231,8 +248,8 @@ trueLevelToDB trueLevel = asks (go . subtract trueLevel)
 
 renameAbstraction :: AbstractTy -> RenameM Renamed
 renameAbstraction (BoundAt scope index) = RenameM $ do
-  trueLevel <- gets (\x -> view (#tracker % to Vector.length) x - asInt scope)
-  scopeInfo <- gets (\x -> view #tracker x Vector.!? asInt scope)
+  trueLevel <- gets (\x -> view (#tracker % to Vector.length) x - review asInt scope)
+  scopeInfo <- gets (\x -> view #tracker x Vector.!? review asInt scope)
   let asIntIx = review intIndex index
   case scopeInfo of
     -- This variable is bound in a scope that encloses the renaming scope. Thus,
@@ -274,4 +291,4 @@ dropDownScope = over #tracker Vector.tail
 -- we've seen this variable.
 noteUsed :: DeBruijn -> Index "tyvar" -> RenameState -> RenameState
 noteUsed scope index =
-  set (#tracker % ix (asInt scope) % _1 % ix (review intIndex index)) True
+  set (#tracker % ix (review asInt scope) % _1 % ix (review intIndex index)) True

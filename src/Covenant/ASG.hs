@@ -35,6 +35,7 @@ module Covenant.ASG
       ( Builtin1,
         Builtin2,
         Builtin3,
+        Builtin6,
         Lam,
         Force,
         Return
@@ -51,38 +52,16 @@ module Covenant.ASG
     CovenantError (..),
     ScopeInfo,
     ASGBuilder,
-    CovenantTypeError
-      ( BrokenIdReference,
-        ForceCompType,
-        ForceNonThunk,
-        ForceError,
-        ThunkValType,
-        ThunkError,
-        ApplyToValType,
-        ApplyToError,
-        ApplyCompType,
-        RenameFunctionFailed,
-        RenameArgumentFailed,
-        NoSuchArgument,
-        ReturnCompType,
-        LambdaResultsInValType,
-        LambdaResultsInNonReturn,
-        ReturnWrapsError,
-        ReturnWrapsCompType,
-        WrongReturnType,
-        UnificationError
-      ),
-    RenameError
-      ( InvalidAbstractionReference,
-        IrrelevantAbstraction,
-        UndeterminedAbstraction
-      ),
+    TypeAppError (..),
+    RenameError (..),
+    CovenantTypeError (..),
 
     -- ** Introducers
     arg,
     builtin1,
     builtin2,
     builtin3,
+    builtin6,
     force,
     ret,
     lam,
@@ -92,6 +71,11 @@ module Covenant.ASG
     app,
 
     -- ** Elimination
+
+    -- *** Environment
+    defaultDatatypes,
+
+    -- *** Function
     runASGBuilder,
   )
 where
@@ -113,13 +97,14 @@ import Control.Monad.Reader
     runReaderT,
   )
 import Covenant.Constant (AConstant, typeConstant)
+import Covenant.Data (DatatypeInfo, mkDatatypeInfo)
 import Covenant.DeBruijn (DeBruijn, asInt)
 import Covenant.Index (Index, count0, intIndex)
+import Covenant.Internal.KindCheck (checkEncodingArgs)
+import Covenant.Internal.Ledger (ledgerTypes)
 import Covenant.Internal.Rename
   ( RenameError
-      ( InvalidAbstractionReference,
-        IrrelevantAbstraction,
-        UndeterminedAbstraction
+      ( InvalidAbstractionReference
       ),
     renameCompT,
     renameValT,
@@ -134,6 +119,7 @@ import Covenant.Internal.Term
       ( Builtin1Internal,
         Builtin2Internal,
         Builtin3Internal,
+        Builtin6Internal,
         ForceInternal,
         LamInternal,
         ReturnInternal
@@ -143,6 +129,7 @@ import Covenant.Internal.Term
         ApplyToError,
         ApplyToValType,
         BrokenIdReference,
+        EncodingError,
         ForceCompType,
         ForceError,
         ForceNonThunk,
@@ -170,15 +157,32 @@ import Covenant.Internal.Type
   ( AbstractTy,
     CompT (CompT),
     CompTBody (CompTBody),
+    DataDeclaration,
     Renamed,
+    TyName,
     ValT (ThunkT),
   )
-import Covenant.Internal.Unification (checkApp)
+import Covenant.Internal.Unification
+  ( TypeAppError
+      ( DatatypeInfoRenameFailed,
+        DoesNotUnify,
+        ExcessArgs,
+        ImpossibleHappened,
+        InsufficientArgs,
+        LeakingUnifiable,
+        LeakingWildcard,
+        NoBBForm,
+        NoDatatypeInfo
+      ),
+    checkApp,
+  )
 import Covenant.Prim
   ( OneArgFunc,
+    SixArgFunc,
     ThreeArgFunc,
     TwoArgFunc,
     typeOneArgFunc,
+    typeSixArgFunc,
     typeThreeArgFunc,
     typeTwoArgFunc,
   )
@@ -201,6 +205,7 @@ import Optics.Core
     over,
     preview,
     review,
+    view,
     (%),
   )
 
@@ -243,6 +248,28 @@ topLevelNode asg@(ASG (rootId, _)) = nodeAt rootId asg
 -- @since 1.0.0
 nodeAt :: Id -> ASG -> ASGNode
 nodeAt i (ASG (_, mappings)) = fromJust . Map.lookup i $ mappings
+
+data ASGEnv = ASGEnv ScopeInfo (Map TyName (DatatypeInfo AbstractTy))
+
+instance
+  (k ~ A_Lens, a ~ ScopeInfo, b ~ ScopeInfo) =>
+  LabelOptic "scopeInfo" k ASGEnv ASGEnv a b
+  where
+  {-# INLINEABLE labelOptic #-}
+  labelOptic =
+    lens
+      (\(ASGEnv si _) -> si)
+      (\(ASGEnv _ dti) si -> ASGEnv si dti)
+
+instance
+  (k ~ A_Lens, a ~ Map TyName (DatatypeInfo AbstractTy), b ~ Map TyName (DatatypeInfo AbstractTy)) =>
+  LabelOptic "datatypeInfo" k ASGEnv ASGEnv a b
+  where
+  {-# INLINEABLE labelOptic #-}
+  labelOptic =
+    lens
+      (\(ASGEnv _ dti) -> dti)
+      (\(ASGEnv si _) dti -> ASGEnv si dti)
 
 -- | A tracker for scope-related information while building an ASG
 -- programmatically. Currently only tracks available arguments.
@@ -295,6 +322,12 @@ pattern Builtin2 f <- Builtin2Internal f
 pattern Builtin3 :: ThreeArgFunc -> CompNodeInfo
 pattern Builtin3 f <- Builtin3Internal f
 
+-- | A Plutus primop with six arguments.
+--
+-- @since 1.1.0
+pattern Builtin6 :: SixArgFunc -> CompNodeInfo
+pattern Builtin6 f <- Builtin6Internal f
+
 -- | Force a thunk back into the computation it wraps.
 --
 -- @since 1.0.0
@@ -313,7 +346,7 @@ pattern Return r <- ReturnInternal r
 pattern Lam :: Id -> CompNodeInfo
 pattern Lam i <- LamInternal i
 
-{-# COMPLETE Builtin1, Builtin2, Builtin3, Force, Return, Lam #-}
+{-# COMPLETE Builtin1, Builtin2, Builtin3, Builtin6, Force, Return, Lam #-}
 
 -- | A compile-time literal of a flat builtin type.
 --
@@ -369,7 +402,7 @@ data CovenantError
 --
 -- @since 1.0.0
 newtype ASGBuilder (a :: Type)
-  = ASGBuilder (ReaderT ScopeInfo (ExceptT CovenantTypeError (HashConsT Id ASGNode Identity)) a)
+  = ASGBuilder (ReaderT ASGEnv (ExceptT CovenantTypeError (HashConsT Id ASGNode Identity)) a)
   deriving
     ( -- | @since 1.0.0
       Functor,
@@ -377,24 +410,38 @@ newtype ASGBuilder (a :: Type)
       Applicative,
       -- | @since 1.0.0
       Monad,
-      -- | @since 1.0.0
-      MonadReader ScopeInfo,
+      -- | @since 1.1.0
+      MonadReader ASGEnv,
       -- | @since 1.0.0
       MonadError CovenantTypeError,
       -- | @since 1.0.0
       MonadHashCons Id ASGNode
     )
-    via ReaderT ScopeInfo (ExceptT CovenantTypeError (HashConsT Id ASGNode Identity))
+    via ReaderT ASGEnv (ExceptT CovenantTypeError (HashConsT Id ASGNode Identity))
+
+-- | A standard collection of types required for almost any realistic script.
+-- This includes non-\'flat\' builtin types (such as lists and pairs), as well
+-- as all types required by the ledger (including types like @Maybe@).
+--
+-- @since 1.1.0
+defaultDatatypes :: Map TyName (DatatypeInfo AbstractTy)
+defaultDatatypes = foldMap go ledgerTypes
+  where
+    go :: DataDeclaration AbstractTy -> Map TyName (DatatypeInfo AbstractTy)
+    go decl = case mkDatatypeInfo decl of
+      Left err' -> error $ "Unexpected failure in default datatypes: " <> show err'
+      Right info -> Map.singleton (view #datatypeName decl) info
 
 -- | Executes an 'ASGBuilder' to make a \'finished\' ASG.
 --
 -- @since 1.0.0
 runASGBuilder ::
   forall (a :: Type).
+  Map TyName (DatatypeInfo AbstractTy) ->
   ASGBuilder a ->
   Either CovenantError ASG
-runASGBuilder (ASGBuilder comp) =
-  case runIdentity . runHashConsT . runExceptT . runReaderT comp . ScopeInfo $ Vector.empty of
+runASGBuilder tyDict (ASGBuilder comp) =
+  case runIdentity . runHashConsT . runExceptT . runReaderT comp $ ASGEnv (ScopeInfo Vector.empty) tyDict of
     (result, bm) -> case result of
       Left err' -> Left . TypeError bm $ err'
       Right _ -> case Bimap.size bm of
@@ -413,14 +460,14 @@ runASGBuilder (ASGBuilder comp) =
 -- @since 1.0.0
 arg ::
   forall (m :: Type -> Type).
-  (MonadError CovenantTypeError m, MonadReader ScopeInfo m) =>
+  (MonadError CovenantTypeError m, MonadReader ASGEnv m) =>
   DeBruijn ->
   Index "arg" ->
   m Arg
 arg scope index = do
-  let scopeAsInt = asInt scope
+  let scopeAsInt = review asInt scope
   let indexAsInt = review intIndex index
-  lookedUp <- asks (preview (#argumentInfo % ix scopeAsInt % ix indexAsInt))
+  lookedUp <- asks (preview (#scopeInfo % #argumentInfo % ix scopeAsInt % ix indexAsInt))
   case lookedUp of
     Nothing -> throwError . NoSuchArgument scope $ index
     Just t -> pure . Arg scope index $ t
@@ -459,6 +506,18 @@ builtin3 ::
   m Id
 builtin3 bi = do
   let node = ACompNode (typeThreeArgFunc bi) . Builtin3Internal $ bi
+  refTo node
+
+-- | As 'builtin1', but for six-argument primops.
+--
+-- @since 1.1.0
+builtin6 ::
+  forall (m :: Type -> Type).
+  (MonadHashCons Id ASGNode m) =>
+  SixArgFunc ->
+  m Id
+builtin6 bi = do
+  let node = ACompNode (typeSixArgFunc bi) . Builtin6Internal $ bi
   refTo node
 
 -- | Given a reference to a thunk, turn it back into a computation. Will fail if
@@ -513,13 +572,13 @@ ret r = do
 -- @since 1.0.0
 lam ::
   forall (m :: Type -> Type).
-  (MonadHashCons Id ASGNode m, MonadError CovenantTypeError m, MonadReader ScopeInfo m) =>
+  (MonadHashCons Id ASGNode m, MonadError CovenantTypeError m, MonadReader ASGEnv m) =>
   CompT AbstractTy ->
   m Id ->
   m Id
 lam expectedT@(CompT _ (CompTBody xs)) bodyComp = do
   let (args, resultT) = NonEmpty.unsnoc xs
-  bodyId <- local (over #argumentInfo (Vector.cons args)) bodyComp
+  bodyId <- local (over (#scopeInfo % #argumentInfo) (Vector.cons args)) bodyComp
   bodyNode <- lookupRef bodyId
   case bodyNode of
     Nothing -> throwError . BrokenIdReference $ bodyId
@@ -561,7 +620,7 @@ err = refTo AnError
 -- @since 1.0.0
 app ::
   forall (m :: Type -> Type).
-  (MonadHashCons Id ASGNode m, MonadError CovenantTypeError m) =>
+  (MonadHashCons Id ASGNode m, MonadError CovenantTypeError m, MonadReader ASGEnv m) =>
   Id ->
   Vector Ref ->
   m Id
@@ -572,11 +631,11 @@ app fId argRefs = do
       Left err' -> throwError . RenameFunctionFailed fT $ err'
       Right renamedFT -> do
         renamedArgs <- traverse renameArg argRefs
-        case checkApp renamedFT . Vector.toList $ renamedArgs of
-          Left err' -> throwError . UnificationError $ err'
-          Right result -> do
-            let restored = undoRename result
-            refTo . AValNode restored . AppInternal fId $ argRefs
+        tyDict <- asks (view #datatypeInfo)
+        result <- either (throwError . UnificationError) pure $ checkApp tyDict renamedFT (Vector.toList renamedArgs)
+        let restored = undoRename result
+        checkEncodingWithInfo tyDict restored
+        refTo . AValNode restored . AppInternal fId $ argRefs
     ValNodeType t -> throwError . ApplyToValType $ t
     ErrorNodeType -> throwError ApplyToError
 
@@ -611,7 +670,8 @@ thunk i = do
 renameArg ::
   forall (m :: Type -> Type).
   (MonadHashCons Id ASGNode m, MonadError CovenantTypeError m) =>
-  Ref -> m (Maybe (ValT Renamed))
+  Ref ->
+  m (Maybe (ValT Renamed))
 renameArg r =
   typeRef r >>= \case
     CompNodeType t -> throwError . ApplyCompType $ t
@@ -619,3 +679,13 @@ renameArg r =
       Left err' -> throwError . RenameArgumentFailed t $ err'
       Right renamed -> pure . Just $ renamed
     ErrorNodeType -> pure Nothing
+
+checkEncodingWithInfo ::
+  forall (a :: Type) (m :: Type -> Type).
+  (MonadError CovenantTypeError m) =>
+  Map TyName (DatatypeInfo a) ->
+  ValT AbstractTy ->
+  m ()
+checkEncodingWithInfo tyDict valT = case checkEncodingArgs (view (#originalDecl % #datatypeEncoding)) tyDict valT of
+  Left encErr -> throwError $ EncodingError encErr
+  Right {} -> pure ()

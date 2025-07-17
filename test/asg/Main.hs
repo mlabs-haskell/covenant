@@ -65,6 +65,7 @@ import Covenant.Type
 import Covenant.Util (pattern ConsV, pattern NilV)
 import Data.Coerce (coerce)
 import Data.Kind (Type)
+import Data.Map qualified as M
 import Data.Maybe (fromJust)
 import Data.Vector qualified as Vector
 import Optics.Core (preview, review)
@@ -120,20 +121,20 @@ unitEmptyASG :: IO ()
 unitEmptyASG = do
   let builtUp = pure ()
   let expected = Left EmptyASG
-  let actual = runASGBuilder builtUp
+  let actual = runASGBuilder M.empty builtUp
   assertEqual "" expected actual
 
 unitSingleError :: IO ()
 unitSingleError = do
   let builtUp = err
   let expected = Left TopLevelError
-  let actual = runASGBuilder builtUp
+  let actual = runASGBuilder M.empty builtUp
   assertEqual "" expected actual
 
 unitForceError :: IO ()
 unitForceError = do
   let builtUp = err >>= \i -> force (AnId i)
-  let result = runASGBuilder builtUp
+  let result = runASGBuilder M.empty builtUp
   case result of
     Left (TypeError _ ForceError) -> pure ()
     _ -> assertFailure $ "Unexpected result: " <> show result
@@ -141,7 +142,7 @@ unitForceError = do
 unitThunkError :: IO ()
 unitThunkError = do
   let builtUp = err >>= thunk
-  let result = runASGBuilder builtUp
+  let result = runASGBuilder M.empty builtUp
   case result of
     Left (TypeError _ ThunkError) -> pure ()
     _ -> assertFailure $ "Unexpected result: " <> show result
@@ -235,7 +236,9 @@ propForceThunk = forAllShrinkShow arbitrary shrink show $ \x ->
   where
     mkComps ::
       forall (a :: Type).
-      (a -> ASGBuilder Id) -> a -> (ASGBuilder Id, ASGBuilder Id)
+      (a -> ASGBuilder Id) ->
+      a ->
+      (ASGBuilder Id, ASGBuilder Id)
     mkComps f x =
       let comp = f x
           forceThunkComp = do
@@ -431,12 +434,12 @@ failWrongError :: CovenantError -> Property
 failWrongError err' = failWithCounterExample ("Unexpected error: " <> show err')
 
 withCompilationFailure :: ASGBuilder Id -> (CovenantError -> Property) -> Property
-withCompilationFailure comp cb = case runASGBuilder comp of
+withCompilationFailure comp cb = case runASGBuilder M.empty comp of
   Left err' -> cb err'
   Right asg -> failWithCounterExample ("Unexpected success: " <> show asg)
 
 withCompilationSuccess :: ASGBuilder Id -> (ASG -> Property) -> Property
-withCompilationSuccess comp cb = case runASGBuilder comp of
+withCompilationSuccess comp cb = case runASGBuilder M.empty comp of
   Left err' -> failWithCounterExample ("Unexpected failure: " <> show err')
   Right asg -> cb asg
 

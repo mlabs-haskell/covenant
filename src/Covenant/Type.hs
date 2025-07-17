@@ -22,6 +22,9 @@ module Covenant.Type
 
     -- * Value types
     ValT (..),
+    dataTypeT,
+    dataType1T,
+    dataType2T,
     BuiltinFlatT (..),
     byteStringT,
     integerT,
@@ -33,22 +36,25 @@ module Covenant.Type
     mlResultT,
     unitT,
 
-    -- * Renaming
-
-    -- ** Types
-    RenameError (..),
-    RenameM,
-
-    -- ** Introduction
-    renameValT,
-    renameCompT,
-
-    -- ** Elimination
-    runRenameM,
-
-    -- * Type application
-    TypeAppError (..),
-    checkApp,
+    -- * Data declarations
+    TyName (TyName),
+    ConstructorName (ConstructorName),
+    Constructor (Constructor),
+    PlutusDataStrategy
+      ( EnumData,
+        ProductListData,
+        ConstrData,
+        NewtypeData
+      ),
+    DataEncoding (SOP, PlutusData, BuiltinStrategy),
+    PlutusDataConstructor
+      ( PlutusI,
+        PlutusB,
+        PlutusConstr,
+        PlutusList,
+        PlutusMap
+      ),
+    DataDeclaration (DataDeclaration, OpaqueData),
   )
 where
 
@@ -63,16 +69,21 @@ import Covenant.Index
     count3,
     intCount,
   )
-import Covenant.Internal.Rename
-  ( RenameError
-      ( InvalidAbstractionReference,
-        IrrelevantAbstraction,
-        UndeterminedAbstraction
+import Covenant.Internal.Strategy
+  ( DataEncoding (BuiltinStrategy, PlutusData, SOP),
+    PlutusDataConstructor
+      ( PlutusB,
+        PlutusConstr,
+        PlutusI,
+        PlutusList,
+        PlutusMap
       ),
-    RenameM,
-    renameCompT,
-    renameValT,
-    runRenameM,
+    PlutusDataStrategy
+      ( ConstrData,
+        EnumData,
+        NewtypeData,
+        ProductListData
+      ),
   )
 import Covenant.Internal.Type
   ( AbstractTy (BoundAt),
@@ -88,18 +99,12 @@ import Covenant.Internal.Type
       ),
     CompT (CompT),
     CompTBody (CompTBody),
+    Constructor (Constructor),
+    ConstructorName (ConstructorName),
+    DataDeclaration (DataDeclaration, OpaqueData),
     Renamed (Rigid, Unifiable, Wildcard),
-    ValT (Abstraction, BuiltinFlat, ThunkT),
-  )
-import Covenant.Internal.Unification
-  ( TypeAppError
-      ( DoesNotUnify,
-        ExcessArgs,
-        InsufficientArgs,
-        LeakingUnifiable,
-        LeakingWildcard
-      ),
-    checkApp,
+    TyName (TyName),
+    ValT (Abstraction, BuiltinFlat, Datatype, ThunkT),
   )
 import Data.Coerce (coerce)
 import Data.Kind (Type)
@@ -107,6 +112,7 @@ import Data.Vector (Vector)
 import Data.Vector qualified as Vector
 import Data.Vector.NonEmpty (NonEmptyVector)
 import Data.Vector.NonEmpty qualified as NonEmpty
+import GHC.Exts (fromListN)
 import Optics.Core (preview)
 
 -- | The body of a computation type that doesn't take any arguments and produces
@@ -249,6 +255,24 @@ pattern CompN count xs <- CompT count xs
 -- @since 1.0.0
 tyvar :: DeBruijn -> Index "tyvar" -> ValT AbstractTy
 tyvar db = Abstraction . BoundAt db
+
+-- | Helper for referring to compound data types with no type variables.
+--
+-- @since 1.1.0
+dataTypeT :: forall (a :: Type). TyName -> ValT a
+dataTypeT tn = Datatype tn Vector.empty
+
+-- | Helper for referring to compound data types with one type variable.
+--
+-- @since 1.1.0
+dataType1T :: TyName -> ValT AbstractTy -> ValT AbstractTy
+dataType1T tn = Datatype tn . Vector.singleton
+
+-- | Helper for referring to compound data types with two type variables.
+--
+-- @since 1.1.0
+dataType2T :: TyName -> ValT AbstractTy -> ValT AbstractTy -> ValT AbstractTy
+dataType2T tn v1 v2 = Datatype tn . fromListN 2 $ [v1, v2]
 
 -- | Helper for defining the value type of builtin bytestrings.
 --

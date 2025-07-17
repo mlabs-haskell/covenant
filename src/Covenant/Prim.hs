@@ -7,12 +7,6 @@
 -- Contains definitions relating to Plutus primitive functions in Covenant
 -- programs.
 --
--- = Note
---
--- In the 1.0.0 release, we didn't include non-flat builtin types, specifically
--- pairs, lists and @Data@. Thus, the primops that operate on, or produce, these
--- are not currently included.
---
 -- @since 1.0.0
 module Covenant.Prim
   ( OneArgFunc (..),
@@ -21,20 +15,23 @@ module Covenant.Prim
     typeTwoArgFunc,
     ThreeArgFunc (..),
     typeThreeArgFunc,
-    -- SixArgFunc (..),
-    -- typeSixArgFunc,
+    SixArgFunc (..),
+    typeSixArgFunc,
   )
 where
 
-import Covenant.DeBruijn (DeBruijn (Z))
-import Covenant.Index (ix0)
+import Covenant.DeBruijn (DeBruijn (S, Z))
+import Covenant.Index (ix0, ix1)
 import Covenant.Type
   ( AbstractTy,
-    CompT (Comp0, Comp1),
+    CompT (Comp0, Comp1, Comp2),
     CompTBody (ReturnT, (:--:>)),
-    ValT,
+    ValT (ThunkT),
     boolT,
     byteStringT,
+    dataType1T,
+    dataType2T,
+    dataTypeT,
     g1T,
     g2T,
     integerT,
@@ -55,10 +52,7 @@ import Test.QuickCheck (Arbitrary (arbitrary), elements)
 -- to directly \'lift\' empty list constants into itself. Secondly, while these
 -- primitives /could/ still be used instead of direct lifts, there is never a
 -- reason to prefer them, as they are less efficient than embedding a constant
--- directly. Thirdly, their naive typings would end up with overdetermined type
--- variables - consider the typing of @MkNilData@:
---
--- @forall a . () -> ![a]@
+-- directly.
 --
 -- For all of these reasons, we do not represent these primitives in the ASG.
 --
@@ -70,22 +64,37 @@ data OneArgFunc
   | Blake2b_256
   | EncodeUtf8
   | DecodeUtf8
-  | --  | FstPair
-    --  |  SndPair
-    --  | HeadList
-    --  | TailList
-    --  | NullList
-    --  | MapData
-    --  | ListData
-    --  | IData
-    --  | BData
-    --  | UnConstrData
-    --  | UnMapData
-    --  | UnListData
-    --  | UnIData
-    --  | UnBData
-    --  | SerialiseData
-    BLS12_381_G1_neg
+  | -- | @since 1.1.0
+    FstPair
+  | -- | @since 1.1.0
+    SndPair
+  | -- | @since 1.1.0
+    HeadList
+  | -- | @since 1.1.0
+    TailList
+  | -- | @since 1.1.0
+    NullList
+  | -- | @since 1.1.0
+    MapData
+  | -- | @since 1.1.0
+    ListData
+  | -- | @since 1.1.0
+    IData
+  | -- | @since 1.1.0
+    BData
+  | -- | @since 1.1.0
+    UnConstrData
+  | -- | @since 1.1.0
+    UnMapData
+  | -- | @since 1.1.0
+    UnListData
+  | -- | @since 1.1.0
+    UnIData
+  | -- | @since 1.1.0
+    UnBData
+  | -- | @since 1.1.0
+    SerialiseData
+  | BLS12_381_G1_neg
   | BLS12_381_G1_compress
   | BLS12_381_G1_uncompress
   | BLS12_381_G2_neg
@@ -119,21 +128,21 @@ instance Arbitrary OneArgFunc where
         Blake2b_256,
         EncodeUtf8,
         DecodeUtf8,
-        -- FstPair,
-        -- SndPair,
-        -- HeadList,
-        -- TailList,
-        -- NullList,
-        -- MapData,
-        -- ListData,
-        -- IData,
-        -- BData,
-        -- UnConstrData,
-        -- UnMapData,
-        -- UnListData,
-        -- UnIData,
-        -- UnBData,
-        -- SerialiseData,
+        FstPair,
+        SndPair,
+        HeadList,
+        TailList,
+        NullList,
+        MapData,
+        ListData,
+        IData,
+        BData,
+        UnConstrData,
+        UnMapData,
+        UnListData,
+        UnIData,
+        UnBData,
+        SerialiseData,
         BLS12_381_G1_neg,
         BLS12_381_G1_compress,
         BLS12_381_G1_uncompress,
@@ -159,6 +168,21 @@ typeOneArgFunc = \case
   Blake2b_256 -> hashingT
   EncodeUtf8 -> Comp0 $ stringT :--:> ReturnT byteStringT
   DecodeUtf8 -> Comp0 $ byteStringT :--:> ReturnT stringT
+  FstPair -> Comp2 $ pairT aT bT :--:> ReturnT aT
+  SndPair -> Comp2 $ pairT aT bT :--:> ReturnT bT
+  HeadList -> Comp1 $ listT aT :--:> ReturnT aT
+  TailList -> Comp1 $ listT aT :--:> ReturnT (listT aT)
+  NullList -> Comp1 $ listT aT :--:> ReturnT boolT
+  MapData -> Comp0 $ listT (pairT dataT dataT) :--:> ReturnT dataT
+  ListData -> Comp0 $ listT dataT :--:> ReturnT dataT
+  IData -> Comp0 $ integerT :--:> ReturnT dataT
+  BData -> Comp0 $ byteStringT :--:> ReturnT dataT
+  UnConstrData -> Comp0 $ dataT :--:> ReturnT (pairT integerT (listT dataT))
+  UnMapData -> Comp0 $ dataT :--:> ReturnT (listT (pairT dataT dataT))
+  UnListData -> Comp0 $ dataT :--:> ReturnT (listT dataT)
+  UnIData -> Comp0 $ dataT :--:> ReturnT integerT
+  UnBData -> Comp0 $ dataT :--:> ReturnT byteStringT
+  SerialiseData -> Comp0 $ dataT :--:> ReturnT byteStringT
   BLS12_381_G1_neg -> Comp0 $ g1T :--:> ReturnT g1T
   BLS12_381_G1_compress -> Comp0 $ g1T :--:> ReturnT byteStringT
   BLS12_381_G1_uncompress -> Comp0 $ byteStringT :--:> ReturnT g1T
@@ -199,11 +223,15 @@ data TwoArgFunc
   | EqualsString
   | ChooseUnit
   | Trace
-  | -- | MkCons
-    -- | ConstrData
-    -- | EqualsData
-    -- | MkPairData
-    BLS12_381_G1_add
+  | -- | @since 1.1.0
+    MkCons
+  | -- | @since 1.1.0
+    ConstrData
+  | -- | @since 1.1.0
+    EqualsData
+  | -- | @since 1.1.0
+    MkPairData
+  | BLS12_381_G1_add
   | BLS12_381_G1_scalarMul
   | BLS12_381_G1_equal
   | BLS12_381_G1_hashToGroup
@@ -255,10 +283,10 @@ instance Arbitrary TwoArgFunc where
         EqualsString,
         ChooseUnit,
         Trace,
-        -- MkCons,
-        -- ConstrData,
-        -- EqualsData,
-        -- MkPairData,
+        MkCons,
+        ConstrData,
+        EqualsData,
+        MkPairData,
         BLS12_381_G1_add,
         BLS12_381_G1_scalarMul,
         BLS12_381_G1_equal,
@@ -300,8 +328,12 @@ typeTwoArgFunc = \case
   LessThanEqualsByteString -> compareT byteStringT
   AppendString -> combineT stringT
   EqualsString -> compareT stringT
-  ChooseUnit -> Comp1 $ unitT :--:> tyvar Z ix0 :--:> ReturnT (tyvar Z ix0)
-  Trace -> Comp1 $ stringT :--:> tyvar Z ix0 :--:> ReturnT (tyvar Z ix0)
+  ChooseUnit -> Comp1 $ unitT :--:> aT :--:> ReturnT aT
+  Trace -> Comp1 $ stringT :--:> aT :--:> ReturnT aT
+  MkCons -> Comp1 $ aT :--:> listT aT :--:> ReturnT (listT aT)
+  ConstrData -> Comp0 $ integerT :--:> listT dataT :--:> ReturnT dataT
+  EqualsData -> compareT dataT
+  MkPairData -> Comp0 $ dataT :--:> dataT :--:> ReturnT (pairT dataT dataT)
   BLS12_381_G1_add -> combineT g1T
   BLS12_381_G1_scalarMul -> Comp0 $ integerT :--:> g1T :--:> ReturnT g1T
   BLS12_381_G1_equal -> compareT g1T
@@ -332,14 +364,16 @@ data ThreeArgFunc
   | VerifyEcdsaSecp256k1Signature
   | VerifySchnorrSecp256k1Signature
   | IfThenElse
-  | -- | ChooseList
-    -- | CaseList
-    IntegerToByteString
+  | -- | @since 1.1.0
+    ChooseList
+  | -- | @since 1.1.0
+    CaseList
+  | IntegerToByteString
   | AndByteString
   | OrByteString
   | XorByteString
-  | -- | WriteBits
-    ExpModInteger
+  | WriteBits
+  | ExpModInteger
   deriving stock
     ( -- | @since 1.0.0
       Eq,
@@ -360,13 +394,13 @@ instance Arbitrary ThreeArgFunc where
         VerifyEcdsaSecp256k1Signature,
         VerifySchnorrSecp256k1Signature,
         IfThenElse,
-        -- ChooseList,
-        -- CaseList,
+        ChooseList,
+        CaseList,
         IntegerToByteString,
         AndByteString,
         OrByteString,
         XorByteString,
-        -- WriteBits,
+        WriteBits,
         ExpModInteger
       ]
 
@@ -378,18 +412,23 @@ typeThreeArgFunc = \case
   VerifyEd25519Signature -> signatureT
   VerifyEcdsaSecp256k1Signature -> signatureT
   VerifySchnorrSecp256k1Signature -> signatureT
-  IfThenElse ->
-    Comp1 $
-      boolT
-        :--:> tyvar Z ix0
-        :--:> tyvar Z ix0
-        :--:> ReturnT (tyvar Z ix0)
+  IfThenElse -> Comp1 $ boolT :--:> aT :--:> aT :--:> ReturnT aT
+  ChooseList -> Comp2 $ listT aT :--:> bT :--:> bT :--:> ReturnT bT
+  CaseList ->
+    Comp2 $
+      bT
+        :--:> ThunkT (Comp0 $ aTOuter :--:> listT aTOuter :--:> ReturnT bTOuter)
+        :--:> listT aT
+        :--:> ReturnT bT
   IntegerToByteString ->
     Comp0 $
       boolT :--:> integerT :--:> integerT :--:> ReturnT byteStringT
   AndByteString -> bitwiseT
   OrByteString -> bitwiseT
   XorByteString -> bitwiseT
+  WriteBits ->
+    Comp0 $
+      byteStringT :--:> listT integerT :--:> boolT :--:> ReturnT byteStringT
   ExpModInteger ->
     Comp0 $
       integerT
@@ -412,10 +451,9 @@ typeThreeArgFunc = \case
           :--:> byteStringT
           :--:> ReturnT byteStringT
 
-{-
 -- | All six-argument primitives provided by Plutus.
 --
--- @since 1.0.0
+-- @since 1.1.0
 data SixArgFunc
   = ChooseData
   | CaseData
@@ -430,8 +468,54 @@ data SixArgFunc
 
 -- | Does not shrink.
 --
--- @since 1.0.0
+-- @since 1.1.0
 instance Arbitrary SixArgFunc where
   {-# INLINEABLE arbitrary #-}
   arbitrary = elements [ChooseData, CaseData]
--}
+
+-- | Produce the type of a six-argument primop.
+--
+-- @since 1.1.0
+typeSixArgFunc :: SixArgFunc -> CompT AbstractTy
+typeSixArgFunc = \case
+  ChooseData ->
+    Comp1 $
+      dataT
+        :--:> aT
+        :--:> aT
+        :--:> aT
+        :--:> aT
+        :--:> aT
+        :--:> ReturnT aT
+  CaseData ->
+    Comp1 $
+      ThunkT (Comp0 $ integerT :--:> listT dataT :--:> ReturnT aTOuter)
+        :--:> ThunkT (Comp0 $ listT (pairT dataT dataT) :--:> ReturnT aTOuter)
+        :--:> ThunkT (Comp0 $ listT dataT :--:> ReturnT aTOuter)
+        :--:> ThunkT (Comp0 $ integerT :--:> ReturnT aTOuter)
+        :--:> ThunkT (Comp0 $ byteStringT :--:> ReturnT aTOuter)
+        :--:> dataT
+        :--:> ReturnT aT
+
+-- Helpers
+
+dataT :: ValT AbstractTy
+dataT = dataTypeT "Data"
+
+listT :: ValT AbstractTy -> ValT AbstractTy
+listT = dataType1T "List"
+
+pairT :: ValT AbstractTy -> ValT AbstractTy -> ValT AbstractTy
+pairT = dataType2T "Pair"
+
+aT :: ValT AbstractTy
+aT = tyvar Z ix0
+
+aTOuter :: ValT AbstractTy
+aTOuter = tyvar (S Z) ix0
+
+bT :: ValT AbstractTy
+bT = tyvar Z ix1
+
+bTOuter :: ValT AbstractTy
+bTOuter = tyvar (S Z) ix1
