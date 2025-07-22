@@ -4,24 +4,50 @@ module Main {- (main) -} where
 
 import Control.Applicative ((<|>))
 import Control.Monad (guard)
-import Covenant.ASG (ASG, ASGBuilder, ASGNode (ACompNode, AValNode), ASGNodeType (ValNodeType), CompNodeInfo
-                                                                                                  ( Builtin1,
-                                                                                                    Builtin2,
-                                                                                                    Builtin3,
-                                                                                                    Return
-                                                                                                  ), CovenantError (EmptyASG, TopLevelError, TopLevelValue, TypeError), CovenantTypeError
-                                                                                                                                                                          ( ApplyCompType,
-                                                                                                                                                                            ApplyToError,
-                                                                                                                                                                            ApplyToValType,
-                                                                                                                                                                            ForceCompType,
-                                                                                                                                                                            ForceError,
-                                                                                                                                                                            ForceNonThunk,
-                                                                                                                                                                            LambdaResultsInValType,
-                                                                                                                                                                            NoSuchArgument,
-                                                                                                                                                                            ReturnCompType,
-                                                                                                                                                                            ThunkError,
-                                                                                                                                                                            ThunkValType
-                                                                                                                                                                          ), Id, Ref (AnArg, AnId), ValNodeInfo (Lit), app, arg, builtin1, builtin2, builtin3, dataConstructor, err, force, lam, lit, nodeAt, ret, runASGBuilder, thunk, topLevelNode)
+import Covenant.ASG
+  ( ASG,
+    ASGBuilder,
+    ASGNode (ACompNode, AValNode),
+    ASGNodeType (ValNodeType),
+    CompNodeInfo
+      ( Builtin1,
+        Builtin2,
+        Builtin3,
+        Return
+      ),
+    CovenantError (EmptyASG, TopLevelError, TopLevelValue, TypeError),
+    CovenantTypeError
+      ( ApplyCompType,
+        ApplyToError,
+        ApplyToValType,
+        ForceCompType,
+        ForceError,
+        ForceNonThunk,
+        LambdaResultsInValType,
+        NoSuchArgument,
+        ReturnCompType,
+        ThunkError,
+        ThunkValType
+      ),
+    Id,
+    Ref (AnArg, AnId),
+    ValNodeInfo (Lit),
+    app,
+    arg,
+    builtin1,
+    builtin2,
+    builtin3,
+    dataConstructor,
+    err,
+    force,
+    lam,
+    lit,
+    nodeAt,
+    ret,
+    runASGBuilder,
+    thunk,
+    topLevelNode,
+  )
 import Covenant.Constant (AConstant (AUnit), typeConstant)
 import Covenant.DeBruijn (DeBruijn (S, Z))
 import Covenant.Index (Index, intIndex, ix0)
