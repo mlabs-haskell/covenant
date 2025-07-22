@@ -24,16 +24,17 @@ import Covenant.ASG
         ForceNonThunk,
         LambdaResultsInValType,
         NoSuchArgument,
+        OutOfScopeTyVar,
         ReturnCompType,
         ThunkError,
-        ThunkValType,
-        OutOfScopeTyVar
+        ThunkValType
       ),
     Id,
     Ref (AnArg, AnId),
     ValNodeInfo (Lit),
     app,
     arg,
+    boundTyVar,
     builtin1,
     builtin2,
     builtin3,
@@ -45,7 +46,7 @@ import Covenant.ASG
     ret,
     runASGBuilder,
     thunk,
-    topLevelNode, boundTyVar,
+    topLevelNode,
   )
 import Covenant.Constant (typeConstant)
 import Covenant.DeBruijn (DeBruijn (Z))
@@ -61,7 +62,8 @@ import Covenant.Type
     CompT (Comp0, Comp1, CompN),
     CompTBody (ArgsAndResult, ReturnT, (:--:>)),
     ValT,
-    arity, tyvar,
+    arity,
+    tyvar,
   )
 import Covenant.Util (pattern ConsV, pattern NilV)
 import Data.Coerce (coerce)
@@ -83,7 +85,7 @@ import Test.QuickCheck
     shrink,
     (===),
   )
-import Test.Tasty (adjustOption, defaultMain, testGroup, TestTree)
+import Test.Tasty (TestTree, adjustOption, defaultMain, testGroup)
 import Test.Tasty.HUnit (assertEqual, assertFailure, testCase)
 import Test.Tasty.QuickCheck (QuickCheckTests, testProperty)
 
@@ -434,28 +436,26 @@ boundTyVarHappy = testCase "boundTyVarHappy" . run $ do
     arg1 <- AnArg <$> arg Z ix0
     void $ boundTyVar Z ix0
     ret arg1
- where
-   lamTy :: CompT AbstractTy
-   lamTy =  Comp1 $ tyvar Z ix0 :--:> ReturnT (tyvar Z ix0)
+  where
+    lamTy :: CompT AbstractTy
+    lamTy = Comp1 $ tyvar Z ix0 :--:> ReturnT (tyvar Z ix0)
 
-   run :: forall (a :: Type). ASGBuilder a -> IO ()
-   run act = case runASGBuilder M.empty act of
-     Left err' -> assertFailure . show $ err'
-     Right{}   -> pure ()
-
+    run :: forall (a :: Type). ASGBuilder a -> IO ()
+    run act = case runASGBuilder M.empty act of
+      Left err' -> assertFailure . show $ err'
+      Right {} -> pure ()
 
 boundTyVarShouldFail :: TestTree
 boundTyVarShouldFail = testCase "boundTyVarShouldFail" . run $ boundTyVar Z ix0
- where
-   run :: forall (a :: Type). Show a => ASGBuilder a -> IO ()
-   run act = case runASGBuilder M.empty act of
-     Left (TypeError _ (OutOfScopeTyVar db argpos)) ->
-       if db == Z && argpos == ix0
-       then pure ()
-       else assertFailure $ "Expected OutOfScopeTyVar error for Z, ix0 but got: " <> show db <> ", " <> show argpos
-     Left err' -> assertFailure $ "Expected an OutofScopeTyVar error, but got: " <> show err'
-     Right x -> assertFailure $ "Expected boundTyVar to fail, but got: " <> show x
-
+  where
+    run :: forall (a :: Type). (Show a) => ASGBuilder a -> IO ()
+    run act = case runASGBuilder M.empty act of
+      Left (TypeError _ (OutOfScopeTyVar db argpos)) ->
+        if db == Z && argpos == ix0
+          then pure ()
+          else assertFailure $ "Expected OutOfScopeTyVar error for Z, ix0 but got: " <> show db <> ", " <> show argpos
+      Left err' -> assertFailure $ "Expected an OutofScopeTyVar error, but got: " <> show err'
+      Right x -> assertFailure $ "Expected boundTyVar to fail, but got: " <> show x
 
 -- Helpers
 

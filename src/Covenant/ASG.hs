@@ -145,6 +145,7 @@ import Covenant.Internal.Term
         LambdaResultsInNonReturn,
         LambdaResultsInValType,
         NoSuchArgument,
+        OutOfScopeTyVar,
         RenameArgumentFailed,
         RenameFunctionFailed,
         ReturnCompType,
@@ -153,7 +154,7 @@ import Covenant.Internal.Term
         ThunkError,
         ThunkValType,
         UnificationError,
-        WrongReturnType, OutOfScopeTyVar
+        WrongReturnType
       ),
     Id,
     Ref (AnArg, AnId),
@@ -773,7 +774,9 @@ checkEncodingWithInfo tyDict valT = case checkEncodingArgs (view (#originalDecl 
 tryApply ::
   forall (m :: Type -> Type).
   (MonadError CovenantTypeError m, MonadReader ASGEnv m) =>
-  CompT AbstractTy -> ValT AbstractTy -> m (ValT AbstractTy)
+  CompT AbstractTy ->
+  ValT AbstractTy ->
+  m (ValT AbstractTy)
 tryApply algebraT argT = case runRenameM . renameCompT $ algebraT of
   Left err' -> throwError . RenameFunctionFailed algebraT $ err'
   Right renamedAlgebraT -> case runRenameM . renameValT $ argT of
@@ -786,16 +789,14 @@ tryApply algebraT argT = case runRenameM . renameCompT $ algebraT of
 
 -- Putting this here to reduce chance of annoying manual merge (will move later)
 
-{- | Wrapper around an `Arg` that we know represents an in-scope type variable.
-
--}
+-- | Wrapper around an `Arg` that we know represents an in-scope type variable.
 data BoundTyVar = BoundTyVar DeBruijn (Index "tyvar")
   deriving stock
-   ( -- @since 1.2.0
-     Show,
-     Eq,
-     Ord
-   )
+    ( -- @since 1.2.0
+      Show,
+      Eq,
+      Ord
+    )
 
 boundTyVar ::
   forall (m :: Type -> Type).
