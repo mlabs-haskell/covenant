@@ -1,6 +1,6 @@
 cabal-version: 3.0
 name: covenant
-version: 1.1.0
+version: 1.2.0
 synopsis: Standalone IR for Cardano scripts.
 description:
   A library describing a call-by-push-value, Turner-total IR. Includes the ability to build up the IR programmatically.

@@ -222,6 +222,7 @@ import Optics.Core
     (%),
   )
 
+
 -- | A fully-assembled Covenant ASG.
 --
 -- @since 1.0.0
@@ -790,14 +791,18 @@ tryApply algebraT argT = case runRenameM . renameCompT $ algebraT of
 -- Putting this here to reduce chance of annoying manual merge (will move later)
 
 -- | Wrapper around an `Arg` that we know represents an in-scope type variable.
+-- @since 1.2.0
 data BoundTyVar = BoundTyVar DeBruijn (Index "tyvar")
   deriving stock
     ( -- @since 1.2.0
       Show,
+      -- @since 1.2.0
       Eq,
+      -- @since 1.2.0
       Ord
     )
-
+-- | Given a DB Index and position index, safely retrieve an in-scope type variable.
+-- @since 1.2.0
 boundTyVar ::
   forall (m :: Type -> Type).
   (MonadError CovenantTypeError m, MonadReader ASGEnv m) =>

@@ -151,6 +151,7 @@ data CovenantTypeError
     CataUnsuitable (CompT AbstractTy) (ValT AbstractTy)
   | -- | Someone attempted to construct a tyvar using a DB index or argument position
     --   which refers to a scope (or argument) that does not exist.
+    -- @since 1.2.0
     OutOfScopeTyVar DeBruijn (Index "tyvar")
   deriving stock
     ( -- | @since 1.0.0
