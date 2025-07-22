@@ -3,7 +3,7 @@
 module Main (main) where
 
 import Control.Applicative ((<|>))
-import Control.Monad (guard)
+import Control.Monad (guard, void)
 import Covenant.ASG
   ( ASG,
     ASGBuilder,
@@ -24,6 +24,7 @@ import Covenant.ASG
         ForceNonThunk,
         LambdaResultsInValType,
         NoSuchArgument,
+        OutOfScopeTyVar,
         ReturnCompType,
         ThunkError,
         ThunkValType
@@ -33,6 +34,7 @@ import Covenant.ASG
     ValNodeInfo (Lit),
     app,
     arg,
+    boundTyVar,
     builtin1,
     builtin2,
     builtin3,
@@ -57,10 +59,11 @@ import Covenant.Prim
 import Covenant.Test (Concrete (Concrete))
 import Covenant.Type
   ( AbstractTy,
-    CompT (Comp0, CompN),
-    CompTBody (ArgsAndResult, ReturnT),
+    CompT (Comp0, Comp1, CompN),
+    CompTBody (ArgsAndResult, ReturnT, (:--:>)),
     ValT,
     arity,
+    tyvar,
   )
 import Covenant.Util (pattern ConsV, pattern NilV)
 import Data.Coerce (coerce)
@@ -82,7 +85,7 @@ import Test.QuickCheck
     shrink,
     (===),
   )
-import Test.Tasty (adjustOption, defaultMain, testGroup)
+import Test.Tasty (TestTree, adjustOption, defaultMain, testGroup)
 import Test.Tasty.HUnit (assertEqual, assertFailure, testCase)
 import Test.Tasty.QuickCheck (QuickCheckTests, testProperty)
 
@@ -109,7 +112,9 @@ main =
       testProperty "requesting a non-existent argument does not compile" propNonExistentArg,
       testProperty "requesting an argument that exists compiles" propExistingArg,
       testProperty "returning a computation from a lambda does not compile" propReturnComp,
-      testProperty "a lambda body having a value type does not compile" propLambdaValBody
+      testProperty "a lambda body having a value type does not compile" propLambdaValBody,
+      boundTyVarHappy,
+      boundTyVarShouldFail
     ]
   where
     moreTests :: QuickCheckTests -> QuickCheckTests
@@ -424,6 +429,33 @@ propLambdaValBody = forAllShrinkShow arbitrary shrink show $ \(Concrete t, c) ->
         TypeError _ (LambdaResultsInValType actualT) -> resultT === actualT
         TypeError _ err' -> failWrongTypeError err'
         err' -> failWrongError err'
+
+boundTyVarHappy :: TestTree
+boundTyVarHappy = testCase "boundTyVarHappy" . run $ do
+  lam lamTy $ do
+    arg1 <- AnArg <$> arg Z ix0
+    void $ boundTyVar Z ix0
+    ret arg1
+  where
+    lamTy :: CompT AbstractTy
+    lamTy = Comp1 $ tyvar Z ix0 :--:> ReturnT (tyvar Z ix0)
+
+    run :: forall (a :: Type). ASGBuilder a -> IO ()
+    run act = case runASGBuilder M.empty act of
+      Left err' -> assertFailure . show $ err'
+      Right {} -> pure ()
+
+boundTyVarShouldFail :: TestTree
+boundTyVarShouldFail = testCase "boundTyVarShouldFail" . run $ boundTyVar Z ix0
+  where
+    run :: forall (a :: Type). (Show a) => ASGBuilder a -> IO ()
+    run act = case runASGBuilder M.empty act of
+      Left (TypeError _ (OutOfScopeTyVar db argpos)) ->
+        if db == Z && argpos == ix0
+          then pure ()
+          else assertFailure $ "Expected OutOfScopeTyVar error for Z, ix0 but got: " <> show db <> ", " <> show argpos
+      Left err' -> assertFailure $ "Expected an OutofScopeTyVar error, but got: " <> show err'
+      Right x -> assertFailure $ "Expected boundTyVar to fail, but got: " <> show x
 
 -- Helpers
 

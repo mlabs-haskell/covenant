@@ -325,7 +325,9 @@ prettyDeclSet (DataDeclSet decls) =
 -- @since 1.1.0
 chooseInt ::
   forall (m :: Type -> Type).
-  (MonadGen m) => (Int, Int) -> m Int
+  (MonadGen m) =>
+  (Int, Int) ->
+  m Int
 chooseInt bounds = GT.liftGen $ QC.chooseInt bounds
 
 -- | The same as 'QC.scale', but lifted to work in any 'MonadGen'.
@@ -333,7 +335,10 @@ chooseInt bounds = GT.liftGen $ QC.chooseInt bounds
 -- @since 1.1.0
 scale ::
   forall (m :: Type -> Type) (a :: Type).
-  (MonadGen m) => (Int -> Int) -> m a -> m a
+  (MonadGen m) =>
+  (Int -> Int) ->
+  m a ->
+  m a
 scale f g = GT.sized (\n -> GT.resize (f n) g)
 
 -- | If the argument is a 'Right', pass the assertion; otherwise, fail the

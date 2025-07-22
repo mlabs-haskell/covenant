@@ -6,6 +6,8 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## UNRELEASED
 
+* Helper function for safely retrieving an in-scope type variable when constructing the ASG  
+
 ## 1.1.0 -- 2025-07-11
 
 ### Added 

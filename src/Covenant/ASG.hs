@@ -55,6 +55,7 @@ module Covenant.ASG
     TypeAppError (..),
     RenameError (..),
     CovenantTypeError (..),
+    BoundTyVar,
 
     -- ** Introducers
     arg,
@@ -70,6 +71,7 @@ module Covenant.ASG
     thunk,
     app,
     cata,
+    boundTyVar,
 
     -- ** Elimination
 
@@ -143,6 +145,7 @@ import Covenant.Internal.Term
         LambdaResultsInNonReturn,
         LambdaResultsInValType,
         NoSuchArgument,
+        OutOfScopeTyVar,
         RenameArgumentFailed,
         RenameFunctionFailed,
         ReturnCompType,
@@ -202,7 +205,7 @@ import Data.Functor.Identity (Identity, runIdentity)
 import Data.Kind (Type)
 import Data.Map.Strict (Map)
 import Data.Map.Strict qualified as Map
-import Data.Maybe (fromJust)
+import Data.Maybe (fromJust, isJust)
 import Data.Vector (Vector)
 import Data.Vector qualified as Vector
 import Data.Vector.NonEmpty qualified as NonEmpty
@@ -771,7 +774,9 @@ checkEncodingWithInfo tyDict valT = case checkEncodingArgs (view (#originalDecl 
 tryApply ::
   forall (m :: Type -> Type).
   (MonadError CovenantTypeError m, MonadReader ASGEnv m) =>
-  CompT AbstractTy -> ValT AbstractTy -> m (ValT AbstractTy)
+  CompT AbstractTy ->
+  ValT AbstractTy ->
+  m (ValT AbstractTy)
 tryApply algebraT argT = case runRenameM . renameCompT $ algebraT of
   Left err' -> throwError . RenameFunctionFailed algebraT $ err'
   Right renamedAlgebraT -> case runRenameM . renameValT $ argT of
@@ -781,3 +786,33 @@ tryApply algebraT argT = case runRenameM . renameCompT $ algebraT of
       case checkApp tyDict renamedAlgebraT [Just renamedArgT] of
         Left err' -> throwError . UnificationError $ err'
         Right resultT -> pure . undoRename $ resultT
+
+-- Putting this here to reduce chance of annoying manual merge (will move later)
+
+-- | Wrapper around an `Arg` that we know represents an in-scope type variable.
+-- @since 1.2.0
+data BoundTyVar = BoundTyVar DeBruijn (Index "tyvar")
+  deriving stock
+    ( -- @since 1.2.0
+      Show,
+      -- @since 1.2.0
+      Eq,
+      -- @since 1.2.0
+      Ord
+    )
+
+-- | Given a DB Index and position index, safely retrieve an in-scope type variable.
+-- @since 1.2.0
+boundTyVar ::
+  forall (m :: Type -> Type).
+  (MonadError CovenantTypeError m, MonadReader ASGEnv m) =>
+  DeBruijn ->
+  Index "tyvar" ->
+  m BoundTyVar
+boundTyVar scope index = do
+  let scopeAsInt = review asInt scope
+  let indexAsInt = review intIndex index
+  tyVarInScope <- asks (isJust . preview (#scopeInfo % #argumentInfo % ix scopeAsInt % ix indexAsInt))
+  if tyVarInScope
+    then pure (BoundTyVar scope index)
+    else throwError $ OutOfScopeTyVar scope index
