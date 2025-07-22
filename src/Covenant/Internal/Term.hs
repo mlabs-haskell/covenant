@@ -27,13 +27,15 @@ import Covenant.Internal.Type
     CompT,
     ConstructorName,
     TyName,
-    ValT,
+    ValT, Renamed,
   )
 import Covenant.Internal.Unification (TypeAppError)
 import Covenant.Prim (OneArgFunc, SixArgFunc, ThreeArgFunc, TwoArgFunc)
 import Data.Kind (Type)
 import Data.Vector (Vector)
 import Data.Word (Word64)
+import Covenant.Internal.Strategy (PlutusDataConstructor)
+import qualified Data.Set as Set
 
 -- | An error that can arise during the construction of an ASG by programmatic
 -- means.
@@ -172,6 +174,14 @@ data CovenantTypeError
     --   We just return the arguments to `dataConstructor` since that's all we can really do.
     -- @since 1.2.0
     IntroFormErrorNodeField TyName ConstructorName (Vector Ref)
+    -- | The user tried to construct an introduction form using a Plutus Data constructor not found in the
+    --   opaque datatype declaration
+    -- @since 1.2.0
+  | UndeclaredOpaquePlutusDataCtor (Set.Set PlutusDataConstructor) ConstructorName
+    -- | The user tried to construct an introduction form with a valid Plutus Data constructor, but supplied a ref
+    --   to a field of the wrong type.
+    -- @since 1.2.0
+  | InvalidOpaqueField (Set.Set PlutusDataConstructor) ConstructorName [ValT Renamed]
   deriving stock
     ( -- | @since 1.0.0
       Eq,

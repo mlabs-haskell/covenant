@@ -51,7 +51,7 @@ module Covenant.ASG
 
     -- ** Types
     CovenantError (..),
-    ScopeInfo,
+    ScopeInfo(..), -- Need to export the constructor for DebugASGEnv 
     ASGBuilder,
     CovenantTypeError (..),
     RenameError
@@ -81,6 +81,11 @@ module Covenant.ASG
 
     -- *** Function
     runASGBuilder,
+
+    -- Test stuff. This might change.
+    ASGNodeType (..),
+    ASGEnv(..),
+
   )
 where
 
@@ -102,8 +107,8 @@ import Control.Monad.Reader
     runReaderT,
   )
 import Covenant.Constant (AConstant, typeConstant)
-import Covenant.Data (DatatypeInfo, mkDatatypeInfo)
-import Covenant.DeBruijn (DeBruijn, asInt)
+import Covenant.Data (DatatypeInfo, mkDatatypeInfo, mapValT)
+import Covenant.DeBruijn (DeBruijn (S), asInt)
 import Covenant.Index (Count, Index, count0, intCount, intIndex)
 import Covenant.Internal.KindCheck (checkEncodingArgs)
 import Covenant.Internal.Ledger (ledgerTypes)
@@ -160,7 +165,7 @@ import Covenant.Internal.Term
         ThunkValType,
         TypeDoesNotExist,
         UnificationError,
-        WrongReturnType
+        WrongReturnType, UndeclaredOpaquePlutusDataCtor, InvalidOpaqueField
       ),
     Id,
     Ref (AnArg, AnId),
@@ -170,7 +175,7 @@ import Covenant.Internal.Term
     typeRef,
   )
 import Covenant.Internal.Type
-  ( AbstractTy,
+  ( AbstractTy (BoundAt),
     BuiltinFlatT (ByteStringT, IntegerT),
     CompT (CompT),
     CompTBody (CompTBody),
@@ -193,7 +198,7 @@ import Covenant.Prim
     typeThreeArgFunc,
     typeTwoArgFunc,
   )
-import Covenant.Type (CompT (Comp0), CompTBody (ReturnT), PlutusDataConstructor)
+import Covenant.Type (CompT (Comp0), CompTBody (ReturnT), PlutusDataConstructor (PlutusI, PlutusB, PlutusList, PlutusMap, PlutusConstr))
 import Data.Bimap (Bimap)
 import Data.Bimap qualified as Bimap
 import Data.Coerce (coerce)
@@ -221,6 +226,7 @@ import Optics.Core
     view,
     (%),
   )
+import Debug.Trace 
 
 -- | A fully-assembled Covenant ASG.
 --
@@ -478,6 +484,8 @@ runASGBuilder tyDict (ASGBuilder comp) =
             ACompNode _ _ -> pure . ASG $ (i, Bimap.toMap bm)
             AValNode t info -> Left . TopLevelValue bm t $ info
 
+
+
 -- | Given a scope and a positional argument index, construct that argument.
 -- Will fail if that argument doesn't exist in the specified scope, or if the
 -- specified scope doesn't exist.
@@ -496,6 +504,8 @@ arg scope index = do
   case lookedUp of
     Nothing -> throwError . NoSuchArgument scope $ index
     Just t -> pure . Arg scope index $ t
+
+
 
 -- | Construct a node corresponding to the given Plutus primop.
 --
@@ -655,10 +665,13 @@ app fId argRefs = do
     CompNodeType fT -> case runRenameM . renameCompT $ fT of
       Left err' -> throwError . RenameFunctionFailed fT $ err'
       Right renamedFT -> do
+        traceM $ "APP FN RENAMED: " <> show renamedFT
         renamedArgs <- traverse renameArg argRefs
         tyDict <- asks (view #datatypeInfo)
         result <- either (throwError . UnificationError) pure $ checkApp tyDict renamedFT (Vector.toList renamedArgs)
+        traceM $ "APP RESULT RENAMED: " <> show result 
         let restored = undoRename result
+        traceM $ "APP RESULT RESTORED: " <> show restored 
         checkEncodingWithInfo tyDict restored
         refTo . AValNode restored . AppInternal fId $ argRefs
     ValNodeType t -> throwError . ApplyToValType $ t
@@ -673,8 +686,18 @@ dataConstructor ::
   Vector Ref ->
   m Id
 dataConstructor tyName ctorName fields = do
+  argFieldTypes <- traverse typeRef fields
+  traceM $ "DATACON RAW FIELD TYPES: " <> show argFieldTypes 
   thisTyInfo <- lookupDatatypeInfo
   let thisTyDecl = view #originalDecl thisTyInfo
+  renamedFieldTypes <-
+        traverse renameArg fields
+          >>= ( \case
+                  Nothing -> throwError $ IntroFormErrorNodeField tyName ctorName fields
+                  Just ok -> pure ok
+              )
+            . sequence
+  traceM $ "DATACON RENAMED FIELD TYPES: " <> show renamedFieldTypes
   {- The procedures for handling a typed declared as Opaque and a "normal" type are totally different.
 
      For Opaque types, we just have to check that the "ConstructorName" we get corresponds to a constructor of
@@ -682,29 +705,35 @@ dataConstructor tyName ctorName fields = do
   -}
   case thisTyDecl of
     OpaqueData _ opaqueCtorSet -> do
-      checkOpaqueArgs opaqueCtorSet
+      checkOpaqueArgs opaqueCtorSet renamedFieldTypes
       refTo $ AValNode (Datatype tyName mempty) (DataConstructorInternal tyName ctorName fields)
     DataDeclaration _ count ctors _ -> do
       -- First we check that the arity of the constructor is equal to the number of fields in the decl.
       checkFieldArity (Vector.length fields) thisTyInfo
       -- Then we resolve the supplied field Refs, rename, and throw an error if we're passed an error node.
-      renamedFieldTypes <-
-        traverse renameArg fields
-          >>= ( \case
-                  Nothing -> throwError $ IntroFormErrorNodeField tyName ctorName fields
-                  Just ok -> pure ok
-              )
-            . sequence
+
       -- Then we construct the return type.
       resultThunk <- mkResultThunk count ctors renamedFieldTypes
+      traceM $ "DATACON RESULT THUNK: " <> show resultThunk
       -- Then we undo the renaming.
-      let restored = undoRename resultThunk
+      let restored = fixUnRenamed $ undoRename resultThunk
+      traceM $ "DATACON RESULT RESTORED: " <> show restored 
       -- Then we check the compatibility of the arguments with the datatype's encoding.
       asks (view #datatypeInfo) >>= \dti -> checkEncodingWithInfo dti restored
       -- Finally, if nothing has thrown an error, we return a reference to our result node, decorated with the
       -- return type we constructed.
       refTo $ AValNode restored (DataConstructorInternal tyName ctorName fields)
   where
+    {- Due to implementation details of the renamer and the way it interacts with datatypes, the DB indices of
+       variables will always be "one more than they should be" after undoing renaming.
+
+       This is a bit of a hack but it's the best that can be done in the circumstances. 
+    -}
+    fixUnRenamed :: ValT AbstractTy -> ValT AbstractTy
+    fixUnRenamed = mapValT $ \case
+      Abstraction (BoundAt (S x) i) -> Abstraction (BoundAt x i)
+      other -> other 
+
     {- Constructs the result type of the introduction form. Arguments are:
          1. The count (number of tyvars) from the data declaration.
          2. The vector of constructors from the data declaration.
@@ -712,7 +741,8 @@ dataConstructor tyName ctorName fields = do
 
        The procedure goes like:
          1. Extract the argument types from the constructor in the declaration. Any tyvars here
-            *have* to be Unifiable (unless something has slipped past the kind checker).
+            *have* to be Unifiable (unless something has slipped past the kind checker) -
+            data declarations have atomic, independent scopes.
          2. Unify those with the actual, supplied field types, yielding a set of substitutions.
          3. Construct a fully abstract (i.e. parameterized only by unifiable type variables) representation of the
             type constructor.
@@ -755,8 +785,21 @@ dataConstructor tyName ctorName fields = do
         throwError $
           IntroFormWrongNumArgs tyName ctorName actualNumFields
 
-    checkOpaqueArgs :: Set.Set PlutusDataConstructor -> m ()
-    checkOpaqueArgs = error "TODO: Implement 'checkOpaqueArgs'"
+    checkOpaqueArgs :: Set.Set PlutusDataConstructor -> Vector (ValT Renamed) -> m ()
+    checkOpaqueArgs declCtors (Vector.toList -> fieldArgs) = case ctorName of
+      "I" -> opaqueCheck PlutusI [BuiltinFlat IntegerT]
+      "B" -> opaqueCheck PlutusB [BuiltinFlat ByteStringT]
+      "List" -> opaqueCheck PlutusList [Datatype "List" (Vector.fromList [Datatype "Data" mempty])]
+      "Map" -> opaqueCheck PlutusMap [Datatype "Map" (Vector.fromList [Datatype "Data" mempty,Datatype "Data" mempty])]
+      "Constr" -> opaqueCheck PlutusConstr [BuiltinFlat IntegerT, Datatype "List" (Vector.fromList [Datatype "Data" mempty])]
+      _ -> throwError $ UndeclaredOpaquePlutusDataCtor declCtors ctorName
+     where 
+       opaqueCheck :: PlutusDataConstructor -> [ValT Renamed] -> m ()
+       opaqueCheck setMustHaveThis fieldShouldBeThis = do
+         unless (setMustHaveThis `Set.member` declCtors) $ throwError (UndeclaredOpaquePlutusDataCtor declCtors ctorName)
+         unless (fieldArgs == fieldShouldBeThis) $ throwError (InvalidOpaqueField declCtors ctorName fieldArgs)
+
+
 
     -- convenience helpers
 

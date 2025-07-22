@@ -10,6 +10,7 @@ module Covenant.Data
     everythingOf,
     DatatypeInfo (DatatypeInfo),
     mkDatatypeInfo,
+    mapValT
   )
 where
 
