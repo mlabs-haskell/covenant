@@ -222,7 +222,6 @@ import Optics.Core
     (%),
   )
 
-
 -- | A fully-assembled Covenant ASG.
 --
 -- @since 1.0.0
@@ -801,6 +800,7 @@ data BoundTyVar = BoundTyVar DeBruijn (Index "tyvar")
       -- @since 1.2.0
       Ord
     )
+
 -- | Given a DB Index and position index, safely retrieve an in-scope type variable.
 -- @since 1.2.0
 boundTyVar ::
