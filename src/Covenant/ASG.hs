@@ -55,7 +55,7 @@ module Covenant.ASG
     TypeAppError (..),
     RenameError (..),
     CovenantTypeError (..),
-    BoundTyVar, -- I don't think we need to, or should, export the constructor.
+    BoundTyVar,
 
     -- ** Introducers
     arg,
