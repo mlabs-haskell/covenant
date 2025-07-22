@@ -23,10 +23,10 @@ module Covenant.Test
     tree,
     weirderList,
     -- ASGBuilder variant
-    DebugASGBuilder(..),
+    DebugASGBuilder (..),
     debugASGBuilder,
     typeIdVal,
-    undoRename
+    undoRename,
   )
 where
 
@@ -36,7 +36,9 @@ import Data.Foldable (foldl')
 import Control.Applicative ((<|>))
 import Control.Exception (throwIO)
 import Control.Monad (void)
-import Control.Monad.Reader (MonadTrans (lift), runReader, ReaderT (runReaderT), MonadReader)
+import Control.Monad.Except (ExceptT, MonadError, runExceptT)
+import Control.Monad.HashCons (HashConsT, MonadHashCons, runHashConsT)
+import Control.Monad.Reader (MonadReader, MonadTrans (lift), ReaderT (runReaderT), runReader)
 import Control.Monad.State.Strict
   ( MonadState (get, put),
     State,
@@ -44,6 +46,7 @@ import Control.Monad.State.Strict
     gets,
     modify,
   )
+import Covenant.ASG (ASGEnv (ASGEnv), CovenantError (TypeError), ScopeInfo (ScopeInfo))
 import Covenant.Data (DatatypeInfo, mkBBF, mkBaseFunctor, mkDatatypeInfo, noPhantomTyVars)
 import Covenant.DeBruijn (DeBruijn (Z), asInt)
 import Covenant.Index
@@ -59,6 +62,7 @@ import Covenant.Index
 import Covenant.Internal.Ledger (CtorBuilder (Ctor), DeclBuilder (Decl), ledgerTypes, list, maybeT, mkDecl, pair, tree, weirderList)
 import Covenant.Internal.PrettyPrint (ScopeBoundary, prettyStr)
 import Covenant.Internal.Rename (renameDataDecl, renameValT, undoRename)
+import Covenant.Internal.Term (ASGNode, ASGNodeType (ValNodeType), CovenantTypeError, Id, typeId)
 import Covenant.Internal.Type
   ( Constructor (Constructor),
     ConstructorName (ConstructorName),
@@ -89,6 +93,7 @@ import Covenant.Type
   )
 import Data.Coerce (coerce)
 import Data.Foldable (forM_)
+import Data.Functor.Identity (Identity (runIdentity))
 import Data.Kind (Type)
 import Data.Map.Strict (Map)
 import Data.Map.Strict qualified as M
@@ -121,11 +126,6 @@ import Test.QuickCheck.GenT qualified as GT
 import Test.QuickCheck.Instances.Containers ()
 import Test.QuickCheck.Instances.Vector ()
 import Test.Tasty.HUnit (assertFailure)
-import Covenant.Internal.Term (CovenantTypeError, ASGNode, Id, ASGNodeType (ValNodeType), typeId)
-import Data.Functor.Identity (Identity(runIdentity))
-import Control.Monad.HashCons (HashConsT, MonadHashCons, runHashConsT)
-import Control.Monad.Except (ExceptT, MonadError, runExceptT)
-import Covenant.ASG (ASGEnv (ASGEnv), CovenantError (TypeError), ScopeInfo(ScopeInfo))
 
 -- | Wrapper for 'ValT' to provide an 'Arbitrary' instance to generate only
 -- value types without any type variables.
@@ -837,7 +837,6 @@ tyAppTestDatatypes = foldl' (\acc decl -> M.insert (view #datatypeName decl) (un
 
 -- ASG Stuff
 
-
 -- | A concrete monadic stack, providing the minimum amount of functionality
 -- needed to build an ASG using the combinators given in this module.
 --
@@ -862,7 +861,6 @@ newtype DebugASGBuilder (a :: Type)
     )
     via ReaderT ASGEnv (ExceptT CovenantTypeError (HashConsT Id ASGNode Identity))
 
-
 debugASGBuilder ::
   forall (a :: Type).
   Map TyName (DatatypeInfo AbstractTy) ->
@@ -877,12 +875,14 @@ debugASGBuilder tyDict (DebugASGBuilder comp) =
 -- Helper to avoid having to export some Term internals.
 -- For intro forms tests we only care about value types, this just errors out if
 -- we don't get one of those when calling `typeId`
+
 -- | DO NOT USE THIS OUTSIDE OF TESTS
 typeIdVal ::
   forall (m :: Type -> Type).
   (MonadHashCons Id ASGNode m, MonadError CovenantTypeError m) =>
   Id ->
   m (ValT AbstractTy)
-typeIdVal i = typeId i >>= \case
-  ValNodeType t -> pure t
-  other -> error $ "Expected a ValT but got: " <> show other
+typeIdVal i =
+  typeId i >>= \case
+    ValNodeType t -> pure t
+    other -> error $ "Expected a ValT but got: " <> show other

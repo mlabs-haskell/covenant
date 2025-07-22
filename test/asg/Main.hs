@@ -4,49 +4,25 @@ module Main {- (main) -} where
 
 import Control.Applicative ((<|>))
 import Control.Monad (guard)
-import Covenant.ASG
-  ( ASG,
-    ASGBuilder,
-    ASGNode (ACompNode, AValNode),
-    CompNodeInfo
-      ( Builtin1,
-        Builtin2,
-        Builtin3,
-        Return
-      ),
-    CovenantError (EmptyASG, TopLevelError, TopLevelValue, TypeError),
-    CovenantTypeError
-      ( ApplyCompType,
-        ApplyToError,
-        ApplyToValType,
-        ForceCompType,
-        ForceError,
-        ForceNonThunk,
-        LambdaResultsInValType,
-        NoSuchArgument,
-        ReturnCompType,
-        ThunkError,
-        ThunkValType
-      ),
-    Id,
-    Ref (AnArg, AnId),
-    ValNodeInfo (Lit),
-    app,
-    arg,
-    builtin1,
-    builtin2,
-    builtin3,
-    err,
-    force,
-    lam,
-    lit,
-    nodeAt,
-    ret,
-    runASGBuilder,
-    thunk,
-    topLevelNode, dataConstructor,
-  )
-import Covenant.Constant (typeConstant, AConstant(AUnit))
+import Covenant.ASG (ASG, ASGBuilder, ASGNode (ACompNode, AValNode), ASGNodeType (ValNodeType), CompNodeInfo
+                                                                                                  ( Builtin1,
+                                                                                                    Builtin2,
+                                                                                                    Builtin3,
+                                                                                                    Return
+                                                                                                  ), CovenantError (EmptyASG, TopLevelError, TopLevelValue, TypeError), CovenantTypeError
+                                                                                                                                                                          ( ApplyCompType,
+                                                                                                                                                                            ApplyToError,
+                                                                                                                                                                            ApplyToValType,
+                                                                                                                                                                            ForceCompType,
+                                                                                                                                                                            ForceError,
+                                                                                                                                                                            ForceNonThunk,
+                                                                                                                                                                            LambdaResultsInValType,
+                                                                                                                                                                            NoSuchArgument,
+                                                                                                                                                                            ReturnCompType,
+                                                                                                                                                                            ThunkError,
+                                                                                                                                                                            ThunkValType
+                                                                                                                                                                          ), Id, Ref (AnArg, AnId), ValNodeInfo (Lit), app, arg, builtin1, builtin2, builtin3, dataConstructor, err, force, lam, lit, nodeAt, ret, runASGBuilder, thunk, topLevelNode)
+import Covenant.Constant (AConstant (AUnit), typeConstant)
 import Covenant.DeBruijn (DeBruijn (S, Z))
 import Covenant.Index (Index, intIndex, ix0)
 import Covenant.Prim
@@ -54,14 +30,8 @@ import Covenant.Prim
     typeThreeArgFunc,
     typeTwoArgFunc,
   )
-import Covenant.Test (Concrete (Concrete), tyAppTestDatatypes, DebugASGBuilder, debugASGBuilder, typeIdVal, undoRename)
-import Covenant.Type
-  ( AbstractTy,
-    CompT (Comp0, Comp1, CompN),
-    CompTBody (ArgsAndResult, ReturnT),
-    ValT(Datatype, ThunkT),
-    arity, Renamed(Unifiable), checkApp, runRenameM, renameCompT, CompTBody((:--:>)),
-  )
+import Covenant.Test (Concrete (Concrete), DebugASGBuilder, debugASGBuilder, tyAppTestDatatypes, typeIdVal, undoRename)
+import Covenant.Type (AbstractTy, BuiltinFlatT (UnitT), CompT (Comp0, Comp1, CompN), CompTBody (ArgsAndResult, ReturnT, (:--:>)), Renamed (Unifiable), ValT (Abstraction, BuiltinFlat, Datatype, ThunkT), arity, checkApp, renameCompT, runRenameM, tyvar)
 import Covenant.Util (pattern ConsV, pattern NilV)
 import Data.Coerce (coerce)
 import Data.Kind (Type)
@@ -82,14 +52,9 @@ import Test.QuickCheck
     shrink,
     (===),
   )
-import Test.Tasty (adjustOption, defaultMain, testGroup, TestTree)
+import Test.Tasty (TestTree, adjustOption, defaultMain, testGroup)
 import Test.Tasty.HUnit (assertEqual, assertFailure, testCase)
 import Test.Tasty.QuickCheck (QuickCheckTests, testProperty)
-import Covenant.Type (tyvar)
-import Covenant.ASG (ASGNodeType(ValNodeType))
-import Covenant.Type (ValT(Abstraction))
-import Covenant.Type (ValT(BuiltinFlat))
-import Covenant.Type (BuiltinFlatT(UnitT))
 
 main :: IO ()
 main =
@@ -433,34 +398,35 @@ propLambdaValBody = forAllShrinkShow arbitrary shrink show $ \(Concrete t, c) ->
 -- Intro form tests
 
 nothingIntro :: TestTree
-nothingIntro = runIntroFormTest "nothing" expectNothingThunk
-  $ dataConstructor "Maybe" "Nothing" mempty >>= typeIdVal
- where
-   expectNothingThunk :: ValT AbstractTy
-   expectNothingThunk =  ThunkT . Comp1 . ReturnT $ Datatype "Maybe" (Vector.fromList [tyvar Z ix0])
+nothingIntro =
+  runIntroFormTest "nothing" expectNothingThunk $
+    dataConstructor "Maybe" "Nothing" mempty >>= typeIdVal
+  where
+    expectNothingThunk :: ValT AbstractTy
+    expectNothingThunk = ThunkT . Comp1 . ReturnT $ Datatype "Maybe" (Vector.fromList [tyvar Z ix0])
 
 justConcreteIntro :: TestTree
 justConcreteIntro = runIntroFormTest "justConcreteIntro" expected $ do
   argRef <- AnId <$> lit AUnit
   dataConstructor "Maybe" "Just" (Vector.singleton argRef) >>= typeIdVal
- where
-   expected :: ValT AbstractTy
-   expected = ThunkT . Comp0 . ReturnT $ Datatype "Maybe" (Vector.singleton $ BuiltinFlat UnitT)
+  where
+    expected :: ValT AbstractTy
+    expected = ThunkT . Comp0 . ReturnT $ Datatype "Maybe" (Vector.singleton $ BuiltinFlat UnitT)
 
 justRigidIntro :: TestTree
 justRigidIntro = runIntroFormTest "justRigidIntro" expected $ do
   lamId <- lam lamTy $ do
     arg1 <- AnArg <$> arg Z ix0
-    justRigid <-  dataConstructor "Maybe" "Just" (Vector.singleton arg1)
+    justRigid <- dataConstructor "Maybe" "Just" (Vector.singleton arg1)
     ret (AnId justRigid)
   lamThunked <- thunk lamId
-  typeIdVal  lamThunked
- where
-   lamTy :: CompT AbstractTy
-   lamTy = Comp1 $ tyvar Z ix0 :--:> ReturnT (ThunkT . Comp0 . ReturnT $  Datatype "Maybe" $ Vector.singleton (tyvar (S Z) ix0))
-   
-   expected :: ValT AbstractTy
-   expected =  ThunkT lamTy
+  typeIdVal lamThunked
+  where
+    lamTy :: CompT AbstractTy
+    lamTy = Comp1 $ tyvar Z ix0 :--:> ReturnT (ThunkT . Comp0 . ReturnT $ Datatype "Maybe" $ Vector.singleton (tyvar (S Z) ix0))
+
+    expected :: ValT AbstractTy
+    expected = ThunkT lamTy
 
 justNothingIntro :: TestTree
 justNothingIntro = runIntroFormTest "justNothingIntro" expected $ do
@@ -469,47 +435,42 @@ justNothingIntro = runIntroFormTest "justNothingIntro" expected $ do
   nothingApplied <- app nothingForced mempty
   justNothing <- dataConstructor "Maybe" "Just" (Vector.singleton (AnId nothingApplied))
   typeIdVal nothingForced
- where
-   expected :: ValT AbstractTy
-   expected = ThunkT
-            . Comp1
-            . ReturnT
-            . Datatype "Maybe"
-            . Vector.singleton
-            . Datatype "Maybe"
-            $ Vector.singleton
-            $ tyvar Z ix0
-
-
-
+  where
+    expected :: ValT AbstractTy
+    expected =
+      ThunkT
+        . Comp1
+        . ReturnT
+        . Datatype "Maybe"
+        . Vector.singleton
+        . Datatype "Maybe"
+        $ Vector.singleton
+        $ tyvar Z ix0
 
 runIntroFormTest :: String -> ValT AbstractTy -> DebugASGBuilder (ValT AbstractTy) -> TestTree
 runIntroFormTest nm expectedTy act = testCase nm $ case debugASGBuilder tyAppTestDatatypes act of
-     Left err -> assertFailure ("ASG Error: " <> show err)
-     Right actualTy -> assertEqual nm expectedTy actualTy
-
+  Left err -> assertFailure ("ASG Error: " <> show err)
+  Right actualTy -> assertEqual nm expectedTy actualTy
 
 debugUndoRename :: TestTree
 debugUndoRename = testCase "debugUndoRename" $ do
   let expectNothingThunk :: ValT AbstractTy
-      expectNothingThunk =  ThunkT . Comp1 . ReturnT $ Datatype "Maybe" (Vector.fromList [tyvar Z ix0])
-      input = Comp0
-              . ReturnT
-              . ThunkT
-              . Comp1
-              . ReturnT
-              $ Datatype "Maybe" (Vector.fromList [tyvar Z ix0])
-  inputRenamed <- either (error . show) pure
-                  . runRenameM
-                  . renameCompT
-                  $ input
+      expectNothingThunk = ThunkT . Comp1 . ReturnT $ Datatype "Maybe" (Vector.fromList [tyvar Z ix0])
+      input =
+        Comp0
+          . ReturnT
+          . ThunkT
+          . Comp1
+          . ReturnT
+          $ Datatype "Maybe" (Vector.fromList [tyvar Z ix0])
+  inputRenamed <-
+    either (error . show) pure
+      . runRenameM
+      . renameCompT
+      $ input
   case checkApp tyAppTestDatatypes inputRenamed mempty of
     Left err -> assertFailure (show err)
     Right actual -> assertEqual "debugUndoRename" expectNothingThunk (undoRename actual)
-
-
-
-
 
 -- Helpers
 
