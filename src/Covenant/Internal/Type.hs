@@ -159,7 +159,9 @@ newtype CompTBody (a :: Type) = CompTBody (NonEmptyVector (ValT a))
       -- | @since 1.0.0
       Ord,
       -- | @since 1.0.0
-      Show
+      Show,
+      -- | @since 1.2.0
+      Functor
     )
 
 -- | @since 1.0.0
@@ -180,7 +182,9 @@ data CompT (a :: Type) = CompT (Count "tyvar") (CompTBody a)
       -- | @since 1.0.0
       Ord,
       -- | @since 1.0.0
-      Show
+      Show,
+      -- | @since 1.2.0
+      Functor
     )
 
 -- | @since 1.0.0
@@ -238,7 +242,9 @@ data ValT (a :: Type)
       -- | @since 1.0.0
       Ord,
       -- | @since 1.0.0
-      Show
+      Show,
+      -- | @since 1.2.0
+      Functor
     )
 
 -- | @since 1.0.0

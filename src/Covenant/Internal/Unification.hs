@@ -5,6 +5,10 @@ module Covenant.Internal.Unification
     checkApp,
     runUnifyM,
     UnifyM,
+    unify,
+    substitute,
+    fixUp,
+    reconcile
   )
 where
 
@@ -76,6 +80,9 @@ data TypeAppError
     --
     -- @since 1.1.0
     ImpossibleHappened Text
+  | -- Could not reconcile two assignments with the same index
+    -- @since 1.2.0
+    CouldNotReconcile (Index "tyvar") (ValT Renamed) (ValT Renamed)
   deriving stock
     ( -- | @since 1.0.0
       Eq,
@@ -344,28 +351,30 @@ unify expected actual =
         go :: [(Index "tyvar", ValT Renamed)] -> ValT Renamed -> ValT Renamed
         go subs arg = foldl' (\val (i, concrete) -> substitute i concrete val) arg subs
     concretify _ _ = throwError $ ImpossibleHappened "bbForm is not a thunk"
-    reconcile ::
-      Map (Index "tyvar") (ValT Renamed) ->
-      Map (Index "tyvar") (ValT Renamed) ->
-      UnifyM (Map (Index "tyvar") (ValT Renamed))
-    -- Note (Koz, 14/04/2025): This utter soup means the following:
-    --
-    -- - If the old map and the new map don't have any overlapping assignments,
-    --   just union them.
-    -- - Otherwise, for any assignment to a unifiable that is present in both
-    --   maps, ensure they assign to the same thing; if they do, it's fine,
-    --   otherwise we have a problem.
-    reconcile =
-      Merge.mergeA
-        Merge.preserveMissing
-        Merge.preserveMissing
-        (Merge.zipWithAMatched combineBindings)
+
+reconcile ::
+  Map (Index "tyvar") (ValT Renamed) ->
+  Map (Index "tyvar") (ValT Renamed) ->
+  UnifyM (Map (Index "tyvar") (ValT Renamed))
+-- Note (Koz, 14/04/2025): This utter soup means the following:
+--
+-- - If the old map and the new map don't have any overlapping assignments,
+--   just union them.
+-- - Otherwise, for any assignment to a unifiable that is present in both
+--   maps, ensure they assign to the same thing; if they do, it's fine,
+--   otherwise we have a problem.
+reconcile =
+  Merge.mergeA
+    Merge.preserveMissing
+    Merge.preserveMissing
+    (Merge.zipWithAMatched combineBindings)
+  where
     combineBindings :: Index "tyvar" -> ValT Renamed -> ValT Renamed -> UnifyM (ValT Renamed)
-    combineBindings _ old new =
+    combineBindings i old new =
       if old == new
         then pure old
         else case old of
           Abstraction (Unifiable _) -> pure new
           _ -> case new of
             Abstraction (Unifiable _) -> pure old
-            _ -> unificationError
+            _ -> throwError $ CouldNotReconcile i old new

@@ -1,6 +1,6 @@
 {-# LANGUAGE PatternSynonyms #-}
 
-module Main (main) where
+module Main  where
 
 import Control.Applicative ((<|>))
 import Control.Monad (guard, void)
@@ -46,9 +46,9 @@ import Covenant.ASG
     ret,
     runASGBuilder,
     thunk,
-    topLevelNode,
+    topLevelNode, dataConstructor,
   )
-import Covenant.Constant (typeConstant)
+import Covenant.Constant (typeConstant, AConstant(AUnit))
 import Covenant.DeBruijn (DeBruijn (Z))
 import Covenant.Index (Index, intIndex, ix0)
 import Covenant.Prim
@@ -56,7 +56,7 @@ import Covenant.Prim
     typeThreeArgFunc,
     typeTwoArgFunc,
   )
-import Covenant.Test (Concrete (Concrete))
+import Covenant.Test (Concrete (Concrete), DebugASGBuilder, debugASGBuilder, tyAppTestDatatypes, runRenameM, renameCompT, checkApp, typeIdVal)
 import Covenant.Type
   ( AbstractTy,
     CompT (Comp0, Comp1, CompN),
@@ -88,6 +88,13 @@ import Test.QuickCheck
 import Test.Tasty (TestTree, adjustOption, defaultMain, testGroup)
 import Test.Tasty.HUnit (assertEqual, assertFailure, testCase)
 import Test.Tasty.QuickCheck (QuickCheckTests, testProperty)
+import Covenant.Type (ValT(ThunkT))
+import Covenant.Type (ValT(Datatype))
+import Covenant.Test (undoRename)
+import Covenant.Type (ValT(BuiltinFlat))
+import Covenant.Type (BuiltinFlatT(UnitT))
+import Covenant.DeBruijn (DeBruijn(S))
+import Data.Wedge (wedgeLeft)
 
 main :: IO ()
 main =
@@ -260,7 +267,7 @@ propApplyReturn = forAllShrinkShow arbitrary shrink show $ \c ->
         ret (AnId i)
       applyReturnComp = do
         i <- comp
-        applied <- app i Vector.empty
+        applied <- app i Vector.empty mempty
         ret (AnId applied)
    in withCompilationSuccess comp $ \expectedASG ->
         withCompilationSuccess applyReturnComp $ \applyReturnASG ->
@@ -310,7 +317,7 @@ propApplyToVal = forAllShrinkShow arbitrary shrink show $ \c args ->
   let comp = do
         args' <- traverse (fmap AnId . lit) args
         i <- lit c
-        app i args'
+        app i args' mempty
    in withCompilationFailure comp $ \case
         TypeError _ (ApplyToValType t) -> typeConstant c === t
         TypeError _ err' -> failWrongTypeError err'
@@ -321,7 +328,7 @@ propApplyToError = forAllShrinkShow arbitrary shrink show $ \args ->
   let comp = do
         args' <- traverse (fmap AnId . lit) args
         i <- err
-        app i args'
+        app i args' mempty
    in withCompilationFailure comp $ \case
         TypeError _ ApplyToError -> property True
         TypeError _ err' -> failWrongTypeError err'
@@ -343,7 +350,7 @@ propApplyComp = forAllShrinkShow arbitrary shrink show $ \f arg1 ->
           Left bi1 -> builtin1 bi1
           Right (Left bi2) -> builtin2 bi2
           Right (Right bi3) -> builtin3 bi3
-        app i (Vector.singleton . AnId $ arg')
+        app i (Vector.singleton . AnId $ arg') mempty
    in withCompilationFailure comp $ \case
         TypeError _ (ApplyCompType actualT) -> t === actualT
         TypeError _ err' -> failWrongTypeError err'
@@ -456,6 +463,89 @@ boundTyVarShouldFail = testCase "boundTyVarShouldFail" . run $ boundTyVar Z ix0
           else assertFailure $ "Expected OutOfScopeTyVar error for Z, ix0 but got: " <> show db <> ", " <> show argpos
       Left err' -> assertFailure $ "Expected an OutofScopeTyVar error, but got: " <> show err'
       Right x -> assertFailure $ "Expected boundTyVar to fail, but got: " <> show x
+
+-- Intro form tests
+
+nothingIntro :: TestTree
+nothingIntro =
+  runIntroFormTest "nothing" expectNothingThunk $
+    dataConstructor "Maybe" "Nothing" mempty >>= typeIdVal
+  where
+    expectNothingThunk :: ValT AbstractTy
+    expectNothingThunk = ThunkT . Comp1 . ReturnT $ Datatype "Maybe" (Vector.fromList [tyvar Z ix0])
+
+justConcreteIntro :: TestTree
+justConcreteIntro = runIntroFormTest "justConcreteIntro" expected $ do
+  argRef <- AnId <$> lit AUnit
+  dataConstructor "Maybe" "Just" (Vector.singleton argRef) >>= typeIdVal
+  where
+    expected :: ValT AbstractTy
+    expected = ThunkT . Comp0 . ReturnT $ Datatype "Maybe" (Vector.singleton $ BuiltinFlat UnitT)
+
+justRigidIntro :: TestTree
+justRigidIntro = runIntroFormTest "justRigidIntro" expected $ do
+  lamId <- lam lamTy $ do
+    arg1 <- AnArg <$> arg Z ix0
+    justRigid <- dataConstructor "Maybe" "Just" (Vector.singleton arg1)
+    ret (AnId justRigid)
+  lamThunked <- thunk lamId
+  typeIdVal lamThunked
+  where
+    lamTy :: CompT AbstractTy
+    lamTy = Comp1 $ tyvar Z ix0 :--:> ReturnT (ThunkT . Comp0 . ReturnT $ Datatype "Maybe" $ Vector.singleton (tyvar (S Z) ix0))
+
+    expected :: ValT AbstractTy
+    expected = ThunkT lamTy
+
+justNothingIntro :: TestTree
+justNothingIntro = runIntroFormTest "justNothingIntro" expectedThunk $ do
+  thunk <- lam expectedComp $ do
+    nothingThunk <- dataConstructor "Maybe" "Nothing" mempty
+    var <- boundTyVar Z ix0
+    nothingForced <- force (AnId nothingThunk)
+    nothingApplied <- app nothingForced mempty (Vector.singleton . wedgeLeft . Just $ var)
+    justNothing <- dataConstructor "Maybe" "Just" (Vector.singleton (AnId nothingApplied))
+    justNothingForced <- force (AnId justNothing)
+    justNothingInstantiated <- app justNothingForced mempty (Vector.singleton . wedgeLeft . Just $ var)
+    thunk justNothingInstantiated
+  typeIdVal thunk 
+  where
+    expectedComp :: CompT AbstractTy
+    expectedComp = Comp1
+        . ReturnT
+        . Datatype "Maybe"
+        . Vector.singleton
+        . Datatype "Maybe"
+        $ Vector.singleton
+        $ tyvar Z ix0
+
+    expectedThunk :: ValT AbstractTy
+    expectedThunk = ThunkT expectedComp
+
+runIntroFormTest :: String -> ValT AbstractTy -> DebugASGBuilder (ValT AbstractTy) -> TestTree
+runIntroFormTest nm expectedTy act = testCase nm $ case debugASGBuilder tyAppTestDatatypes act of
+  Left err -> assertFailure ("ASG Error: " <> show err)
+  Right actualTy -> assertEqual nm expectedTy actualTy
+
+debugUndoRename :: TestTree
+debugUndoRename = testCase "debugUndoRename" $ do
+  let expectNothingThunk :: ValT AbstractTy
+      expectNothingThunk = ThunkT . Comp1 . ReturnT $ Datatype "Maybe" (Vector.fromList [tyvar Z ix0])
+      input =
+        Comp0
+          . ReturnT
+          . ThunkT
+          . Comp1
+          . ReturnT
+          $ Datatype "Maybe" (Vector.fromList [tyvar Z ix0])
+  inputRenamed <-
+    either (error . show) pure
+      . runRenameM
+      . renameCompT
+      $ input
+  case checkApp tyAppTestDatatypes inputRenamed mempty of
+    Left err' -> assertFailure (show err')
+    Right actual -> assertEqual "debugUndoRename" expectNothingThunk (undoRename actual)
 
 -- Helpers
 

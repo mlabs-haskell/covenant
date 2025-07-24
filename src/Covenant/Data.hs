@@ -35,6 +35,9 @@ module Covenant.Data
     isRecursiveChildOf,
     hasRecursive,
     everythingOf,
+
+    -- ** Helpers
+    mapValT,
   )
 where
 
