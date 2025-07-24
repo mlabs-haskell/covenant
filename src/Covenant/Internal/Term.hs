@@ -21,19 +21,22 @@ import Covenant.DeBruijn (DeBruijn)
 import Covenant.Index (Index)
 import Covenant.Internal.KindCheck (EncodingArgErr)
 import Covenant.Internal.Rename (RenameError)
+import Covenant.Internal.Strategy (PlutusDataConstructor)
 import Covenant.Internal.Type
   ( AbstractTy,
     BuiltinFlatT,
     CompT,
-    ValT, TyName, ConstructorName, Renamed,
+    ConstructorName,
+    Renamed,
+    TyName,
+    ValT,
   )
 import Covenant.Internal.Unification (TypeAppError)
 import Covenant.Prim (OneArgFunc, SixArgFunc, ThreeArgFunc, TwoArgFunc)
 import Data.Kind (Type)
+import Data.Set qualified as Set
 import Data.Vector (Vector)
 import Data.Word (Word64)
-import Covenant.Internal.Strategy (PlutusDataConstructor)
-import qualified Data.Set as Set
 
 -- | An error that can arise during the construction of an ASG by programmatic
 -- means.

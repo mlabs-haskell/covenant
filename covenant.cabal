@@ -30,9 +30,9 @@ common lang
     -Woperator-whitespace
     -Wambiguous-fields
     -Wmisplaced-pragmas
-    -- -Wmissing-export-lists
-    -- -Wmissing-import-lists
 
+  -- -Wmissing-export-lists
+  -- -Wmissing-import-lists
   default-extensions:
     BangPatterns
     BinaryLiterals
@@ -122,6 +122,7 @@ library
     Covenant.Internal.Unification
 
   build-depends:
+    -- TODO: Pin version
     QuickCheck ==2.15.0.1,
     acc ==0.2.0.3,
     bimap ==0.5.0,
@@ -136,7 +137,6 @@ library
     prettyprinter ==1.7.1,
     quickcheck-instances ==0.3.32,
     quickcheck-transformer ==0.3.1.2,
-        -- TODO: Pin version
     smash,
     tasty-hunit ==0.10.2,
     text >=2.1.1 && <2.2,

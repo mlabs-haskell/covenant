@@ -8,7 +8,7 @@ module Covenant.Internal.Unification
     unify,
     substitute,
     fixUp,
-    reconcile
+    reconcile,
   )
 where
 

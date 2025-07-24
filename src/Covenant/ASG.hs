@@ -86,7 +86,7 @@ module Covenant.ASG
   )
 where
 
-import Control.Monad (unless, zipWithM, foldM)
+import Control.Monad (foldM, unless, zipWithM)
 import Control.Monad.Except
   ( ExceptT,
     MonadError (throwError),
@@ -104,9 +104,9 @@ import Control.Monad.Reader
     runReaderT,
   )
 import Covenant.Constant (AConstant, typeConstant)
-import Covenant.Data (DatatypeInfo, mkDatatypeInfo, mapValT)
+import Covenant.Data (DatatypeInfo, mapValT, mkDatatypeInfo)
 import Covenant.DeBruijn (DeBruijn (S), asInt)
-import Covenant.Index (Index, count0, intIndex, Count, intCount)
+import Covenant.Index (Count, Index, count0, intCount, intIndex)
 import Covenant.Internal.KindCheck (checkEncodingArgs)
 import Covenant.Internal.Ledger (ledgerTypes)
 import Covenant.Internal.Rename
@@ -114,10 +114,12 @@ import Covenant.Internal.Rename
       ( InvalidAbstractionReference
       ),
     renameCompT,
+    renameDatatypeInfo,
     renameValT,
     runRenameM,
-    undoRename, renameDatatypeInfo,
+    undoRename,
   )
+import Covenant.Internal.Strategy (PlutusDataConstructor (PlutusB, PlutusConstr, PlutusI, PlutusList, PlutusMap))
 import Covenant.Internal.Term
   ( ASGNode (ACompNode, AValNode, AnError),
     ASGNodeType (CompNodeType, ErrorNodeType, ValNodeType),
@@ -141,10 +143,16 @@ import Covenant.Internal.Term
         CataUnsuitable,
         CataWrongBuiltinType,
         CataWrongValT,
+        ConstructorDoesNotExistForType,
+        DatatypeInfoRenameError,
         EncodingError,
+        FailedToRenameInstantiation,
         ForceCompType,
         ForceError,
         ForceNonThunk,
+        IntroFormErrorNodeField,
+        IntroFormWrongNumArgs,
+        InvalidOpaqueField,
         LambdaResultsInNonReturn,
         LambdaResultsInValType,
         NoSuchArgument,
@@ -156,12 +164,14 @@ import Covenant.Internal.Term
         ReturnWrapsError,
         ThunkError,
         ThunkValType,
+        TypeDoesNotExist,
+        UndeclaredOpaquePlutusDataCtor,
         UnificationError,
-        WrongReturnType, ConstructorDoesNotExistForType, TypeDoesNotExist, DatatypeInfoRenameError, UndeclaredOpaquePlutusDataCtor, InvalidOpaqueField, IntroFormWrongNumArgs, IntroFormErrorNodeField, FailedToRenameInstantiation
+        WrongReturnType
       ),
     Id,
     Ref (AnArg, AnId),
-    ValNodeInfo (AppInternal, CataInternal, LitInternal, ThunkInternal, DataConstructorInternal),
+    ValNodeInfo (AppInternal, CataInternal, DataConstructorInternal, LitInternal, ThunkInternal),
     typeASGNode,
     typeId,
     typeRef,
@@ -171,11 +181,13 @@ import Covenant.Internal.Type
     BuiltinFlatT (ByteStringT, IntegerT),
     CompT (CompT),
     CompTBody (CompTBody),
+    Constructor,
+    ConstructorName,
     DataDeclaration (DataDeclaration, OpaqueData),
     Renamed (Unifiable),
     TyName,
-    ValT (BuiltinFlat, Datatype, ThunkT, Abstraction),
-    arity, Constructor, ConstructorName,
+    ValT (Abstraction, BuiltinFlat, Datatype, ThunkT),
+    arity,
   )
 import Covenant.Internal.Unification
   ( TypeAppError
@@ -189,7 +201,13 @@ import Covenant.Internal.Unification
         NoBBForm,
         NoDatatypeInfo
       ),
-    checkApp, UnifyM, runUnifyM, substitute, fixUp, unify, reconcile,
+    UnifyM,
+    checkApp,
+    fixUp,
+    reconcile,
+    runUnifyM,
+    substitute,
+    unify,
   )
 import Covenant.Prim
   ( OneArgFunc,
@@ -201,37 +219,38 @@ import Covenant.Prim
     typeThreeArgFunc,
     typeTwoArgFunc,
   )
+import Covenant.Type (CompT (Comp0), CompTBody (ReturnT), tyvar)
 import Data.Bimap (Bimap)
 import Data.Bimap qualified as Bimap
 import Data.Coerce (coerce)
+import Data.Foldable (find)
 import Data.Functor.Identity (Identity, runIdentity)
 import Data.Kind (Type)
 import Data.Map.Strict (Map)
 import Data.Map.Strict qualified as Map
-import Data.Maybe (fromJust, isJust, catMaybes)
+import Data.Maybe (catMaybes, fromJust, isJust)
+import Data.Set qualified as Set
+import Data.Text qualified as T
 import Data.Vector (Vector)
 import Data.Vector qualified as Vector
 import Data.Vector.NonEmpty qualified as NonEmpty
+import Data.Void (Void, vacuous)
+import Data.Wedge (Wedge (Here, Nowhere, There), wedge, wedgeLeft, wedgeRight)
+import Debug.Trace (traceM)
 import Optics.Core
   ( A_Lens,
     LabelOptic (labelOptic),
     at,
+    folded,
     ix,
     lens,
     over,
     preview,
     review,
+    toListOf,
     view,
-    (%), toListOf, folded,
+    (%),
   )
-import Covenant.Internal.Strategy (PlutusDataConstructor (PlutusI, PlutusB, PlutusList, PlutusMap, PlutusConstr))
-import qualified Data.Set as Set
-import Data.Foldable (find)
-import Covenant.Type (CompT(Comp0), CompTBody (ReturnT), tyvar)
-import Debug.Trace (traceM)
-import Data.Wedge (Wedge(Nowhere,Here,There), wedgeLeft, wedgeRight, wedge)
-import Data.Void (Void, vacuous)
-import qualified Data.Text as T
 
 -- | A fully-assembled Covenant ASG.
 --
@@ -663,7 +682,7 @@ app ::
   m Id
 app fId argRefs instTys = do
   lookedUp <- typeId fId
-  subs <-  renameSubs $  mkSubstitutions instTys
+  subs <- renameSubs $ mkSubstitutions instTys
   case lookedUp of
     CompNodeType fT -> case runRenameM . renameCompT $ fT of
       Left err' -> throwError . RenameFunctionFailed fT $ err'
@@ -678,32 +697,36 @@ app fId argRefs instTys = do
     ValNodeType t -> throwError . ApplyToValType $ t
     ErrorNodeType -> throwError ApplyToError
   where
-  mkSubstitutions :: Vector (Wedge BoundTyVar (ValT Void)) -> [(Index "tyvar", ValT AbstractTy)]
-  mkSubstitutions =
-    Vector.ifoldl' (\acc (unsafeMkIndex -> i) w -> wedge
-                                acc
-                                (\(BoundTyVar dbIx posIx) -> (i,tyvar dbIx posIx) : acc)
-                                (\v -> (i,vacuous v):acc)
-                                w
-                   ) []
-  -- This is fine, vector indices can't be negative
-  unsafeMkIndex :: Int -> Index "tyvar"
-  unsafeMkIndex  = fromJust . preview intIndex
+    mkSubstitutions :: Vector (Wedge BoundTyVar (ValT Void)) -> [(Index "tyvar", ValT AbstractTy)]
+    mkSubstitutions =
+      Vector.ifoldl'
+        ( \acc (unsafeMkIndex -> i) w ->
+            wedge
+              acc
+              (\(BoundTyVar dbIx posIx) -> (i, tyvar dbIx posIx) : acc)
+              (\v -> (i, vacuous v) : acc)
+              w
+        )
+        []
+    -- This is fine, vector indices can't be negative
+    unsafeMkIndex :: Int -> Index "tyvar"
+    unsafeMkIndex = fromJust . preview intIndex
 
-  renameSubs :: [(Index "tyvar", ValT AbstractTy)] -> m [(Index "tyvar", ValT Renamed)]
-  renameSubs subs = case traverse (traverse (runRenameM . renameValT)) subs of
-    Left err' -> throwError $ FailedToRenameInstantiation err'
-    Right res -> pure res
+    renameSubs :: [(Index "tyvar", ValT AbstractTy)] -> m [(Index "tyvar", ValT Renamed)]
+    renameSubs subs = case traverse (traverse (runRenameM . renameValT)) subs of
+      Left err' -> throwError $ FailedToRenameInstantiation err'
+      Right res -> pure res
 
-  instantiate :: [(Index "tyvar", ValT Renamed)] -> CompT Renamed -> m (CompT Renamed)
-  instantiate [] fn = pure fn 
-  instantiate subs fn = do
-    instantiated <- liftUnifyM . fixUp $  foldr (\(i,t) f -> substitute i t f) (ThunkT fn) subs
-    case instantiated of
-      ThunkT res -> pure res
-      other -> throwError . UnificationError . ImpossibleHappened
-               $ "Impossible happened: Result of tyvar instantiation should be a thunk, but is: "
-                 <> T.pack (show other)
+    instantiate :: [(Index "tyvar", ValT Renamed)] -> CompT Renamed -> m (CompT Renamed)
+    instantiate [] fn = pure fn
+    instantiate subs fn = do
+      instantiated <- liftUnifyM . fixUp $ foldr (\(i, t) f -> substitute i t f) (ThunkT fn) subs
+      case instantiated of
+        ThunkT res -> pure res
+        other ->
+          throwError . UnificationError . ImpossibleHappened $
+            "Impossible happened: Result of tyvar instantiation should be a thunk, but is: "
+              <> T.pack (show other)
 
 -- TODO: Modify this to work with Opaques after the hard part (normal datatypes) is done.
 dataConstructor ::
@@ -849,8 +872,6 @@ dataConstructor tyName ctorName fields = do
         Just infoAbstract -> case renameDatatypeInfo infoAbstract of
           Left e -> throwError $ DatatypeInfoRenameError e
           Right infoRenamed -> pure infoRenamed
-
-
 
 -- | Construct a node corresponding to the given constant.
 --
@@ -1011,13 +1032,15 @@ boundTyVar scope index = do
     then pure (BoundTyVar scope index)
     else throwError $ OutOfScopeTyVar scope index
 
-    -- Runs a UnifyM computation in our abstract monad. Again, largely to avoid superfluous code
-    -- duplication.
-liftUnifyM :: forall (m :: Type -> Type) (a :: Type)
-            . (MonadHashCons Id ASGNode m, MonadError CovenantTypeError m, MonadReader ASGEnv m)
-           => UnifyM a -> m a
+-- Runs a UnifyM computation in our abstract monad. Again, largely to avoid superfluous code
+-- duplication.
+liftUnifyM ::
+  forall (m :: Type -> Type) (a :: Type).
+  (MonadHashCons Id ASGNode m, MonadError CovenantTypeError m, MonadReader ASGEnv m) =>
+  UnifyM a ->
+  m a
 liftUnifyM act = do
-      tyDict <- asks (view #datatypeInfo)
-      case runUnifyM tyDict act of
-        Left e -> throwError $ UnificationError e
-        Right res -> pure res
+  tyDict <- asks (view #datatypeInfo)
+  case runUnifyM tyDict act of
+    Left e -> throwError $ UnificationError e
+    Right res -> pure res

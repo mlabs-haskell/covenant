@@ -69,6 +69,9 @@ import Data.Foldable (foldl')
 #endif
 import Control.Applicative ((<|>))
 import Control.Monad (void)
+import Control.Monad.Error.Class (MonadError)
+import Control.Monad.HashCons (HashConsT, MonadHashCons, runHashConsT)
+import Control.Monad.Reader (MonadReader, ReaderT, runReaderT)
 import Control.Monad.State.Strict
   ( MonadState (get, put),
     State,
@@ -77,6 +80,8 @@ import Control.Monad.State.Strict
     modify,
   )
 import Control.Monad.Trans (MonadTrans (lift))
+import Control.Monad.Trans.Except (ExceptT, runExceptT)
+import Covenant.ASG (ASGEnv (ASGEnv), ASGNode, CovenantError (TypeError), CovenantTypeError, Id, ScopeInfo (ScopeInfo))
 import Covenant.Data
   ( DatatypeInfo,
     mkDatatypeInfo,
@@ -115,12 +120,14 @@ import Covenant.Internal.Rename
     renameCompT,
     renameDataDecl,
     renameValT,
-    runRenameM, undoRename,
+    runRenameM,
+    undoRename,
   )
 import Covenant.Internal.Strategy
   ( DataEncoding (PlutusData, SOP),
     PlutusDataStrategy (ConstrData),
   )
+import Covenant.Internal.Term (ASGNodeType (ValNodeType), typeId)
 import Covenant.Internal.Type
   ( AbstractTy (BoundAt),
     BuiltinFlatT
@@ -147,6 +154,7 @@ import Covenant.Type
   )
 import Covenant.Util (prettyStr)
 import Data.Coerce (coerce)
+import Data.Functor.Identity (Identity (runIdentity))
 import Data.Kind (Type)
 import Data.Map.Strict (Map)
 import Data.Map.Strict qualified as M
@@ -188,13 +196,6 @@ import Test.QuickCheck.GenT qualified as GT
 import Test.QuickCheck.Instances.Containers ()
 import Test.QuickCheck.Instances.Vector ()
 import Test.Tasty.HUnit (assertFailure)
-import Control.Monad.Reader (ReaderT, MonadReader, runReaderT)
-import Covenant.ASG (ASGNode, Id, CovenantTypeError, ASGEnv(ASGEnv), CovenantError(TypeError), ScopeInfo(ScopeInfo))
-import Data.Functor.Identity (Identity(runIdentity))
-import Control.Monad.HashCons (HashConsT,runHashConsT, MonadHashCons)
-import Control.Monad.Trans.Except (ExceptT,runExceptT)
-import Control.Monad.Error.Class (MonadError)
-import Covenant.Internal.Term (ASGNodeType(ValNodeType), typeId)
 
 -- | Wrapper for 'ValT' to provide an 'Arbitrary' instance to generate only
 -- value types without any type variables.

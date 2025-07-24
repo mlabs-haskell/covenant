@@ -1,6 +1,6 @@
 {-# LANGUAGE PatternSynonyms #-}
 
-module Main  where
+module Main where
 
 import Control.Applicative ((<|>))
 import Control.Monad (guard, void)
@@ -38,6 +38,7 @@ import Covenant.ASG
     builtin1,
     builtin2,
     builtin3,
+    dataConstructor,
     err,
     force,
     lam,
@@ -46,31 +47,25 @@ import Covenant.ASG
     ret,
     runASGBuilder,
     thunk,
-    topLevelNode, dataConstructor,
+    topLevelNode,
   )
-import Covenant.Constant (typeConstant, AConstant(AUnit))
-import Covenant.DeBruijn (DeBruijn (Z))
+import Covenant.Constant (AConstant (AUnit), typeConstant)
+import Covenant.DeBruijn (DeBruijn (S, Z))
 import Covenant.Index (Index, intIndex, ix0)
 import Covenant.Prim
   ( typeOneArgFunc,
     typeThreeArgFunc,
     typeTwoArgFunc,
   )
-import Covenant.Test (Concrete (Concrete), DebugASGBuilder, debugASGBuilder, tyAppTestDatatypes, runRenameM, renameCompT, checkApp, typeIdVal)
-import Covenant.Type
-  ( AbstractTy,
-    CompT (Comp0, Comp1, CompN),
-    CompTBody (ArgsAndResult, ReturnT, (:--:>)),
-    ValT,
-    arity,
-    tyvar,
-  )
+import Covenant.Test (Concrete (Concrete), DebugASGBuilder, checkApp, debugASGBuilder, renameCompT, runRenameM, tyAppTestDatatypes, typeIdVal, undoRename)
+import Covenant.Type (AbstractTy, BuiltinFlatT (UnitT), CompT (Comp0, Comp1, CompN), CompTBody (ArgsAndResult, ReturnT, (:--:>)), ValT (BuiltinFlat, Datatype, ThunkT), arity, tyvar)
 import Covenant.Util (pattern ConsV, pattern NilV)
 import Data.Coerce (coerce)
 import Data.Kind (Type)
 import Data.Map qualified as M
 import Data.Maybe (fromJust)
 import Data.Vector qualified as Vector
+import Data.Wedge (wedgeLeft)
 import Optics.Core (preview, review)
 import Test.QuickCheck
   ( Gen,
@@ -88,13 +83,6 @@ import Test.QuickCheck
 import Test.Tasty (TestTree, adjustOption, defaultMain, testGroup)
 import Test.Tasty.HUnit (assertEqual, assertFailure, testCase)
 import Test.Tasty.QuickCheck (QuickCheckTests, testProperty)
-import Covenant.Type (ValT(ThunkT))
-import Covenant.Type (ValT(Datatype))
-import Covenant.Test (undoRename)
-import Covenant.Type (ValT(BuiltinFlat))
-import Covenant.Type (BuiltinFlatT(UnitT))
-import Covenant.DeBruijn (DeBruijn(S))
-import Data.Wedge (wedgeLeft)
 
 main :: IO ()
 main =
@@ -508,10 +496,11 @@ justNothingIntro = runIntroFormTest "justNothingIntro" expectedThunk $ do
     justNothingForced <- force (AnId justNothing)
     justNothingInstantiated <- app justNothingForced mempty (Vector.singleton . wedgeLeft . Just $ var)
     thunk justNothingInstantiated
-  typeIdVal thunk 
+  typeIdVal thunk
   where
     expectedComp :: CompT AbstractTy
-    expectedComp = Comp1
+    expectedComp =
+      Comp1
         . ReturnT
         . Datatype "Maybe"
         . Vector.singleton
