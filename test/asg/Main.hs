@@ -56,7 +56,7 @@ import Covenant.Type
   ( AbstractTy,
     CompT (Comp0, Comp1, Comp2, CompN),
     CompTBody (ArgsAndResult, ReturnT, (:--:>)),
-    ValT(ThunkT),
+    ValT (ThunkT),
     arity,
     tyvar,
   )
@@ -225,15 +225,15 @@ propForceThunk = forAllShrinkShow arbitrary shrink show $ \x ->
             force (AnId thunkI)
        in (comp, forceThunkComp)
 
-
 propForceComp :: Property
 propForceComp = forAllShrinkShow arbitrary shrink show $ \x ->
-  let comp = AnId <$> do
-        i <- case x of
-          Left bi1 -> builtin1 bi1
-          Right (Left bi2) -> builtin2 bi2
-          Right (Right bi3) -> builtin3 bi3
-        force (AnId i)
+  let comp =
+        AnId <$> do
+          i <- case x of
+            Left bi1 -> builtin1 bi1
+            Right (Left bi2) -> builtin2 bi2
+            Right (Right bi3) -> builtin3 bi3
+          force (AnId i)
       expectedT = case x of
         Left bi1 -> typeOneArgFunc bi1
         Right (Left bi2) -> typeTwoArgFunc bi2
@@ -245,9 +245,10 @@ propForceComp = forAllShrinkShow arbitrary shrink show $ \x ->
 
 propForceNonThunk :: Property
 propForceNonThunk = forAllShrinkShow arbitrary shrink show $ \c ->
-  let comp = AnId <$> do
-        i <- lit c
-        force (AnId i)
+  let comp =
+        AnId <$> do
+          i <- lit c
+          force (AnId i)
    in withCompilationFailure comp $ \case
         TypeError _ (ForceNonThunk actualT) -> typeConstant c === actualT
         TypeError _ err' -> failWrongTypeError err'
@@ -255,9 +256,10 @@ propForceNonThunk = forAllShrinkShow arbitrary shrink show $ \c ->
 
 propThunkValType :: Property
 propThunkValType = forAllShrinkShow arbitrary shrink show $ \c ->
-  let comp = AnId <$> do
-        i <- lit c
-        thunk i
+  let comp =
+        AnId <$> do
+          i <- lit c
+          thunk i
    in withCompilationFailure comp $ \case
         TypeError _ (ThunkValType actualT) -> typeConstant c === actualT
         TypeError _ err' -> failWrongTypeError err'
@@ -265,10 +267,11 @@ propThunkValType = forAllShrinkShow arbitrary shrink show $ \c ->
 
 propApplyToVal :: Property
 propApplyToVal = forAllShrinkShow arbitrary shrink show $ \c args ->
-  let comp = AnId <$> do
-        args' <- traverse (fmap AnId . lit) args
-        i <- lit c
-        app i args'
+  let comp =
+        AnId <$> do
+          args' <- traverse (fmap AnId . lit) args
+          i <- lit c
+          app i args'
    in withCompilationFailure comp $ \case
         TypeError _ (ApplyToValType t) -> typeConstant c === t
         TypeError _ err' -> failWrongTypeError err'
@@ -276,10 +279,11 @@ propApplyToVal = forAllShrinkShow arbitrary shrink show $ \c args ->
 
 propApplyToError :: Property
 propApplyToError = forAllShrinkShow arbitrary shrink show $ \args ->
-  let comp = AnId <$> do
-        args' <- traverse (fmap AnId . lit) args
-        i <- err
-        app i args'
+  let comp =
+        AnId <$> do
+          args' <- traverse (fmap AnId . lit) args
+          i <- err
+          app i args'
    in withCompilationFailure comp $ \case
         TypeError _ ApplyToError -> property True
         TypeError _ err' -> failWrongTypeError err'
@@ -295,13 +299,14 @@ propApplyComp = forAllShrinkShow arbitrary shrink show $ \f arg1 ->
         Right (Left bi2) -> typeTwoArgFunc bi2
         Right (Right bi3) -> typeThreeArgFunc bi3
 
-      comp = AnId <$> do
-        i <- builtin1 f
-        arg' <- case arg1 of
-          Left bi1 -> builtin1 bi1
-          Right (Left bi2) -> builtin2 bi2
-          Right (Right bi3) -> builtin3 bi3
-        app i (Vector.singleton . AnId $ arg')
+      comp =
+        AnId <$> do
+          i <- builtin1 f
+          arg' <- case arg1 of
+            Left bi1 -> builtin1 bi1
+            Right (Left bi2) -> builtin2 bi2
+            Right (Right bi3) -> builtin3 bi3
+          app i (Vector.singleton . AnId $ arg')
    in withCompilationFailure comp $ \case
         TypeError _ (ApplyCompType actualT) -> t === actualT
         TypeError _ err' -> failWrongTypeError err'
@@ -389,25 +394,24 @@ boundTyVarShouldFail = testCase "boundTyVarShouldFail" . run $ boundTyVar Z ix0
       Left err' -> assertFailure $ "Expected an OutofScopeTyVar error, but got: " <> show err'
       Right x -> assertFailure $ "Expected boundTyVar to fail, but got: " <> show x
 
-
 -- TODO: better name
 newLamTest1 :: TestTree
 newLamTest1 = testCase "new lam test 1" $ case runASGBuilder M.empty fn of
   Left err' -> assertFailure (show err')
-  Right{} -> pure ()
- where
-   fn :: ASGBuilder Id
-   fn = lam expected $ do
-     f <- arg Z ix0 >>= force . AnArg
-     a <- AnArg <$> arg Z ix1
-     AnId <$> app f (Vector.singleton a) 
+  Right {} -> pure ()
+  where
+    fn :: ASGBuilder Id
+    fn = lam expected $ do
+      f <- arg Z ix0 >>= force . AnArg
+      a <- AnArg <$> arg Z ix1
+      AnId <$> app f (Vector.singleton a)
 
-   expected :: CompT AbstractTy
-   expected = Comp2
-              $ ThunkT (Comp0 $ tyvar (S Z) ix0 :--:> ReturnT (tyvar (S Z) ix1))
-                :--:> tyvar Z ix0
-                :--:> ReturnT (tyvar Z ix1)
-
+    expected :: CompT AbstractTy
+    expected =
+      Comp2 $
+        ThunkT (Comp0 $ tyvar (S Z) ix0 :--:> ReturnT (tyvar (S Z) ix1))
+          :--:> tyvar Z ix0
+          :--:> ReturnT (tyvar Z ix1)
 
 -- Helpers
 
@@ -443,7 +447,7 @@ failUnexpectedValNodeInfo :: ValNodeInfo -> Property
 failUnexpectedValNodeInfo info =
   failWithCounterExample ("Unexpected ValNodeInfo: " <> show info)
 
-{- NOTE: Not 100% sure I won't need these 
+{- NOTE: Not 100% sure I won't need these
 withExpectedId :: Ref -> (Id -> Property) -> Property
 withExpectedId r cb = case r of
   AnId i -> cb i

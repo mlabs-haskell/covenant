@@ -99,8 +99,8 @@ import Control.Monad.Reader
     runReaderT,
   )
 import Covenant.Constant (AConstant, typeConstant)
-import Covenant.Data ( DatatypeInfo, mkDatatypeInfo, mapValT )
-import Covenant.DeBruijn (DeBruijn (S,Z), asInt)
+import Covenant.Data (DatatypeInfo, mapValT, mkDatatypeInfo)
+import Covenant.DeBruijn (DeBruijn (S, Z), asInt)
 import Covenant.Index (Index, intIndex)
 import Covenant.Internal.KindCheck (checkEncodingArgs)
 import Covenant.Internal.Ledger (ledgerTypes)
@@ -139,8 +139,8 @@ import Covenant.Internal.Term
         ForceCompType,
         ForceError,
         ForceNonThunk,
-        LambdaResultsInNonReturn,
         LambdaResultsInCompType,
+        LambdaResultsInNonReturn,
         NoSuchArgument,
         OutOfScopeTyVar,
         RenameArgumentFailed,
@@ -195,6 +195,7 @@ import Covenant.Prim
     typeThreeArgFunc,
     typeTwoArgFunc,
   )
+import Covenant.Type (ValT (Abstraction))
 import Data.Bimap (Bimap)
 import Data.Bimap qualified as Bimap
 import Data.Coerce (coerce)
@@ -218,7 +219,6 @@ import Optics.Core
     view,
     (%),
   )
-import Covenant.Type (ValT(Abstraction))
 
 -- | A fully-assembled Covenant ASG.
 --
@@ -549,7 +549,6 @@ force r = do
     CompNodeType t -> throwError . ForceCompType $ t
     ErrorNodeType -> throwError ForceError
 
-
 {- TODO: Remove once changes are complete
 -- | Given the result of a function body (either a value or an error), construct
 -- the return for it. Will fail if that reference aims at a computation node.
@@ -569,6 +568,7 @@ ret r = do
     CompNodeType t -> throwError . ReturnCompType $ t
     ErrorNodeType -> err
 -}
+
 -- | Given a desired type, and a computation which will construct a lambda body
 -- when executed (with the scope extended with the arguments the functions can
 -- expect), construct a lambda.
@@ -596,21 +596,23 @@ lam expectedT@(CompT _ (CompTBody xs)) bodyComp = do
     AnArg (Arg _ _ argTy) -> do
       let argTy' = decDb argTy
       if argTy' == resultT
-      then refTo . ACompNode expectedT . LamInternal $ bodyRef
-      else throwError . WrongReturnType resultT $ argTy'
-    AnId bodyId -> lookupRef bodyId >>= \case
+        then refTo . ACompNode expectedT . LamInternal $ bodyRef
+        else throwError . WrongReturnType resultT $ argTy'
+    AnId bodyId ->
+      lookupRef bodyId >>= \case
         Nothing -> throwError . BrokenIdReference $ bodyId
         -- This unifies with anything, so we're fine
         Just AnError -> refTo . ACompNode expectedT . LamInternal . AnId $ bodyId
         Just (AValNode ty _) -> do
-           let tyFixed = decDb ty
-           if tyFixed == resultT
-             then refTo . ACompNode expectedT . LamInternal . AnId $ bodyId
-             else throwError . WrongReturnType resultT $ tyFixed
+          let tyFixed = decDb ty
+          if tyFixed == resultT
+            then refTo . ACompNode expectedT . LamInternal . AnId $ bodyId
+            else throwError . WrongReturnType resultT $ tyFixed
         Just (ACompNode t _) -> throwError $ LambdaResultsInCompType t
   where
     decDb :: ValT AbstractTy -> ValT AbstractTy
     decDb = mapValT (\case Abstraction (BoundAt (S Z) argPos) -> Abstraction (BoundAt Z argPos); other -> other)
+
 -- | Construct the error node.
 --
 -- @since 1.0.0
