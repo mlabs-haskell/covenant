@@ -118,7 +118,7 @@ import Covenant.Internal.Rename
     renameValT,
     runRenameM,
     undoRename,
-    unsafeExperimentalRunRenameM
+    unsafeExperimentalRunRenameM,
   )
 import Covenant.Internal.Strategy (PlutusDataConstructor (PlutusB, PlutusConstr, PlutusI, PlutusList, PlutusMap))
 import Covenant.Internal.Term
@@ -237,6 +237,7 @@ import Data.Vector qualified as Vector
 import Data.Vector.NonEmpty qualified as NonEmpty
 import Data.Void (Void, vacuous)
 import Data.Wedge (Wedge (Here, Nowhere, There), wedge, wedgeLeft, wedgeRight)
+import Data.Word (Word32)
 import Debug.Trace (traceM)
 import Optics.Core
   ( A_Lens,
@@ -251,10 +252,9 @@ import Optics.Core
     toListOf,
     view,
     (%),
-    _2,
     _1,
+    _2,
   )
-import Data.Word (Word32)
 
 -- | A fully-assembled Covenant ASG.
 --
@@ -638,7 +638,7 @@ lam ::
 lam expectedT@(CompT cnt (CompTBody xs)) bodyComp = do
   let (args, resultT) = NonEmpty.unsnoc xs
       cntW = view wordCount cnt
-  bodyId <- local (over (#scopeInfo % #argumentInfo) (Vector.cons (cntW,args))) bodyComp
+  bodyId <- local (over (#scopeInfo % #argumentInfo) (Vector.cons (cntW, args))) bodyComp
   bodyNode <- lookupRef bodyId
   case bodyNode of
     Nothing -> throwError . BrokenIdReference $ bodyId
@@ -780,7 +780,7 @@ dataConstructor tyName ctorName fields = do
       resultThunk <- mkResultThunk count ctors renamedFieldTypes
       traceM $ "DATACON RESULT THUNK: " <> show resultThunk
       -- Then we undo the renaming.
-      let restored = fixUnRenamed  $ undoRename resultThunk
+      let restored = fixUnRenamed $ undoRename resultThunk
       traceM $ "DATACON RESULT RESTORED: " <> show restored <> "\n"
       -- Then we check the compatibility of the arguments with the datatype's encoding.
       asks (view #datatypeInfo) >>= \dti -> checkEncodingWithInfo dti restored
@@ -1040,12 +1040,14 @@ boundTyVar ::
 boundTyVar scope index = do
   let scopeAsInt = review asInt scope
   let indexAsWord = fromIntegral $ review intIndex index
-  tyVarInScope <- asks (preview (#scopeInfo % #argumentInfo % ix scopeAsInt % _1)) >>= \case
-                       Nothing -> pure False
-                       Just varsBoundAtScope -> -- varsBoundAtScope is the count of the CompT binding context verbatim
-                         if varsBoundAtScope <= 0
-                         then pure False
-                         else pure $ indexAsWord <= (varsBoundAtScope - 1)
+  tyVarInScope <-
+    asks (preview (#scopeInfo % #argumentInfo % ix scopeAsInt % _1)) >>= \case
+      Nothing -> pure False
+      Just varsBoundAtScope ->
+        -- varsBoundAtScope is the count of the CompT binding context verbatim
+        if varsBoundAtScope <= 0
+          then pure False
+          else pure $ indexAsWord <= (varsBoundAtScope - 1)
   if tyVarInScope
     then pure (BoundTyVar scope index)
     else throwError $ OutOfScopeTyVar scope index

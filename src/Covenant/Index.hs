@@ -22,7 +22,7 @@ module Covenant.Index
     count2,
     ix3,
     count3,
-    wordCount
+    wordCount,
   )
 where
 
@@ -32,9 +32,9 @@ import Data.List.NonEmpty (NonEmpty)
 import Data.Semigroup (Semigroup (sconcat, stimes), Sum (Sum))
 import Data.Word (Word32)
 import GHC.TypeLits (Symbol)
+import Optics.Core (Lens', lens)
 import Optics.Prism (Prism', prism)
 import Test.QuickCheck (Arbitrary)
-import Optics.Core (Lens', lens)
 
 -- | A positional index, starting from zero. The label allows distinguishing
 -- different flavours of indices.
