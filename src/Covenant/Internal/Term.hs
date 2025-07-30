@@ -99,8 +99,8 @@ data CovenantTypeError
     ReturnCompType (CompT AbstractTy)
   | -- | The body of a lambda results in a value-typed node, which isn't allowed.
     --
-    -- @since 1.0.0
-    LambdaResultsInValType (ValT AbstractTy)
+    -- @since 1.2.0
+    LambdaResultsInCompType (CompT AbstractTy)
   | -- | The body of a lambda results in a computation-typed node which isn't
     -- a return, which isn't allowed.
     --
@@ -250,9 +250,8 @@ data CompNodeInfo
   | Builtin2Internal TwoArgFunc
   | Builtin3Internal ThreeArgFunc
   | Builtin6Internal SixArgFunc
-  | LamInternal Id
+  | LamInternal Ref
   | ForceInternal Ref
-  | ReturnInternal Ref
   deriving stock
     ( -- | @since 1.0.0
       Eq,
@@ -269,7 +268,7 @@ data ValNodeInfo
   = LitInternal AConstant
   | AppInternal Id (Vector Ref)
   | ThunkInternal Id
-  | -- | @sicne 1.1.0
+  | -- | @since 1.1.0
     CataInternal Ref Ref
   deriving stock
     ( -- | @since 1.0.0
