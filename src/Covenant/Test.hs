@@ -61,6 +61,8 @@ module Covenant.Test
     -- *** Elimination
     runRenameM,
     undoRename,
+
+    unsafeExperimentalRunRenameM
   )
 where
 
@@ -122,6 +124,7 @@ import Covenant.Internal.Rename
     renameValT,
     runRenameM,
     undoRename,
+    unsafeExperimentalRunRenameM
   )
 import Covenant.Internal.Strategy
   ( DataEncoding (PlutusData, SOP),

@@ -106,7 +106,7 @@ import Control.Monad.Reader
 import Covenant.Constant (AConstant, typeConstant)
 import Covenant.Data (DatatypeInfo, mapValT, mkDatatypeInfo)
 import Covenant.DeBruijn (DeBruijn (S), asInt)
-import Covenant.Index (Count, Index, count0, intCount, intIndex)
+import Covenant.Index (Count, Index, count0, intCount, intIndex, wordCount)
 import Covenant.Internal.KindCheck (checkEncodingArgs)
 import Covenant.Internal.Ledger (ledgerTypes)
 import Covenant.Internal.Rename
@@ -118,6 +118,7 @@ import Covenant.Internal.Rename
     renameValT,
     runRenameM,
     undoRename,
+    unsafeExperimentalRunRenameM
   )
 import Covenant.Internal.Strategy (PlutusDataConstructor (PlutusB, PlutusConstr, PlutusI, PlutusList, PlutusMap))
 import Covenant.Internal.Term
@@ -250,7 +251,10 @@ import Optics.Core
     toListOf,
     view,
     (%),
+    _2,
+    _1,
   )
+import Data.Word (Word32)
 
 -- | A fully-assembled Covenant ASG.
 --
@@ -325,7 +329,7 @@ instance
 -- /exactly/ what you're doing.
 --
 -- @since 1.0.0
-newtype ScopeInfo = ScopeInfo (Vector (Vector (ValT AbstractTy)))
+newtype ScopeInfo = ScopeInfo (Vector (Word32, Vector (ValT AbstractTy)))
   deriving stock
     ( -- | @since 1.0.0
       Eq,
@@ -341,7 +345,7 @@ newtype ScopeInfo = ScopeInfo (Vector (Vector (ValT AbstractTy)))
 --
 -- @since 1.0.0
 instance
-  (k ~ A_Lens, a ~ Vector (Vector (ValT AbstractTy)), b ~ Vector (Vector (ValT AbstractTy))) =>
+  (k ~ A_Lens, a ~ Vector (Word32, Vector (ValT AbstractTy)), b ~ Vector (Word32, Vector (ValT AbstractTy))) =>
   LabelOptic "argumentInfo" k ScopeInfo ScopeInfo a b
   where
   {-# INLINEABLE labelOptic #-}
@@ -522,7 +526,7 @@ arg ::
 arg scope index = do
   let scopeAsInt = review asInt scope
   let indexAsInt = review intIndex index
-  lookedUp <- asks (preview (#scopeInfo % #argumentInfo % ix scopeAsInt % ix indexAsInt))
+  lookedUp <- asks (preview (#scopeInfo % #argumentInfo % ix scopeAsInt % _2 % ix indexAsInt))
   case lookedUp of
     Nothing -> throwError . NoSuchArgument scope $ index
     Just t -> pure . Arg scope index $ t
@@ -631,9 +635,10 @@ lam ::
   CompT AbstractTy ->
   m Id ->
   m Id
-lam expectedT@(CompT _ (CompTBody xs)) bodyComp = do
+lam expectedT@(CompT cnt (CompTBody xs)) bodyComp = do
   let (args, resultT) = NonEmpty.unsnoc xs
-  bodyId <- local (over (#scopeInfo % #argumentInfo) (Vector.cons args)) bodyComp
+      cntW = view wordCount cnt
+  bodyId <- local (over (#scopeInfo % #argumentInfo) (Vector.cons (cntW,args))) bodyComp
   bodyNode <- lookupRef bodyId
   case bodyNode of
     Nothing -> throwError . BrokenIdReference $ bodyId
@@ -682,16 +687,24 @@ app ::
   m Id
 app fId argRefs instTys = do
   lookedUp <- typeId fId
-  subs <- renameSubs $ mkSubstitutions instTys
+  traceM $ "APP FunTy: " <> show lookedUp
+  let rawSubs = mkSubstitutions instTys
+  traceM $ "APP raw subs: " <> show rawSubs
+  subs <- renameSubs rawSubs
+  traceM $ "APP renamedSubs: " <> show subs
   case lookedUp of
     CompNodeType fT -> case runRenameM . renameCompT $ fT of
       Left err' -> throwError . RenameFunctionFailed fT $ err'
       Right renamedFT -> do
         instantiatedFT <- instantiate subs renamedFT
+        traceM $ "APP instantiated funTy: " <> show instantiatedFT
         renamedArgs <- traverse renameArg argRefs
+        traceM $ "APP renamed args: " <> show renamedArgs
         tyDict <- asks (view #datatypeInfo)
         result <- either (throwError . UnificationError) pure $ checkApp tyDict instantiatedFT (Vector.toList renamedArgs)
+        traceM $ "APP result (before undoRename): " <> show result
         let restored = undoRename result
+        traceM $ "APP result restored: " <> show restored <> "\n"
         checkEncodingWithInfo tyDict restored
         refTo . AValNode restored . AppInternal fId $ argRefs
     ValNodeType t -> throwError . ApplyToValType $ t
@@ -767,8 +780,8 @@ dataConstructor tyName ctorName fields = do
       resultThunk <- mkResultThunk count ctors renamedFieldTypes
       traceM $ "DATACON RESULT THUNK: " <> show resultThunk
       -- Then we undo the renaming.
-      let restored = fixUnRenamed $ undoRename resultThunk
-      traceM $ "DATACON RESULT RESTORED: " <> show restored
+      let restored = fixUnRenamed  $ undoRename resultThunk
+      traceM $ "DATACON RESULT RESTORED: " <> show restored <> "\n"
       -- Then we check the compatibility of the arguments with the datatype's encoding.
       asks (view #datatypeInfo) >>= \dti -> checkEncodingWithInfo dti restored
       -- Finally, if nothing has thrown an error, we return a reference to our result node, decorated with the
@@ -1026,8 +1039,13 @@ boundTyVar ::
   m BoundTyVar
 boundTyVar scope index = do
   let scopeAsInt = review asInt scope
-  let indexAsInt = review intIndex index
-  tyVarInScope <- asks (isJust . preview (#scopeInfo % #argumentInfo % ix scopeAsInt % ix indexAsInt))
+  let indexAsWord = fromIntegral $ review intIndex index
+  tyVarInScope <- asks (preview (#scopeInfo % #argumentInfo % ix scopeAsInt % _1)) >>= \case
+                       Nothing -> pure False
+                       Just varsBoundAtScope -> -- varsBoundAtScope is the count of the CompT binding context verbatim
+                         if varsBoundAtScope <= 0
+                         then pure False
+                         else pure $ indexAsWord <= (varsBoundAtScope - 1)
   if tyVarInScope
     then pure (BoundTyVar scope index)
     else throwError $ OutOfScopeTyVar scope index

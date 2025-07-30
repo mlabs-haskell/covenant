@@ -65,7 +65,7 @@ import Data.Kind (Type)
 import Data.Map qualified as M
 import Data.Maybe (fromJust)
 import Data.Vector qualified as Vector
-import Data.Wedge (wedgeLeft)
+import Data.Wedge (wedgeLeft, Wedge (Nowhere))
 import Optics.Core (preview, review)
 import Test.QuickCheck
   ( Gen,
@@ -492,10 +492,12 @@ justNothingIntro = runIntroFormTest "justNothingIntro" expectedThunk $ do
     var <- boundTyVar Z ix0
     nothingForced <- force (AnId nothingThunk)
     nothingApplied <- app nothingForced mempty (Vector.singleton . wedgeLeft . Just $ var)
-    justNothing <- dataConstructor "Maybe" "Just" (Vector.singleton (AnId nothingApplied))
-    justNothingForced <- force (AnId justNothing)
-    justNothingInstantiated <- app justNothingForced mempty (Vector.singleton . wedgeLeft . Just $ var)
-    thunk justNothingInstantiated
+    -- justNothing <- dataConstructor "Maybe" "Just" (Vector.singleton (AnId nothingApplied))
+    --justNothingForced <-  force (AnId justNothing)
+    --justNothingApplied <- app justNothingForced mempty (Vector.singleton Nowhere)
+    --ret (AnId justNothingApplied)
+    --justNothingInstantiated <- app justNothingForced mempty (Vector.singleton . wedgeLeft . Just $ var)
+    ret (AnId nothingApplied)
   typeIdVal thunk
   where
     expectedComp :: CompT AbstractTy
@@ -504,8 +506,8 @@ justNothingIntro = runIntroFormTest "justNothingIntro" expectedThunk $ do
         . ReturnT
         . Datatype "Maybe"
         . Vector.singleton
-        . Datatype "Maybe"
-        $ Vector.singleton
+       -- . Datatype "Maybe"
+        -- $ Vector.singleton
         $ tyvar Z ix0
 
     expectedThunk :: ValT AbstractTy

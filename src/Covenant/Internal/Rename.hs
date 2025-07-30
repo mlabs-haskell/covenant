@@ -7,6 +7,7 @@ module Covenant.Internal.Rename
     renameCompT,
     undoRename,
     renameDatatypeInfo,
+    unsafeExperimentalRunRenameM
   )
 where
 
@@ -164,6 +165,14 @@ runRenameM ::
   RenameM a ->
   Either RenameError a
 runRenameM (RenameM comp) = evalState (runExceptT comp) . RenameState 0 $ Vector.empty
+
+unsafeExperimentalRunRenameM ::
+  forall (a :: Type).
+  Word64 ->
+  RenameM a ->
+  Either RenameError a
+unsafeExperimentalRunRenameM s (RenameM comp) = evalState (runExceptT comp) . RenameState s $ Vector.empty 
+
 
 -- | Rename a computation type.
 --
