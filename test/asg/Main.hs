@@ -51,15 +51,15 @@ import Covenant.Prim
     typeThreeArgFunc,
     typeTwoArgFunc,
   )
-import Covenant.Test (Concrete (Concrete))
+import Covenant.Test (Concrete (Concrete), tyAppTestDatatypes)
 import Covenant.Type
-  ( AbstractTy,
-    CompT (Comp0, Comp1, Comp2, CompN),
-    CompTBody (ArgsAndResult, ReturnT, (:--:>)),
-    ValT (ThunkT),
-    arity,
-    tyvar,
-  )
+    ( AbstractTy,
+      CompT(Comp0, Comp1, Comp2, CompN),
+      CompTBody(ArgsAndResult, ReturnT, (:--:>)),
+      ValT(ThunkT),
+      arity,
+      tyvar,
+      ValT(Datatype) )
 import Covenant.Util (pattern ConsV, pattern NilV)
 import Data.Coerce (coerce)
 import Data.Kind (Type)
@@ -80,8 +80,8 @@ import Test.QuickCheck
     shrink,
     (===),
   )
-import Test.Tasty (TestTree, adjustOption, defaultMain, testGroup)
-import Test.Tasty.HUnit (assertEqual, assertFailure, testCase)
+import Test.Tasty (adjustOption, defaultMain, testGroup)
+import Test.Tasty.HUnit (assertEqual, assertFailure, testCase, Assertion)
 import Test.Tasty.QuickCheck (QuickCheckTests, testProperty)
 
 main :: IO ()
@@ -104,9 +104,10 @@ main =
       testProperty "passing computations as arguments does not compile" propApplyComp,
       testProperty "requesting a non-existent argument does not compile" propNonExistentArg,
       testProperty "requesting an argument that exists compiles" propExistingArg,
-      newLamTest1,
-      boundTyVarHappy,
-      boundTyVarShouldFail
+      testCase "db indices are well behaved (non-datatype case)" newLamTest1,
+      testCase "db indices are well behaved (datatype case)" newLamTest2,
+      testCase "calling down an in-scope tyvar works" boundTyVarHappy,
+      testCase "calling down an out-of-scope tyvar fails" boundTyVarShouldFail
     ]
   where
     moreTests :: QuickCheckTests -> QuickCheckTests
@@ -367,8 +368,8 @@ propExistingArg = forAllShrinkShow gen shr show $ \(t, index) ->
                   Just (Concrete res') -> pure (Comp0 (ArgsAndResult (coerce args') res'), index)
            in shrinkOnIndex <|> shrinkOnArgs
 
-boundTyVarHappy :: TestTree
-boundTyVarHappy = testCase "boundTyVarHappy" . run $ do
+boundTyVarHappy :: Assertion
+boundTyVarHappy =  run $ do
   lam lamTy $ do
     arg1 <- AnArg <$> arg Z ix0
     void $ boundTyVar Z ix0
@@ -382,8 +383,8 @@ boundTyVarHappy = testCase "boundTyVarHappy" . run $ do
       Left err' -> assertFailure . show $ err'
       Right {} -> pure ()
 
-boundTyVarShouldFail :: TestTree
-boundTyVarShouldFail = testCase "boundTyVarShouldFail" . run $ boundTyVar Z ix0
+boundTyVarShouldFail :: Assertion
+boundTyVarShouldFail = run $ boundTyVar Z ix0
   where
     run :: forall (a :: Type). (Show a) => ASGBuilder a -> IO ()
     run act = case runASGBuilder M.empty act of
@@ -395,8 +396,8 @@ boundTyVarShouldFail = testCase "boundTyVarShouldFail" . run $ boundTyVar Z ix0
       Right x -> assertFailure $ "Expected boundTyVar to fail, but got: " <> show x
 
 -- TODO: better name
-newLamTest1 :: TestTree
-newLamTest1 = testCase "new lam test 1" $ case runASGBuilder M.empty fn of
+newLamTest1 :: Assertion
+newLamTest1 = case runASGBuilder M.empty fn of
   Left err' -> assertFailure (show err')
   Right {} -> pure ()
   where
@@ -411,6 +412,24 @@ newLamTest1 = testCase "new lam test 1" $ case runASGBuilder M.empty fn of
       Comp2 $
         ThunkT (Comp0 $ tyvar (S Z) ix0 :--:> ReturnT (tyvar (S Z) ix1))
           :--:> tyvar Z ix0
+          :--:> ReturnT (tyvar Z ix1)
+
+newLamTest2 :: Assertion
+newLamTest2 = case runASGBuilder tyAppTestDatatypes fn of
+  Left err' -> assertFailure (show err')
+  Right {} -> pure ()
+  where
+    fn :: ASGBuilder Id
+    fn = lam expected $ do
+      f <- arg Z ix0 >>= force . AnArg
+      a <- AnArg <$> arg Z ix1
+      AnId <$> app f (Vector.singleton a)
+
+    expected :: CompT AbstractTy
+    expected =
+      Comp2 $
+        ThunkT (Comp0 $ Datatype "Maybe" (Vector.singleton $ tyvar (S Z) ix0) :--:> ReturnT (tyvar (S Z) ix1))
+          :--:> Datatype "Maybe" (Vector.singleton $ tyvar Z ix0)
           :--:> ReturnT (tyvar Z ix1)
 
 -- Helpers

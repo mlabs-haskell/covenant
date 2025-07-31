@@ -347,7 +347,7 @@ pattern Force r <- ForceInternal r
 
 -- | A lambda.
 --
--- @since 1.0.0
+-- @since 1.2.0
 pattern Lam :: Ref -> CompNodeInfo
 pattern Lam r <- LamInternal r
 
@@ -549,26 +549,6 @@ force r = do
     CompNodeType t -> throwError . ForceCompType $ t
     ErrorNodeType -> throwError ForceError
 
-{- TODO: Remove once changes are complete
--- | Given the result of a function body (either a value or an error), construct
--- the return for it. Will fail if that reference aims at a computation node.
---
--- @since 1.0.0
-ret ::
-  forall (m :: Type -> Type).
-  (MonadHashCons Id ASGNode m, MonadError CovenantTypeError m) =>
-  Ref ->
-  m Id
-ret r = do
-  refT <- typeRef r
-  case refT of
-    ValNodeType t -> do
-      let t' = CompT count0 . CompTBody . NonEmpty.singleton $ t
-      refTo . ACompNode t' . ReturnInternal $ r
-    CompNodeType t -> throwError . ReturnCompType $ t
-    ErrorNodeType -> err
--}
-
 -- | Given a desired type, and a computation which will construct a lambda body
 -- when executed (with the scope extended with the arguments the functions can
 -- expect), construct a lambda.
@@ -580,9 +560,9 @@ ret r = do
 -- \'bottom-up\', whereas function arguments (and their scopes) are necessarily
 -- top-down. Thus, we need to \'delay\' the construction of a lambda's body to
 -- ensure that proper scoped argument information can be given to it, hence why
--- the argument being passed is an @m Id@.
+-- the argument being passed is an @m Ref@.
 --
--- @since 1.0.0
+-- @since 1.2.0
 lam ::
   forall (m :: Type -> Type).
   (MonadHashCons Id ASGNode m, MonadError CovenantTypeError m, MonadReader ASGEnv m) =>
