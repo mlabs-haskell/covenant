@@ -53,13 +53,13 @@ import Covenant.Prim
   )
 import Covenant.Test (Concrete (Concrete), tyAppTestDatatypes)
 import Covenant.Type
-    ( AbstractTy,
-      CompT(Comp0, Comp1, Comp2, CompN),
-      CompTBody(ArgsAndResult, ReturnT, (:--:>)),
-      ValT(ThunkT),
-      arity,
-      tyvar,
-      ValT(Datatype) )
+  ( AbstractTy,
+    CompT (Comp0, Comp1, Comp2, CompN),
+    CompTBody (ArgsAndResult, ReturnT, (:--:>)),
+    ValT (Datatype, ThunkT),
+    arity,
+    tyvar,
+  )
 import Covenant.Util (pattern ConsV, pattern NilV)
 import Data.Coerce (coerce)
 import Data.Kind (Type)
@@ -81,7 +81,7 @@ import Test.QuickCheck
     (===),
   )
 import Test.Tasty (adjustOption, defaultMain, testGroup)
-import Test.Tasty.HUnit (assertEqual, assertFailure, testCase, Assertion)
+import Test.Tasty.HUnit (Assertion, assertEqual, assertFailure, testCase)
 import Test.Tasty.QuickCheck (QuickCheckTests, testProperty)
 
 main :: IO ()
@@ -369,7 +369,7 @@ propExistingArg = forAllShrinkShow gen shr show $ \(t, index) ->
            in shrinkOnIndex <|> shrinkOnArgs
 
 boundTyVarHappy :: Assertion
-boundTyVarHappy =  run $ do
+boundTyVarHappy = run $ do
   lam lamTy $ do
     arg1 <- AnArg <$> arg Z ix0
     void $ boundTyVar Z ix0
