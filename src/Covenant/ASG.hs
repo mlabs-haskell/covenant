@@ -37,8 +37,7 @@ module Covenant.ASG
         Builtin3,
         Builtin6,
         Lam,
-        Force,
-        Return
+        Force
       ),
     ValNodeInfo (Lit, App, Thunk, Cata),
     ASGNode (..),
@@ -64,7 +63,6 @@ module Covenant.ASG
     builtin3,
     builtin6,
     force,
-    ret,
     lam,
     err,
     lit,
@@ -101,9 +99,9 @@ import Control.Monad.Reader
     runReaderT,
   )
 import Covenant.Constant (AConstant, typeConstant)
-import Covenant.Data (DatatypeInfo, mkDatatypeInfo)
-import Covenant.DeBruijn (DeBruijn, asInt)
-import Covenant.Index (Index, count0, intIndex)
+import Covenant.Data (DatatypeInfo, mapValT, mkDatatypeInfo)
+import Covenant.DeBruijn (DeBruijn (S, Z), asInt)
+import Covenant.Index (Index, intIndex)
 import Covenant.Internal.KindCheck (checkEncodingArgs)
 import Covenant.Internal.Ledger (ledgerTypes)
 import Covenant.Internal.Rename
@@ -125,8 +123,7 @@ import Covenant.Internal.Term
         Builtin3Internal,
         Builtin6Internal,
         ForceInternal,
-        LamInternal,
-        ReturnInternal
+        LamInternal
       ),
     CovenantTypeError
       ( ApplyCompType,
@@ -142,8 +139,8 @@ import Covenant.Internal.Term
         ForceCompType,
         ForceError,
         ForceNonThunk,
+        LambdaResultsInCompType,
         LambdaResultsInNonReturn,
-        LambdaResultsInValType,
         NoSuchArgument,
         OutOfScopeTyVar,
         RenameArgumentFailed,
@@ -164,7 +161,7 @@ import Covenant.Internal.Term
     typeRef,
   )
 import Covenant.Internal.Type
-  ( AbstractTy,
+  ( AbstractTy (BoundAt),
     BuiltinFlatT (ByteStringT, IntegerT),
     CompT (CompT),
     CompTBody (CompTBody),
@@ -198,6 +195,7 @@ import Covenant.Prim
     typeThreeArgFunc,
     typeTwoArgFunc,
   )
+import Covenant.Type (ValT (Abstraction))
 import Data.Bimap (Bimap)
 import Data.Bimap qualified as Bimap
 import Data.Coerce (coerce)
@@ -347,19 +345,13 @@ pattern Builtin6 f <- Builtin6Internal f
 pattern Force :: Ref -> CompNodeInfo
 pattern Force r <- ForceInternal r
 
--- | Produce the result of a computation.
---
--- @since 1.0.0
-pattern Return :: Ref -> CompNodeInfo
-pattern Return r <- ReturnInternal r
-
 -- | A lambda.
 --
--- @since 1.0.0
-pattern Lam :: Id -> CompNodeInfo
-pattern Lam i <- LamInternal i
+-- @since 1.2.0
+pattern Lam :: Ref -> CompNodeInfo
+pattern Lam r <- LamInternal r
 
-{-# COMPLETE Builtin1, Builtin2, Builtin3, Builtin6, Force, Return, Lam #-}
+{-# COMPLETE Builtin1, Builtin2, Builtin3, Builtin6, Force, Lam #-}
 
 -- | A compile-time literal of a flat builtin type.
 --
@@ -557,24 +549,6 @@ force r = do
     CompNodeType t -> throwError . ForceCompType $ t
     ErrorNodeType -> throwError ForceError
 
--- | Given the result of a function body (either a value or an error), construct
--- the return for it. Will fail if that reference aims at a computation node.
---
--- @since 1.0.0
-ret ::
-  forall (m :: Type -> Type).
-  (MonadHashCons Id ASGNode m, MonadError CovenantTypeError m) =>
-  Ref ->
-  m Id
-ret r = do
-  refT <- typeRef r
-  case refT of
-    ValNodeType t -> do
-      let t' = CompT count0 . CompTBody . NonEmpty.singleton $ t
-      refTo . ACompNode t' . ReturnInternal $ r
-    CompNodeType t -> throwError . ReturnCompType $ t
-    ErrorNodeType -> err
-
 -- | Given a desired type, and a computation which will construct a lambda body
 -- when executed (with the scope extended with the arguments the functions can
 -- expect), construct a lambda.
@@ -586,37 +560,38 @@ ret r = do
 -- \'bottom-up\', whereas function arguments (and their scopes) are necessarily
 -- top-down. Thus, we need to \'delay\' the construction of a lambda's body to
 -- ensure that proper scoped argument information can be given to it, hence why
--- the argument being passed is an @m Id@.
+-- the argument being passed is an @m Ref@.
 --
--- @since 1.0.0
+-- @since 1.2.0
 lam ::
   forall (m :: Type -> Type).
   (MonadHashCons Id ASGNode m, MonadError CovenantTypeError m, MonadReader ASGEnv m) =>
   CompT AbstractTy ->
-  m Id ->
+  m Ref ->
   m Id
 lam expectedT@(CompT _ (CompTBody xs)) bodyComp = do
   let (args, resultT) = NonEmpty.unsnoc xs
-  bodyId <- local (over (#scopeInfo % #argumentInfo) (Vector.cons args)) bodyComp
-  bodyNode <- lookupRef bodyId
-  case bodyNode of
-    Nothing -> throwError . BrokenIdReference $ bodyId
-    -- This unifies with anything, so we're fine
-    Just AnError -> refTo . ACompNode expectedT . LamInternal $ bodyId
-    Just (ACompNode t specs) -> case specs of
-      ReturnInternal r -> do
-        rT <- typeRef r
-        case rT of
-          -- Note (Koz, 17/04/2025): I am not 100% sure about this, but I can't
-          -- see how anything else would make sense.
-          ValNodeType actualT ->
-            if resultT == actualT
-              then refTo . ACompNode expectedT . LamInternal $ bodyId
-              else throwError . WrongReturnType resultT $ actualT
-          ErrorNodeType -> throwError ReturnWrapsError -- Should be impossible
-          CompNodeType t' -> throwError . ReturnWrapsCompType $ t'
-      _ -> throwError . LambdaResultsInNonReturn $ t
-    Just (AValNode t _) -> throwError . LambdaResultsInValType $ t
+  bodyRef <- local (over (#scopeInfo % #argumentInfo) (Vector.cons args)) bodyComp
+  case bodyRef of
+    AnArg (Arg _ _ argTy) -> do
+      let argTy' = decDb argTy
+      if argTy' == resultT
+        then refTo . ACompNode expectedT . LamInternal $ bodyRef
+        else throwError . WrongReturnType resultT $ argTy'
+    AnId bodyId ->
+      lookupRef bodyId >>= \case
+        Nothing -> throwError . BrokenIdReference $ bodyId
+        -- This unifies with anything, so we're fine
+        Just AnError -> refTo . ACompNode expectedT . LamInternal . AnId $ bodyId
+        Just (AValNode ty _) -> do
+          let tyFixed = decDb ty
+          if tyFixed == resultT
+            then refTo . ACompNode expectedT . LamInternal . AnId $ bodyId
+            else throwError . WrongReturnType resultT $ tyFixed
+        Just (ACompNode t _) -> throwError $ LambdaResultsInCompType t
+  where
+    decDb :: ValT AbstractTy -> ValT AbstractTy
+    decDb = mapValT (\case Abstraction (BoundAt (S Z) argPos) -> Abstraction (BoundAt Z argPos); other -> other)
 
 -- | Construct the error node.
 --

@@ -7,12 +7,11 @@ import Control.Monad (guard, void)
 import Covenant.ASG
   ( ASG,
     ASGBuilder,
-    ASGNode (ACompNode, AValNode),
+    ASGNode (ACompNode),
     CompNodeInfo
       ( Builtin1,
         Builtin2,
-        Builtin3,
-        Return
+        Builtin3
       ),
     CovenantError (EmptyASG, TopLevelError, TopLevelValue, TypeError),
     CovenantTypeError
@@ -22,10 +21,8 @@ import Covenant.ASG
         ForceCompType,
         ForceError,
         ForceNonThunk,
-        LambdaResultsInValType,
         NoSuchArgument,
         OutOfScopeTyVar,
-        ReturnCompType,
         ThunkError,
         ThunkValType
       ),
@@ -42,26 +39,24 @@ import Covenant.ASG
     force,
     lam,
     lit,
-    nodeAt,
-    ret,
     runASGBuilder,
     thunk,
     topLevelNode,
   )
 import Covenant.Constant (typeConstant)
-import Covenant.DeBruijn (DeBruijn (Z))
-import Covenant.Index (Index, intIndex, ix0)
+import Covenant.DeBruijn (DeBruijn (S, Z))
+import Covenant.Index (Index, intIndex, ix0, ix1)
 import Covenant.Prim
   ( typeOneArgFunc,
     typeThreeArgFunc,
     typeTwoArgFunc,
   )
-import Covenant.Test (Concrete (Concrete))
+import Covenant.Test (Concrete (Concrete), tyAppTestDatatypes)
 import Covenant.Type
   ( AbstractTy,
-    CompT (Comp0, Comp1, CompN),
+    CompT (Comp0, Comp1, Comp2, CompN),
     CompTBody (ArgsAndResult, ReturnT, (:--:>)),
-    ValT,
+    ValT (Datatype, ThunkT),
     arity,
     tyvar,
   )
@@ -85,8 +80,8 @@ import Test.QuickCheck
     shrink,
     (===),
   )
-import Test.Tasty (TestTree, adjustOption, defaultMain, testGroup)
-import Test.Tasty.HUnit (assertEqual, assertFailure, testCase)
+import Test.Tasty (adjustOption, defaultMain, testGroup)
+import Test.Tasty.HUnit (Assertion, assertEqual, assertFailure, testCase)
 import Test.Tasty.QuickCheck (QuickCheckTests, testProperty)
 
 main :: IO ()
@@ -100,9 +95,7 @@ main =
       testProperty "toplevel one-arg builtin compiles and has the right type" propTopLevelBuiltin1,
       testProperty "toplevel two-arg builtin compiles and has the right type" propTopLevelBuiltin2,
       testProperty "toplevel three-arg builtin compiles and has the right type" propTopLevelBuiltin3,
-      testProperty "toplevel return compiles and has the right type" propTopLevelReturn,
       testProperty "forcing a thunk has the same type as what the thunk wraps" propForceThunk,
-      testProperty "applying zero arguments to a return has the same type as what the return wraps" propApplyReturn,
       testProperty "forcing a computation type does not compile" propForceComp,
       testProperty "forcing a non-thunk value type does not compile" propForceNonThunk,
       testProperty "thunking a value type does not compile" propThunkValType,
@@ -111,10 +104,10 @@ main =
       testProperty "passing computations as arguments does not compile" propApplyComp,
       testProperty "requesting a non-existent argument does not compile" propNonExistentArg,
       testProperty "requesting an argument that exists compiles" propExistingArg,
-      testProperty "returning a computation from a lambda does not compile" propReturnComp,
-      testProperty "a lambda body having a value type does not compile" propLambdaValBody,
-      boundTyVarHappy,
-      boundTyVarShouldFail
+      testCase "db indices are well behaved (non-datatype case)" newLamTest1,
+      testCase "db indices are well behaved (datatype case)" newLamTest2,
+      testCase "calling down an in-scope tyvar works" boundTyVarHappy,
+      testCase "calling down an out-of-scope tyvar fails" boundTyVarShouldFail
     ]
   where
     moreTests :: QuickCheckTests -> QuickCheckTests
@@ -156,7 +149,7 @@ unitThunkError = do
 
 propTopLevelConstant :: Property
 propTopLevelConstant = forAllShrinkShow arbitrary shrink show $ \c ->
-  let builtUp = lit c
+  let builtUp = AnId <$> lit c
    in withCompilationFailure builtUp $ \case
         TopLevelValue _ t info -> case info of
           Lit c' ->
@@ -206,25 +199,6 @@ propTopLevelBuiltin3 = forAllShrinkShow arbitrary shrink show $ \bi3 ->
                 ]
             _ -> failUnexpectedCompNodeInfo info
 
-propTopLevelReturn :: Property
-propTopLevelReturn = forAllShrinkShow arbitrary shrink show $ \c ->
-  let builtUp = lit c >>= \i -> ret (AnId i)
-   in withCompilationSuccess builtUp $ \asg ->
-        withToplevelCompNode asg $ \t info ->
-          case info of
-            Return r -> withExpectedId r $ \i ->
-              withExpectedValNode i asg $ \t' info' ->
-                case info' of
-                  Lit c' ->
-                    let cT = typeConstant c
-                     in conjoin
-                          [ c' === c,
-                            cT === t',
-                            t === Comp0 (ReturnT cT)
-                          ]
-                  _ -> failUnexpectedValNodeInfo info'
-            _ -> failUnexpectedCompNodeInfo info
-
 -- We use builtins only for this test, but this should demonstrate the
 -- properties well enough
 propForceThunk :: Property
@@ -252,30 +226,15 @@ propForceThunk = forAllShrinkShow arbitrary shrink show $ \x ->
             force (AnId thunkI)
        in (comp, forceThunkComp)
 
--- As we can't build toplevel value ASGs, this has to be a bit roundabout
-propApplyReturn :: Property
-propApplyReturn = forAllShrinkShow arbitrary shrink show $ \c ->
-  let comp = do
-        i <- lit c
-        ret (AnId i)
-      applyReturnComp = do
-        i <- comp
-        applied <- app i Vector.empty
-        ret (AnId applied)
-   in withCompilationSuccess comp $ \expectedASG ->
-        withCompilationSuccess applyReturnComp $ \applyReturnASG ->
-          withToplevelCompNode expectedASG $ \expectedT _ ->
-            withToplevelCompNode applyReturnASG $ \actualT _ ->
-              expectedT === actualT
-
 propForceComp :: Property
 propForceComp = forAllShrinkShow arbitrary shrink show $ \x ->
-  let comp = do
-        i <- case x of
-          Left bi1 -> builtin1 bi1
-          Right (Left bi2) -> builtin2 bi2
-          Right (Right bi3) -> builtin3 bi3
-        force (AnId i)
+  let comp =
+        AnId <$> do
+          i <- case x of
+            Left bi1 -> builtin1 bi1
+            Right (Left bi2) -> builtin2 bi2
+            Right (Right bi3) -> builtin3 bi3
+          force (AnId i)
       expectedT = case x of
         Left bi1 -> typeOneArgFunc bi1
         Right (Left bi2) -> typeTwoArgFunc bi2
@@ -287,9 +246,10 @@ propForceComp = forAllShrinkShow arbitrary shrink show $ \x ->
 
 propForceNonThunk :: Property
 propForceNonThunk = forAllShrinkShow arbitrary shrink show $ \c ->
-  let comp = do
-        i <- lit c
-        force (AnId i)
+  let comp =
+        AnId <$> do
+          i <- lit c
+          force (AnId i)
    in withCompilationFailure comp $ \case
         TypeError _ (ForceNonThunk actualT) -> typeConstant c === actualT
         TypeError _ err' -> failWrongTypeError err'
@@ -297,9 +257,10 @@ propForceNonThunk = forAllShrinkShow arbitrary shrink show $ \c ->
 
 propThunkValType :: Property
 propThunkValType = forAllShrinkShow arbitrary shrink show $ \c ->
-  let comp = do
-        i <- lit c
-        thunk i
+  let comp =
+        AnId <$> do
+          i <- lit c
+          thunk i
    in withCompilationFailure comp $ \case
         TypeError _ (ThunkValType actualT) -> typeConstant c === actualT
         TypeError _ err' -> failWrongTypeError err'
@@ -307,10 +268,11 @@ propThunkValType = forAllShrinkShow arbitrary shrink show $ \c ->
 
 propApplyToVal :: Property
 propApplyToVal = forAllShrinkShow arbitrary shrink show $ \c args ->
-  let comp = do
-        args' <- traverse (fmap AnId . lit) args
-        i <- lit c
-        app i args'
+  let comp =
+        AnId <$> do
+          args' <- traverse (fmap AnId . lit) args
+          i <- lit c
+          app i args'
    in withCompilationFailure comp $ \case
         TypeError _ (ApplyToValType t) -> typeConstant c === t
         TypeError _ err' -> failWrongTypeError err'
@@ -318,10 +280,11 @@ propApplyToVal = forAllShrinkShow arbitrary shrink show $ \c args ->
 
 propApplyToError :: Property
 propApplyToError = forAllShrinkShow arbitrary shrink show $ \args ->
-  let comp = do
-        args' <- traverse (fmap AnId . lit) args
-        i <- err
-        app i args'
+  let comp =
+        AnId <$> do
+          args' <- traverse (fmap AnId . lit) args
+          i <- err
+          app i args'
    in withCompilationFailure comp $ \case
         TypeError _ ApplyToError -> property True
         TypeError _ err' -> failWrongTypeError err'
@@ -337,13 +300,14 @@ propApplyComp = forAllShrinkShow arbitrary shrink show $ \f arg1 ->
         Right (Left bi2) -> typeTwoArgFunc bi2
         Right (Right bi3) -> typeThreeArgFunc bi3
 
-      comp = do
-        i <- builtin1 f
-        arg' <- case arg1 of
-          Left bi1 -> builtin1 bi1
-          Right (Left bi2) -> builtin2 bi2
-          Right (Right bi3) -> builtin3 bi3
-        app i (Vector.singleton . AnId $ arg')
+      comp =
+        AnId <$> do
+          i <- builtin1 f
+          arg' <- case arg1 of
+            Left bi1 -> builtin1 bi1
+            Right (Left bi2) -> builtin2 bi2
+            Right (Right bi3) -> builtin3 bi3
+          app i (Vector.singleton . AnId $ arg')
    in withCompilationFailure comp $ \case
         TypeError _ (ApplyCompType actualT) -> t === actualT
         TypeError _ err' -> failWrongTypeError err'
@@ -351,7 +315,7 @@ propApplyComp = forAllShrinkShow arbitrary shrink show $ \f arg1 ->
 
 propNonExistentArg :: Property
 propNonExistentArg = forAllShrinkShow arbitrary shrink show $ \(db, index) ->
-  let comp = arg db index >>= \i -> ret (AnArg i)
+  let comp = arg db index >>= \i -> pure $ AnArg i
    in withCompilationFailure comp $ \case
         TypeError _ (NoSuchArgument db' index') -> conjoin [db === db', index === index']
         TypeError _ err' -> failWrongTypeError err'
@@ -364,7 +328,7 @@ propExistingArg :: Property
 propExistingArg = forAllShrinkShow gen shr show $ \(t, index) ->
   let comp = lam t $ do
         arg1 <- arg Z index
-        ret (AnArg arg1)
+        pure (AnArg arg1)
    in withCompilationSuccess comp $ \asg ->
         withToplevelCompNode asg $ \t' _ ->
           t' === t
@@ -404,38 +368,12 @@ propExistingArg = forAllShrinkShow gen shr show $ \(t, index) ->
                   Just (Concrete res') -> pure (Comp0 (ArgsAndResult (coerce args') res'), index)
            in shrinkOnIndex <|> shrinkOnArgs
 
-propReturnComp :: Property
-propReturnComp = forAllShrinkShow arbitrary shrink show $ \x ->
-  let t = case x of
-        Left bi1 -> typeOneArgFunc bi1
-        Right (Left bi2) -> typeTwoArgFunc bi2
-        Right (Right bi3) -> typeThreeArgFunc bi3
-      comp = do
-        i <- case x of
-          Left bi1 -> builtin1 bi1
-          Right (Left bi2) -> builtin2 bi2
-          Right (Right bi3) -> builtin3 bi3
-        ret (AnId i)
-   in withCompilationFailure comp $ \case
-        TypeError _ (ReturnCompType actualT) -> t === actualT
-        TypeError _ err' -> failWrongTypeError err'
-        err' -> failWrongError err'
-
-propLambdaValBody :: Property
-propLambdaValBody = forAllShrinkShow arbitrary shrink show $ \(Concrete t, c) ->
-  let resultT = typeConstant c
-      comp = lam (Comp0 (ArgsAndResult (Vector.singleton t) resultT)) $ lit c
-   in withCompilationFailure comp $ \case
-        TypeError _ (LambdaResultsInValType actualT) -> resultT === actualT
-        TypeError _ err' -> failWrongTypeError err'
-        err' -> failWrongError err'
-
-boundTyVarHappy :: TestTree
-boundTyVarHappy = testCase "boundTyVarHappy" . run $ do
+boundTyVarHappy :: Assertion
+boundTyVarHappy = run $ do
   lam lamTy $ do
     arg1 <- AnArg <$> arg Z ix0
     void $ boundTyVar Z ix0
-    ret arg1
+    pure arg1
   where
     lamTy :: CompT AbstractTy
     lamTy = Comp1 $ tyvar Z ix0 :--:> ReturnT (tyvar Z ix0)
@@ -445,8 +383,8 @@ boundTyVarHappy = testCase "boundTyVarHappy" . run $ do
       Left err' -> assertFailure . show $ err'
       Right {} -> pure ()
 
-boundTyVarShouldFail :: TestTree
-boundTyVarShouldFail = testCase "boundTyVarShouldFail" . run $ boundTyVar Z ix0
+boundTyVarShouldFail :: Assertion
+boundTyVarShouldFail = run $ boundTyVar Z ix0
   where
     run :: forall (a :: Type). (Show a) => ASGBuilder a -> IO ()
     run act = case runASGBuilder M.empty act of
@@ -457,6 +395,43 @@ boundTyVarShouldFail = testCase "boundTyVarShouldFail" . run $ boundTyVar Z ix0
       Left err' -> assertFailure $ "Expected an OutofScopeTyVar error, but got: " <> show err'
       Right x -> assertFailure $ "Expected boundTyVar to fail, but got: " <> show x
 
+-- TODO: better name
+newLamTest1 :: Assertion
+newLamTest1 = case runASGBuilder M.empty fn of
+  Left err' -> assertFailure (show err')
+  Right {} -> pure ()
+  where
+    fn :: ASGBuilder Id
+    fn = lam expected $ do
+      f <- arg Z ix0 >>= force . AnArg
+      a <- AnArg <$> arg Z ix1
+      AnId <$> app f (Vector.singleton a)
+
+    expected :: CompT AbstractTy
+    expected =
+      Comp2 $
+        ThunkT (Comp0 $ tyvar (S Z) ix0 :--:> ReturnT (tyvar (S Z) ix1))
+          :--:> tyvar Z ix0
+          :--:> ReturnT (tyvar Z ix1)
+
+newLamTest2 :: Assertion
+newLamTest2 = case runASGBuilder tyAppTestDatatypes fn of
+  Left err' -> assertFailure (show err')
+  Right {} -> pure ()
+  where
+    fn :: ASGBuilder Id
+    fn = lam expected $ do
+      f <- arg Z ix0 >>= force . AnArg
+      a <- AnArg <$> arg Z ix1
+      AnId <$> app f (Vector.singleton a)
+
+    expected :: CompT AbstractTy
+    expected =
+      Comp2 $
+        ThunkT (Comp0 $ Datatype "Maybe" (Vector.singleton $ tyvar (S Z) ix0) :--:> ReturnT (tyvar (S Z) ix1))
+          :--:> Datatype "Maybe" (Vector.singleton $ tyvar Z ix0)
+          :--:> ReturnT (tyvar Z ix1)
+
 -- Helpers
 
 failWrongTypeError :: CovenantTypeError -> Property
@@ -465,7 +440,7 @@ failWrongTypeError err' = failWithCounterExample ("Unexpected type error: " <> s
 failWrongError :: CovenantError -> Property
 failWrongError err' = failWithCounterExample ("Unexpected error: " <> show err')
 
-withCompilationFailure :: ASGBuilder Id -> (CovenantError -> Property) -> Property
+withCompilationFailure :: ASGBuilder Ref -> (CovenantError -> Property) -> Property
 withCompilationFailure comp cb = case runASGBuilder M.empty comp of
   Left err' -> cb err'
   Right asg -> failWithCounterExample ("Unexpected success: " <> show asg)
@@ -491,6 +466,7 @@ failUnexpectedValNodeInfo :: ValNodeInfo -> Property
 failUnexpectedValNodeInfo info =
   failWithCounterExample ("Unexpected ValNodeInfo: " <> show info)
 
+{- NOTE: Not 100% sure I won't need these
 withExpectedId :: Ref -> (Id -> Property) -> Property
 withExpectedId r cb = case r of
   AnId i -> cb i
@@ -500,3 +476,4 @@ withExpectedValNode :: Id -> ASG -> (ValT AbstractTy -> ValNodeInfo -> Property)
 withExpectedValNode i asg cb = case nodeAt i asg of
   AValNode t info -> cb t info
   node -> failWithCounterExample ("Unexpected node: " <> show node)
+--}
