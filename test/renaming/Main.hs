@@ -81,14 +81,14 @@ main =
 testFlat :: BuiltinFlatT -> IO ()
 testFlat t = do
   let input = BuiltinFlat t
-  let result = runRenameM . renameValT $ input
+  let result = runRenameM mempty . renameValT $ input
   assertRight (assertBool "" . liftEq (\_ _ -> False) input) result
 
 -- Checks that for any 'fully concretified' type (nested or not), renaming
 -- changes nothing.
 propNestedConcrete :: Property
 propNestedConcrete = forAllShrinkShow arbitrary shrink show $ \(Concrete t) ->
-  let result = runRenameM . renameValT $ t
+  let result = runRenameM mempty . renameValT $ t
    in case result of
         Left _ -> False
         Right actual -> liftEq (\_ _ -> False) t actual
@@ -101,7 +101,7 @@ testIdT = do
         Comp1 $
           Abstraction (Unifiable ix0)
             :--:> ReturnT (Abstraction (Unifiable ix0))
-  let result = runRenameM . renameCompT $ idT
+  let result = runRenameM mempty . renameCompT $ idT
   assertRight (assertEqual "" expected) result
 
 -- Checks that `forall a b . a -> b -> !a` correctly renames.
@@ -113,7 +113,7 @@ testConstT = do
           Abstraction (Unifiable ix0)
             :--:> Abstraction (Unifiable ix1)
             :--:> ReturnT (Abstraction (Unifiable ix0))
-  let result = runRenameM . renameCompT $ constT
+  let result = runRenameM mempty . renameCompT $ constT
   assertRight (assertEqual "" expected) result
 
 -- Checks that `forall a . a -> !(forall b . b -> !a)` correctly renames.
@@ -129,14 +129,14 @@ testConstT2 = do
                   Abstraction (Wildcard 1 2 ix0)
                     :--:> ReturnT (Abstraction (Unifiable ix0))
               )
-  let result = runRenameM . renameCompT $ constT
+  let result = runRenameM mempty . renameCompT $ constT
   assertRight (assertEqual "" expected) result
 
 -- Checks that `forall a . b -> !a` triggers the variable indexing checker.
 testIndexingIdT :: IO ()
 testIndexingIdT = do
   let t = Comp1 $ tyvar Z ix0 :--:> ReturnT (tyvar Z ix1)
-  let result = runRenameM . renameCompT $ t
+  let result = runRenameM mempty . renameCompT $ t
   case result of
     Left (InvalidAbstractionReference trueLevel ix) -> do
       assertEqual "" trueLevel 1

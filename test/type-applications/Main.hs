@@ -147,7 +147,7 @@ propTooManyArgs = forAllShrink gen shr $ \excessArgs ->
 -- insufficient arguments.
 unitInsufficientArgs :: IO ()
 unitInsufficientArgs = do
-  renamedIdT <- failLeft . runRenameM . renameCompT $ idT
+  renamedIdT <- failLeft . runRenameM mempty . renameCompT $ idT
   let expected = Left $ InsufficientArgs 0 renamedIdT []
   let actual = checkApp M.empty renamedIdT []
   assertEqual "" expected actual
@@ -382,7 +382,7 @@ testEitherConcrete = testCase "testEitherConcrete" $ do
       arg3 = Datatype "Either" . Vector.fromList $ [BuiltinFlat UnitT, BuiltinFlat BoolT]
 
       expected = BuiltinFlat IntegerT
-  defaultLeftRenamed <- failLeft . runRenameM . renameCompT $ defaultLeft
+  defaultLeftRenamed <- failLeft . runRenameM mempty . renameCompT $ defaultLeft
   actual <-
     either (assertFailure . show) pure $
       checkApp
@@ -411,8 +411,8 @@ polymorphicApplicationM = testCase "polyAppMaybe" $ do
           tyvar Z ix0
             :--:> ThunkT (Comp0 (BuiltinFlat BoolT :--:> ReturnT (tyvar (S Z) ix0)))
             :--:> ReturnT (tyvar Z ix0)
-  fnRenamed <- failLeft . runRenameM . renameCompT $ testFn
-  argRenamed <- failLeft . runRenameM . renameValT $ testArg
+  fnRenamed <- failLeft . runRenameM mempty . renameCompT $ testFn
+  argRenamed <- failLeft . runRenameM mempty . renameValT $ testArg
   result <-
     either (assertFailure . show) pure $
       checkApp tyAppTestDatatypes fnRenamed [Just argRenamed]
@@ -428,7 +428,7 @@ polymorphicApplicationE = testCase "polyAppEither" $ do
   let arg1 = Abstraction $ Unifiable ix0
       arg2 = ThunkT (Comp0 $ BuiltinFlat BoolT :--:> ReturnT (BuiltinFlat IntegerT))
       arg3 = Datatype "Either" . Vector.fromList $ [arg1, BuiltinFlat BoolT]
-  fnRenamed <- failLeft . runRenameM . renameCompT $ defaultLeft
+  fnRenamed <- failLeft . runRenameM mempty . renameCompT $ defaultLeft
   actual <-
     either (assertFailure . show) pure $
       checkApp tyAppTestDatatypes fnRenamed (pure <$> [arg1, arg2, arg3])
@@ -445,7 +445,7 @@ polymorphicApplicationP = testCase "polyAppPair" $ do
       arg2 = BuiltinFlat BoolT
       arg3 = ThunkT $ Comp0 $ Abstraction (Rigid 1 ix0) :--:> BuiltinFlat BoolT :--:> ReturnT (BuiltinFlat IntegerT)
       arg4 = Datatype "Pair" (Vector.fromList [arg1, BuiltinFlat BoolT])
-  fnRenamed <- failLeft . runRenameM . renameCompT $ defaultPair
+  fnRenamed <- failLeft . runRenameM mempty . renameCompT $ defaultPair
   actual <-
     either (assertFailure . show) pure $
       checkApp tyAppTestDatatypes fnRenamed (pure <$> [arg1, arg2, arg3, arg4])
@@ -459,7 +459,7 @@ unifyMaybe = testCase "unifyMaybe" $ do
           Datatype "Maybe" (Vector.fromList [tyvar Z ix0])
             :--:> ReturnT (BuiltinFlat IntegerT)
       testArg = Datatype "Maybe" (Vector.fromList [BuiltinFlat BoolT])
-  fnRenamed <- failLeft . runRenameM . renameCompT $ testFn
+  fnRenamed <- failLeft . runRenameM mempty . renameCompT $ testFn
   result <-
     either (assertFailure . catchInsufficientArgs) pure $
       checkApp tyAppTestDatatypes fnRenamed [Just testArg]
@@ -478,7 +478,7 @@ unitNestedDatatypes = do
         Comp1 $
           Datatype "Maybe" (Vector.singleton $ tyvar Z ix0)
             :--:> ReturnT (Datatype "Maybe" (Vector.singleton . Datatype "Maybe" . Vector.singleton $ tyvar Z ix0))
-  fnRenamed <- failLeft . runRenameM . renameCompT $ fn
+  fnRenamed <- failLeft . runRenameM mempty . renameCompT $ fn
   let arg = Datatype "Maybe" . Vector.singleton $ integerT
   let expected = Datatype "Maybe" . Vector.singleton . Datatype "Maybe" . Vector.singleton $ integerT
   case checkApp tyAppTestDatatypes fnRenamed [Just arg] of
@@ -584,7 +584,7 @@ withRenamedComp ::
   CompT AbstractTy ->
   (CompT Renamed -> Property) ->
   Property
-withRenamedComp t f = case runRenameM . renameCompT $ t of
+withRenamedComp t f = case runRenameM mempty . renameCompT $ t of
   Left err -> counterexample (show err) False
   Right t' -> f t'
 
@@ -594,6 +594,6 @@ withRenamedVals ::
   t (ValT AbstractTy) ->
   (t (ValT Renamed) -> Property) ->
   Property
-withRenamedVals vals f = case runRenameM . traverse renameValT $ vals of
+withRenamedVals vals f = case runRenameM mempty . traverse renameValT $ vals of
   Left err -> counterexample (show err) False
   Right vals' -> f vals'

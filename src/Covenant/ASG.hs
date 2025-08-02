@@ -103,7 +103,7 @@ import Control.Monad.Reader
   )
 import Covenant.Constant (AConstant, typeConstant)
 import Covenant.Data (DatatypeInfo, mapValT, mkDatatypeInfo)
-import Covenant.DeBruijn (DeBruijn (S), asInt)
+import Covenant.DeBruijn (DeBruijn (S, Z), asInt)
 import Covenant.Index (Count, Index, count0, intCount, intIndex, wordCount)
 import Covenant.Internal.KindCheck (checkEncodingArgs)
 import Covenant.Internal.Ledger (ledgerTypes)
@@ -150,6 +150,7 @@ import Covenant.Internal.Term
         IntroFormErrorNodeField,
         IntroFormWrongNumArgs,
         InvalidOpaqueField,
+        LambdaResultsInCompType,
         LambdaResultsInNonReturn,
         NoSuchArgument,
         OutOfScopeTyVar,
@@ -162,6 +163,7 @@ import Covenant.Internal.Term
         ThunkValType,
         TypeDoesNotExist,
         UndeclaredOpaquePlutusDataCtor,
+        UndoRenameFailure,
         UnificationError,
         WrongReturnType
       ),
@@ -180,7 +182,7 @@ import Covenant.Internal.Type
     Constructor,
     ConstructorName,
     DataDeclaration (DataDeclaration, OpaqueData),
-    Renamed (Unifiable),
+    Renamed (Rigid, Unifiable),
     TyName,
     ValT (Abstraction, BuiltinFlat, Datatype, ThunkT),
     arity,
@@ -250,6 +252,9 @@ import Optics.Core
     _1,
     _2,
   )
+
+-- traceM :: forall a (m :: Type -> Type). Monad m => a -> m ()
+-- traceM _ = pure ()
 
 -- | A fully-assembled Covenant ASG.
 --
@@ -606,9 +611,10 @@ lam ::
   CompT AbstractTy ->
   m Ref ->
   m Id
-lam expectedT@(CompT _ (CompTBody xs)) bodyComp = do
+lam expectedT@(CompT cnt (CompTBody xs)) bodyComp = do
   let (args, resultT) = NonEmpty.unsnoc xs
-  bodyRef <- local (over (#scopeInfo % #argumentInfo) (Vector.cons args)) bodyComp
+      cntW = view wordCount cnt
+  bodyRef <- local (over (#scopeInfo % #argumentInfo) (Vector.cons (cntW, args))) bodyComp
   case bodyRef of
     AnArg (Arg _ _ argTy) -> do
       let argTy' = decDb argTy
@@ -663,8 +669,9 @@ app fId argRefs instTys = do
   traceM $ "APP raw subs: " <> show rawSubs
   subs <- renameSubs rawSubs
   traceM $ "APP renamedSubs: " <> show subs
+  scopeInfo <- asks (fmap fst . view (#scopeInfo % #argumentInfo))
   case lookedUp of
-    CompNodeType fT -> case runRenameM . renameCompT $ fT of
+    CompNodeType fT -> case runRenameM scopeInfo . renameCompT $ fT of
       Left err' -> throwError . RenameFunctionFailed fT $ err'
       Right renamedFT -> do
         instantiatedFT <- instantiate subs renamedFT
@@ -674,7 +681,7 @@ app fId argRefs instTys = do
         tyDict <- asks (view #datatypeInfo)
         result <- either (throwError . UnificationError) pure $ checkApp tyDict instantiatedFT (Vector.toList renamedArgs)
         traceM $ "APP result (before undoRename): " <> show result
-        let restored = undoRename result
+        restored <- undoRenameM result
         traceM $ "APP result restored: " <> show restored <> "\n"
         checkEncodingWithInfo tyDict restored
         refTo . AValNode restored . AppInternal fId $ argRefs
@@ -697,9 +704,10 @@ app fId argRefs instTys = do
     unsafeMkIndex = fromJust . preview intIndex
 
     renameSubs :: [(Index "tyvar", ValT AbstractTy)] -> m [(Index "tyvar", ValT Renamed)]
-    renameSubs subs = case traverse (traverse (runRenameM . renameValT)) subs of
-      Left err' -> throwError $ FailedToRenameInstantiation err'
-      Right res -> pure res
+    renameSubs subs =
+      askScope >>= \scope -> case traverse (traverse (runRenameM scope . renameValT)) subs of
+        Left err' -> throwError $ FailedToRenameInstantiation err'
+        Right res -> pure res
 
     instantiate :: [(Index "tyvar", ValT Renamed)] -> CompT Renamed -> m (CompT Renamed)
     instantiate [] fn = pure fn
@@ -751,7 +759,7 @@ dataConstructor tyName ctorName fields = do
       resultThunk <- mkResultThunk count ctors renamedFieldTypes
       traceM $ "DATACON RESULT THUNK: " <> show resultThunk
       -- Then we undo the renaming.
-      let restored = fixUnRenamed $ undoRename resultThunk
+      restored {- -fixUnRenamed <$> -} <- undoRenameM resultThunk
       traceM $ "DATACON RESULT RESTORED: " <> show restored <> "\n"
       -- Then we check the compatibility of the arguments with the datatype's encoding.
       asks (view #datatypeInfo) >>= \dti -> checkEncodingWithInfo dti restored
@@ -767,6 +775,14 @@ dataConstructor tyName ctorName fields = do
     fixUnRenamed :: ValT AbstractTy -> ValT AbstractTy
     fixUnRenamed = mapValT $ \case
       Abstraction (BoundAt (S x) i) -> Abstraction (BoundAt x i)
+      other -> other
+
+    --- REVIEW/FIXME/TODO/NOTE: WHY DOES THIS WORK?!?!?!?
+    fixRenamed :: ValT Renamed -> ValT Renamed
+    fixRenamed = mapValT $ \case
+      Abstraction (Rigid r i)
+        | r == 0 -> Abstraction (Rigid r i)
+        | otherwise -> Abstraction (Rigid (r + 1) i)
       other -> other
 
     {- Constructs the result type of the introduction form. Arguments are:
@@ -789,12 +805,20 @@ dataConstructor tyName ctorName fields = do
     mkResultThunk (review intCount -> count) declCtors (Vector.toList -> fieldArgs) = do
       declCtorFields <- Vector.toList . view #constructorArgs <$> findConstructor declCtors
       subs <- unifyFields declCtorFields fieldArgs
+      traceM $ "Subs: " <> show subs
+      traceM $ "Count: " <> show count
       let tyConAbstractArgs
             | count == 0 = []
             | otherwise = Abstraction . Unifiable . fromJust . preview intIndex <$> [0 .. (count - 1)]
           tyConAbstract = Datatype tyName (Vector.fromList tyConAbstractArgs)
+      traceM $ "TyConAbstract: " <> show tyConAbstract
       let tyConConcrete = Map.foldlWithKey' (\acc i t -> substitute i t acc) tyConAbstract subs
-      liftUnifyM . fixUp . ThunkT . Comp0 . ReturnT $ tyConConcrete
+      traceM $ "TyConConcrete: " <> show tyConConcrete
+      let cnt = fromJust . preview intCount $ count - Map.size subs
+      almost <- liftUnifyM . fixUp . ThunkT . Comp0 . ReturnT $ tyConConcrete
+      case almost of
+        ThunkT (CompT _ (CompTBody args)) -> pure $ ThunkT (CompT cnt (CompTBody args))
+        anythingElse -> error "TODO: This is actually impossible but should have a real error"
 
     {- Unifies the declaration fields (which may be abstract) with the supplied fields
        (which will be "concrete", in the sense that "they have to be rigid if they're tyvars").
@@ -949,16 +973,17 @@ cata rAlg rVal =
 
 renameArg ::
   forall (m :: Type -> Type).
-  (MonadHashCons Id ASGNode m, MonadError CovenantTypeError m) =>
+  (MonadHashCons Id ASGNode m, MonadError CovenantTypeError m, MonadReader ASGEnv m) =>
   Ref ->
   m (Maybe (ValT Renamed))
 renameArg r =
-  typeRef r >>= \case
-    CompNodeType t -> throwError . ApplyCompType $ t
-    ValNodeType t -> case runRenameM . renameValT $ t of
-      Left err' -> throwError . RenameArgumentFailed t $ err'
-      Right renamed -> pure . Just $ renamed
-    ErrorNodeType -> pure Nothing
+  askScope >>= \scope ->
+    typeRef r >>= \case
+      CompNodeType t -> throwError . ApplyCompType $ t
+      ValNodeType t -> case runRenameM scope . renameValT $ t of
+        Left err' -> throwError . RenameArgumentFailed t $ err'
+        Right renamed -> pure . Just $ renamed
+      ErrorNodeType -> pure Nothing
 
 checkEncodingWithInfo ::
   forall (a :: Type) (m :: Type -> Type).
@@ -976,15 +1001,16 @@ tryApply ::
   CompT AbstractTy ->
   ValT AbstractTy ->
   m (ValT AbstractTy)
-tryApply algebraT argT = case runRenameM . renameCompT $ algebraT of
-  Left err' -> throwError . RenameFunctionFailed algebraT $ err'
-  Right renamedAlgebraT -> case runRenameM . renameValT $ argT of
-    Left err' -> throwError . RenameArgumentFailed argT $ err'
-    Right renamedArgT -> do
-      tyDict <- asks (view #datatypeInfo)
-      case checkApp tyDict renamedAlgebraT [Just renamedArgT] of
-        Left err' -> throwError . UnificationError $ err'
-        Right resultT -> pure . undoRename $ resultT
+tryApply algebraT argT =
+  askScope >>= \scope -> case runRenameM scope . renameCompT $ algebraT of
+    Left err' -> throwError . RenameFunctionFailed algebraT $ err'
+    Right renamedAlgebraT -> case runRenameM scope . renameValT $ argT of
+      Left err' -> throwError . RenameArgumentFailed argT $ err'
+      Right renamedArgT -> do
+        tyDict <- asks (view #datatypeInfo)
+        case checkApp tyDict renamedAlgebraT [Just renamedArgT] of
+          Left err' -> throwError . UnificationError $ err'
+          Right resultT -> undoRenameM resultT
 
 -- Putting this here to reduce chance of annoying manual merge (will move later)
 
@@ -1022,6 +1048,26 @@ boundTyVar scope index = do
   if tyVarInScope
     then pure (BoundTyVar scope index)
     else throwError $ OutOfScopeTyVar scope index
+
+-- Helper to avoid having to manually catch and rethrow the error
+undoRenameM ::
+  forall (m :: Type -> Type).
+  (MonadError CovenantTypeError m, MonadReader ASGEnv m) =>
+  ValT Renamed ->
+  m (ValT AbstractTy)
+undoRenameM val = do
+  scope <- asks (fmap fst . view (#scopeInfo % #argumentInfo))
+  case undoRename scope val of
+    Left err' -> throwError $ UndoRenameFailure err'
+    Right renamed -> pure renamed
+
+-- To avoid annoying code duplication
+
+askScope ::
+  forall (m :: Type -> Type).
+  (MonadReader ASGEnv m) =>
+  m (Vector Word32)
+askScope = asks (fmap fst . view (#scopeInfo % #argumentInfo))
 
 -- Runs a UnifyM computation in our abstract monad. Again, largely to avoid superfluous code
 -- duplication.

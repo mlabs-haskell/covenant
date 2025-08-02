@@ -190,6 +190,8 @@ data CovenantTypeError
   | -- | We failed to rename an "instantiation type" supplied to `app`
     -- @since 1.2.0
     FailedToRenameInstantiation RenameError
+  | -- | With recent changes, undoRename is no longer deterministic, and we might get an error, which we have to "lfit"
+    UndoRenameFailure RenameError
   deriving stock
     ( -- | @since 1.0.0
       Eq,

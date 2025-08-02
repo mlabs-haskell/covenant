@@ -218,6 +218,8 @@ promoteUnificationError topLevelExpected topLevelActual =
 fixUp :: ValT Renamed -> UnifyM (ValT Renamed)
 fixUp = \case
   -- We have a result that's effectively `forall a . a` but not an error
+
+  -- \*** TODO: Re-enable this error, had to disable it for debugging
   Abstraction (Unifiable index) -> throwError . LeakingUnifiable $ index
   -- We're doing the equivalent of failing the `ST` trick
   Abstraction (Wildcard scopeId trueLevel index) -> throwError . LeakingWildcard scopeId trueLevel $ index

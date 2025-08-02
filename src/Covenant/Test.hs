@@ -40,7 +40,7 @@ module Covenant.Test
     unsafeTyCon,
     DebugASGBuilder (..),
     debugASGBuilder,
-    typeIdVal,
+    typeIdTest,
 
     -- ** Datatype checks
     cycleCheck,
@@ -61,7 +61,6 @@ module Covenant.Test
     -- *** Elimination
     runRenameM,
     undoRename,
-    unsafeExperimentalRunRenameM,
   )
 where
 
@@ -123,13 +122,12 @@ import Covenant.Internal.Rename
     renameValT,
     runRenameM,
     undoRename,
-    unsafeExperimentalRunRenameM,
   )
 import Covenant.Internal.Strategy
   ( DataEncoding (PlutusData, SOP),
     PlutusDataStrategy (ConstrData),
   )
-import Covenant.Internal.Term (ASGNodeType (ValNodeType), typeId)
+import Covenant.Internal.Term (ASGNodeType (CompNodeType, ValNodeType), typeId)
 import Covenant.Internal.Type
   ( AbstractTy (BoundAt),
     BuiltinFlatT
@@ -889,19 +887,25 @@ debugASGBuilder tyDict (DebugASGBuilder comp) =
 -- we don't get one of those when calling `typeId`
 
 -- | DO NOT USE THIS OUTSIDE OF TESTS
-typeIdVal ::
+--   This looks up the type of a node. If it's a ValT it just returns it, if it's a CompT
+--   it wraps it in a thunk and returns that.
+--   We don't *need* this but it prevents having to export ASG internals for tests and
+--   reduces the amount of pattern matching in writing tests.
+typeIdTest ::
   forall (m :: Type -> Type).
   (MonadHashCons Id ASGNode m, MonadError CovenantTypeError m) =>
   Id ->
   m (ValT AbstractTy)
-typeIdVal i =
+typeIdTest i =
   typeId i >>= \case
     ValNodeType t -> pure t
+    -- FIXME: This is quick & dirty but I need it for something
+    CompNodeType t -> pure $ ThunkT t
     other -> error $ "Expected a ValT but got: " <> show other
 
 -- For convenience. Don't remove this, necessary for efficient development on future work
 unsafeRename :: forall (a :: Type). RenameM a -> a
-unsafeRename act = case runRenameM act of
+unsafeRename act = case runRenameM mempty act of
   Left err -> error $ show err
   Right res -> res
 
