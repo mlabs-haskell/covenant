@@ -50,6 +50,7 @@ import Covenant.Internal.Type
 import Data.Bitraversable (Bitraversable (bitraverse))
 import Data.Coerce (coerce)
 import Data.Kind (Type)
+import Data.Maybe (fromJust)
 import Data.Tuple.Optics (_1)
 import Data.Vector (Vector)
 import Data.Vector qualified as Vector
@@ -61,15 +62,15 @@ import Optics.Core
     ix,
     lens,
     over,
+    preview,
     review,
     set,
     to,
     view,
-    (%), preview,
+    (%),
   )
-import Data.Maybe (fromJust)
 
---import Debug.Trace (traceM)
+-- import Debug.Trace (traceM)
 
 traceM :: forall a (m :: Type -> Type). (Monad m) => a -> m ()
 traceM _ = pure ()
@@ -130,18 +131,18 @@ instance
   {-# INLINEABLE labelOptic #-}
   labelOptic =
     lens
-      (\(RenameState x _ _ ) -> x)
+      (\(RenameState x _ _) -> x)
       (\(RenameState _ b c) a' -> RenameState a' b c)
 
-instance (k ~ A_Lens, a ~ Word32, b ~ Word32) =>
+instance
+  (k ~ A_Lens, a ~ Word32, b ~ Word32) =>
   LabelOptic "inheritedScope" k RenameState RenameState a b
   where
   {-# INLINEABLE labelOptic #-}
   labelOptic =
     lens
       (\(RenameState _ x _) -> x)
-      (\(RenameState a _  c) b' -> RenameState a b' c)
-
+      (\(RenameState a _ c) b' -> RenameState a b' c)
 
 -- The 'outer' vector represents a stack of scopes. Each entry is a combination
 -- of a vector of used variables (length is equal to the number of variables
@@ -154,7 +155,7 @@ instance
   {-# INLINEABLE labelOptic #-}
   labelOptic =
     lens
-      (\(RenameState _  _ y) -> y)
+      (\(RenameState _ _ y) -> y)
       (\(RenameState x y _) z' -> RenameState x y z')
 
 -- | Ways in which the renamer can fail.
@@ -167,10 +168,10 @@ data RenameError
     --
     -- @since 1.0.0
     InvalidAbstractionReference Int (Index "tyvar")
-   -- | We encountered a unifiable while un-renaming, which should not be possible.
-  | InvalidScopeReference Int (Index "tyvar")
-  -- TODO: Move to UnRenameError
-  | UnRenameUnifiable Renamed
+  | -- | We encountered a unifiable while un-renaming, which should not be possible.
+    InvalidScopeReference Int (Index "tyvar")
+  | -- TODO: Move to UnRenameError
+    UnRenameUnifiable Renamed
   | UnRenameWildCard Renamed
   deriving stock (Eq, Show)
 
@@ -227,7 +228,6 @@ instance
       (\(UnRenameCxt x _) -> x)
       (\(UnRenameCxt _ y) x' -> UnRenameCxt x' y)
 
-
 instance
   (k ~ A_Lens, a ~ Vector Word32, b ~ Vector Word32) =>
   LabelOptic "scopeInfo" k UnRenameCxt UnRenameCxt a b
@@ -264,15 +264,15 @@ runRenameM ::
   Either RenameError a
 runRenameM scopeInfo (RenameM comp) =
   evalState (runExceptT comp)
-  . RenameState 0 (fromIntegral $ Vector.length scopeInfo)
-  $ Vector.map (\x -> (x,0)) scopeInfo 
+    . RenameState 0 (fromIntegral $ Vector.length scopeInfo)
+    $ Vector.map (\x -> (x, 0)) scopeInfo
 
 runUnRenameM ::
   forall (a :: Type).
   UnRenameM a ->
   Vector Word32 ->
   Either RenameError a
-runUnRenameM (UnRenameM comp) inherited  = runReader (runExceptT comp) $ UnRenameCxt (fromIntegral $ Vector.length inherited) inherited
+runUnRenameM (UnRenameM comp) inherited = runReader (runExceptT comp) $ UnRenameCxt (fromIntegral $ Vector.length inherited) inherited
 
 -- | Rename a computation type.
 --
@@ -300,7 +300,7 @@ renameValT :: ValT AbstractTy -> RenameM (ValT Renamed)
 renameValT v = do
   r <- result
   let msg = "RenameValT: " <> show v <> "\n  result: " <> show r <> "\n"
-  traceM  msg
+  traceM msg
   pure r
   where
     result = case v of
@@ -362,8 +362,7 @@ undoRename scope t = runUnRenameM (go t) scope
       let db = trackerLen - 1 - inheritedSize - tl
       case preview asInt db of
         Nothing -> error "TODO: Real error. Invalid (negative) db in unTrueLevel"
-        Just res -> pure res 
-
+        Just res -> pure res
 
 renameAbstraction :: AbstractTy -> RenameM Renamed
 renameAbstraction (BoundAt scope index) = RenameM $ do
@@ -382,17 +381,18 @@ renameAbstraction (BoundAt scope index) = RenameM $ do
     Nothing -> throwError . InvalidAbstractionReference trueLevel $ index
     Just (occursTracker, uniqueScopeId) -> do
       result <-
-            if | not (checkVarIxExists asIntIx occursTracker) -> throwError . InvalidScopeReference trueLevel $ index
-               | trueLevel == 0 -> pure $ Unifiable index
-               | trueLevel < 0 -> pure $ Rigid trueLevel index
-               | otherwise -> pure $ Wildcard uniqueScopeId trueLevel index
+        if
+          | not (checkVarIxExists asIntIx occursTracker) -> throwError . InvalidScopeReference trueLevel $ index
+          | trueLevel == 0 -> pure $ Unifiable index
+          | trueLevel < 0 -> pure $ Rigid trueLevel index
+          | otherwise -> pure $ Wildcard uniqueScopeId trueLevel index
       traceM $ "Result: " <> show result <> "\n\n"
       pure result
   where
     -- NOTE: The second argument here is actually a *count*, so we have to be sure to decrement it by one to check that
     --       that the first arg refers to a valid index
     checkVarIxExists :: Int -> Word32 -> Bool
-    checkVarIxExists i wCount = fromIntegral i < wCount 
+    checkVarIxExists i wCount = fromIntegral i < wCount
 
 -- Helpers
 

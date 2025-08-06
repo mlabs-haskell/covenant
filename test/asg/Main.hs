@@ -468,13 +468,16 @@ justRigidIntro = runIntroFormTest "justRigidIntro" expected $ do
   typeIdTest lamThunked
   where
     lamTy :: CompT AbstractTy
-    lamTy = Comp1 $
-      tyvar Z ix0 :--:>
-      ReturnT (
-        ThunkT
-        . Comp0
-        . ReturnT
-        $ Datatype "Maybe" $ Vector.singleton (tyvar (S Z) ix0))
+    lamTy =
+      Comp1 $
+        tyvar Z ix0
+          :--:> ReturnT
+            ( ThunkT
+                . Comp0
+                . ReturnT
+                $ Datatype "Maybe"
+                $ Vector.singleton (tyvar (S Z) ix0)
+            )
 
     expected :: ValT AbstractTy
     expected = ThunkT lamTy

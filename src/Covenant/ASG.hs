@@ -235,7 +235,7 @@ import Data.Vector.NonEmpty qualified as NonEmpty
 import Data.Void (Void, vacuous)
 import Data.Wedge (Wedge (Here, Nowhere, There), wedge, wedgeLeft, wedgeRight)
 import Data.Word (Word32)
---import Debug.Trace (traceM)
+-- import Debug.Trace (traceM)
 import Optics.Core
   ( A_Lens,
     LabelOptic (labelOptic),
@@ -253,7 +253,7 @@ import Optics.Core
     _2,
   )
 
-traceM :: forall a (m :: Type -> Type). Monad m => a -> m ()
+traceM :: forall a (m :: Type -> Type). (Monad m) => a -> m ()
 traceM _ = pure ()
 
 -- | A fully-assembled Covenant ASG.
@@ -673,7 +673,7 @@ app fId argRefs instTys = do
   subs <- renameSubs rawSubs
   traceM $ "APP renamedSubs: " <> show subs
   scopeInfo <- askScope
-  traceM $ "scopeInfo input to renameCompT for funTy: " <> show scopeInfo 
+  traceM $ "scopeInfo input to renameCompT for funTy: " <> show scopeInfo
   case lookedUp of
     CompNodeType fT -> case runRenameM scopeInfo . renameCompT $ fT of
       Left err' -> throwError . RenameFunctionFailed fT $ err'
@@ -738,7 +738,7 @@ dataConstructor tyName ctorName fields = do
   argFieldTypes <- traverse typeRef fields
   traceM $ "DATACON RAW FIELD TYPES: " <> show argFieldTypes
   thisTyInfo <- lookupDatatypeInfo
-  traceM $ "DATATYPE INFO: " <> show thisTyInfo 
+  traceM $ "DATATYPE INFO: " <> show thisTyInfo
   let thisTyDecl = view #originalDecl thisTyInfo
   renamedFieldTypes <-
     traverse renameArg fields
@@ -774,7 +774,6 @@ dataConstructor tyName ctorName fields = do
       -- return type we constructed.
       refTo $ AValNode restored (DataConstructorInternal tyName ctorName fields)
   where
-
     {- Constructs the result type of the introduction form. Arguments are:
          1. The count (number of tyvars) from the data declaration.
          2. The vector of constructors from the data declaration.
@@ -806,11 +805,11 @@ dataConstructor tyName ctorName fields = do
       traceM $ "TyConConcrete: " <> show tyConConcrete
       let cnt = fromJust . preview intCount $ count - Map.size subs
       liftUnifyM . fixUp . ThunkT . Comp0 . ReturnT $ tyConConcrete
-      {-
-       -case almost of
-        ThunkT (CompT _ (CompTBody args)) -> pure $ ThunkT (CompT cnt (CompTBody args))
-        anythingElse -> error "TODO: This is actually impossible but should have a real error"
-       -} 
+    {-
+     -case almost of
+      ThunkT (CompT _ (CompTBody args)) -> pure $ ThunkT (CompT cnt (CompTBody args))
+      anythingElse -> error "TODO: This is actually impossible but should have a real error"
+     -}
     {- Unifies the declaration fields (which may be abstract) with the supplied fields
        (which will be "concrete", in the sense that "they have to be rigid if they're tyvars").
 
@@ -1060,10 +1059,11 @@ askScope ::
   m (Vector Word32)
 askScope = asks (fmap fst . view (#scopeInfo % #argumentInfo))
 
-traceScope :: forall (m :: Type -> Type)
-            . (MonadReader ASGEnv m) =>
-              String ->
-              m ()
+traceScope ::
+  forall (m :: Type -> Type).
+  (MonadReader ASGEnv m) =>
+  String ->
+  m ()
 traceScope msg = askScope >>= \scop -> traceM (msg <> ": scope: " <> show scop)
 
 -- Runs a UnifyM computation in our abstract monad. Again, largely to avoid superfluous code

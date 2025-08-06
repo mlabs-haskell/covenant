@@ -44,7 +44,6 @@ import Test.Tasty (adjustOption, defaultMain, testGroup)
 import Test.Tasty.HUnit (assertBool, assertEqual, testCase)
 import Test.Tasty.QuickCheck (QuickCheckTests, testProperty)
 
-
 main :: IO ()
 main =
   defaultMain . adjustOption moreTests . testGroup "Renaming" $
