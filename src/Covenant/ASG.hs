@@ -235,7 +235,7 @@ import Data.Vector.NonEmpty qualified as NonEmpty
 import Data.Void (Void, vacuous)
 import Data.Wedge (Wedge (Here, Nowhere, There), wedge, wedgeLeft, wedgeRight)
 import Data.Word (Word32)
-import Debug.Trace (traceM)
+--import Debug.Trace (traceM)
 import Optics.Core
   ( A_Lens,
     LabelOptic (labelOptic),
@@ -253,8 +253,8 @@ import Optics.Core
     _2,
   )
 
--- traceM :: forall a (m :: Type -> Type). Monad m => a -> m ()
--- traceM _ = pure ()
+traceM :: forall a (m :: Type -> Type). Monad m => a -> m ()
+traceM _ = pure ()
 
 -- | A fully-assembled Covenant ASG.
 --
@@ -586,7 +586,9 @@ force r = do
   refT <- typeRef r
   case refT of
     ValNodeType t -> case t of
-      ThunkT compT -> refTo . ACompNode compT . ForceInternal $ r
+      ThunkT compT -> do
+        traceM ("Force result: " <> show compT)
+        refTo . ACompNode compT . ForceInternal $ r
       _ -> throwError . ForceNonThunk $ t
     CompNodeType t -> throwError . ForceCompType $ t
     ErrorNodeType -> throwError ForceError
@@ -634,7 +636,7 @@ lam expectedT@(CompT cnt (CompTBody xs)) bodyComp = do
         Just (ACompNode t _) -> throwError $ LambdaResultsInCompType t
   where
     decDb :: ValT AbstractTy -> ValT AbstractTy
-    decDb = mapValT (\case Abstraction (BoundAt (S Z) argPos) -> Abstraction (BoundAt Z argPos); other -> other)
+    decDb = id -- mapValT (\case Abstraction (BoundAt (S Z) argPos) -> Abstraction (BoundAt Z argPos); other -> other)
 
 -- | Construct the error node.
 --
@@ -663,17 +665,20 @@ app ::
   Vector (Wedge BoundTyVar (ValT Void)) ->
   m Id
 app fId argRefs instTys = do
+  traceScope "APP start"
   lookedUp <- typeId fId
   traceM $ "APP FunTy: " <> show lookedUp
   let rawSubs = mkSubstitutions instTys
   traceM $ "APP raw subs: " <> show rawSubs
   subs <- renameSubs rawSubs
   traceM $ "APP renamedSubs: " <> show subs
-  scopeInfo <- asks (fmap fst . view (#scopeInfo % #argumentInfo))
+  scopeInfo <- askScope
+  traceM $ "scopeInfo input to renameCompT for funTy: " <> show scopeInfo 
   case lookedUp of
     CompNodeType fT -> case runRenameM scopeInfo . renameCompT $ fT of
       Left err' -> throwError . RenameFunctionFailed fT $ err'
       Right renamedFT -> do
+        traceM $ "APP renamed funTy: " <> show renamedFT
         instantiatedFT <- instantiate subs renamedFT
         traceM $ "APP instantiated funTy: " <> show instantiatedFT
         renamedArgs <- traverse renameArg argRefs
@@ -712,6 +717,7 @@ app fId argRefs instTys = do
     instantiate :: [(Index "tyvar", ValT Renamed)] -> CompT Renamed -> m (CompT Renamed)
     instantiate [] fn = pure fn
     instantiate subs fn = do
+      traceScope "\ninstantiate"
       instantiated <- liftUnifyM . fixUp $ foldr (\(i, t) f -> substitute i t f) (ThunkT fn) subs
       case instantiated of
         ThunkT res -> pure res
@@ -732,6 +738,7 @@ dataConstructor tyName ctorName fields = do
   argFieldTypes <- traverse typeRef fields
   traceM $ "DATACON RAW FIELD TYPES: " <> show argFieldTypes
   thisTyInfo <- lookupDatatypeInfo
+  traceM $ "DATATYPE INFO: " <> show thisTyInfo 
   let thisTyDecl = view #originalDecl thisTyInfo
   renamedFieldTypes <-
     traverse renameArg fields
@@ -759,7 +766,7 @@ dataConstructor tyName ctorName fields = do
       resultThunk <- mkResultThunk count ctors renamedFieldTypes
       traceM $ "DATACON RESULT THUNK: " <> show resultThunk
       -- Then we undo the renaming.
-      restored {- -fixUnRenamed <$> -} <- undoRenameM resultThunk
+      restored <- undoRenameM resultThunk
       traceM $ "DATACON RESULT RESTORED: " <> show restored <> "\n"
       -- Then we check the compatibility of the arguments with the datatype's encoding.
       asks (view #datatypeInfo) >>= \dti -> checkEncodingWithInfo dti restored
@@ -767,23 +774,6 @@ dataConstructor tyName ctorName fields = do
       -- return type we constructed.
       refTo $ AValNode restored (DataConstructorInternal tyName ctorName fields)
   where
-    {- Due to implementation details of the renamer and the way it interacts with datatypes, the DB indices of
-       variables will always be "one more than they should be" after undoing renaming.
-
-       This is a bit of a hack but it's the best that can be done in the circumstances.
-    -}
-    fixUnRenamed :: ValT AbstractTy -> ValT AbstractTy
-    fixUnRenamed = mapValT $ \case
-      Abstraction (BoundAt (S x) i) -> Abstraction (BoundAt x i)
-      other -> other
-
-    --- REVIEW/FIXME/TODO/NOTE: WHY DOES THIS WORK?!?!?!?
-    fixRenamed :: ValT Renamed -> ValT Renamed
-    fixRenamed = mapValT $ \case
-      Abstraction (Rigid r i)
-        | r == 0 -> Abstraction (Rigid r i)
-        | otherwise -> Abstraction (Rigid (r + 1) i)
-      other -> other
 
     {- Constructs the result type of the introduction form. Arguments are:
          1. The count (number of tyvars) from the data declaration.
@@ -815,11 +805,12 @@ dataConstructor tyName ctorName fields = do
       let tyConConcrete = Map.foldlWithKey' (\acc i t -> substitute i t acc) tyConAbstract subs
       traceM $ "TyConConcrete: " <> show tyConConcrete
       let cnt = fromJust . preview intCount $ count - Map.size subs
-      almost <- liftUnifyM . fixUp . ThunkT . Comp0 . ReturnT $ tyConConcrete
-      case almost of
+      liftUnifyM . fixUp . ThunkT . Comp0 . ReturnT $ tyConConcrete
+      {-
+       -case almost of
         ThunkT (CompT _ (CompTBody args)) -> pure $ ThunkT (CompT cnt (CompTBody args))
         anythingElse -> error "TODO: This is actually impossible but should have a real error"
-
+       -} 
     {- Unifies the declaration fields (which may be abstract) with the supplied fields
        (which will be "concrete", in the sense that "they have to be rigid if they're tyvars").
 
@@ -1068,6 +1059,12 @@ askScope ::
   (MonadReader ASGEnv m) =>
   m (Vector Word32)
 askScope = asks (fmap fst . view (#scopeInfo % #argumentInfo))
+
+traceScope :: forall (m :: Type -> Type)
+            . (MonadReader ASGEnv m) =>
+              String ->
+              m ()
+traceScope msg = askScope >>= \scop -> traceM (msg <> ": scope: " <> show scop)
 
 -- Runs a UnifyM computation in our abstract monad. Again, largely to avoid superfluous code
 -- duplication.

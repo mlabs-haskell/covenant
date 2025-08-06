@@ -10,7 +10,7 @@ import Covenant.Index
   )
 import Covenant.Test
   ( Concrete (Concrete),
-    RenameError (InvalidAbstractionReference),
+    RenameError (InvalidAbstractionReference, InvalidScopeReference),
     renameCompT,
     renameValT,
     runRenameM,
@@ -43,6 +43,7 @@ import Test.QuickCheck
 import Test.Tasty (adjustOption, defaultMain, testGroup)
 import Test.Tasty.HUnit (assertBool, assertEqual, testCase)
 import Test.Tasty.QuickCheck (QuickCheckTests, testProperty)
+
 
 main :: IO ()
 main =
@@ -126,7 +127,7 @@ testConstT2 = do
           Abstraction (Unifiable ix0)
             :--:> ReturnT
               ( ThunkT . Comp1 $
-                  Abstraction (Wildcard 1 2 ix0)
+                  Abstraction (Wildcard 1 1 ix0)
                     :--:> ReturnT (Abstraction (Unifiable ix0))
               )
   let result = runRenameM mempty . renameCompT $ constT
@@ -135,13 +136,14 @@ testConstT2 = do
 -- Checks that `forall a . b -> !a` triggers the variable indexing checker.
 testIndexingIdT :: IO ()
 testIndexingIdT = do
-  let t = Comp1 $ tyvar Z ix0 :--:> ReturnT (tyvar Z ix1)
+  let t = Comp1 $ tyvar Z ix1 :--:> ReturnT (tyvar Z ix0)
   let result = runRenameM mempty . renameCompT $ t
+
   case result of
-    Left (InvalidAbstractionReference trueLevel ix) -> do
-      assertEqual "" trueLevel 1
+    Left (InvalidScopeReference trueLevel ix) -> do
+      assertEqual "" trueLevel 0
       assertEqual "" ix ix1
-    _ -> assertBool "renaming succeeded when it should have failed" False
+    _ -> assertBool ("renaming succeeded when it should have failed: " <> show result) False
 
 -- Helpers
 

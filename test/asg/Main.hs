@@ -110,7 +110,12 @@ main =
       testCase "db indices are well behaved (non-datatype case)" newLamTest1,
       testCase "db indices are well behaved (datatype case)" newLamTest2,
       testCase "calling down an in-scope tyvar works" boundTyVarHappy,
-      testCase "calling down an out-of-scope tyvar fails" boundTyVarShouldFail
+      testCase "calling down an out-of-scope tyvar fails" boundTyVarShouldFail,
+      -- TODO: Format like the above tests
+      nothingIntro,
+      justConcreteIntro,
+      justNothingIntro,
+      justRigidIntro
     ]
   where
     moreTests :: QuickCheckTests -> QuickCheckTests
@@ -463,7 +468,13 @@ justRigidIntro = runIntroFormTest "justRigidIntro" expected $ do
   typeIdTest lamThunked
   where
     lamTy :: CompT AbstractTy
-    lamTy = Comp1 $ tyvar Z ix0 :--:> ReturnT (ThunkT . Comp0 . ReturnT $ Datatype "Maybe" $ Vector.singleton (tyvar (S Z) ix0))
+    lamTy = Comp1 $
+      tyvar Z ix0 :--:>
+      ReturnT (
+        ThunkT
+        . Comp0
+        . ReturnT
+        $ Datatype "Maybe" $ Vector.singleton (tyvar (S Z) ix0))
 
     expected :: ValT AbstractTy
     expected = ThunkT lamTy
@@ -478,8 +489,6 @@ justNothingIntro = runIntroFormTest "justNothingIntro" expectedThunk $ do
     justNothing <- dataConstructor "Maybe" "Just" (Vector.singleton (AnId nothingApplied))
     justNothingForced <- force (AnId justNothing)
     justNothingApplied <- app justNothingForced mempty (Vector.singleton Nowhere)
-
-    -- justNothingInstantiated <- app justNothingForced mempty (Vector.singleton . wedgeLeft . Just $ var)
     pure (AnId justNothingApplied)
   typeIdTest thunk
   where

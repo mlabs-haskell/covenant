@@ -115,7 +115,7 @@ import Covenant.Internal.Ledger
   )
 import Covenant.Internal.PrettyPrint (ScopeBoundary)
 import Covenant.Internal.Rename
-  ( RenameError (InvalidAbstractionReference),
+  ( RenameError (InvalidAbstractionReference, InvalidScopeReference),
     RenameM,
     renameCompT,
     renameDataDecl,
