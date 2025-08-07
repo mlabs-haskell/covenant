@@ -1,3 +1,5 @@
+{-# LANGUAGE MultiWayIf #-}
+
 module Covenant.Internal.Rename
   ( RenameM,
     RenameError (..),
@@ -7,17 +9,20 @@ module Covenant.Internal.Rename
     renameCompT,
     undoRename,
     renameDatatypeInfo,
+    UnRenameM,
+    runUnRenameM,
   )
 where
 
-import Control.Monad (unless)
 import Control.Monad.Except
   ( ExceptT,
+    MonadError,
     runExceptT,
     throwError,
   )
 import Control.Monad.Reader
-  ( Reader,
+  ( MonadReader,
+    Reader,
     asks,
     local,
     runReader,
@@ -29,11 +34,11 @@ import Control.Monad.State.Strict
     modify,
   )
 import Covenant.Data (DatatypeInfo (DatatypeInfo))
-import Covenant.DeBruijn (DeBruijn (S, Z), asInt)
-import Covenant.Index (Count, Index, intCount, intIndex)
+import Covenant.DeBruijn (DeBruijn (Z), asInt)
+import Covenant.Index (Count, Index, intIndex, wordCount)
 import Covenant.Internal.Type
   ( AbstractTy (BoundAt),
-    CompT (CompT),
+    CompT (CompT), 
     CompTBody (CompTBody),
     Constructor (Constructor),
     DataDeclaration (DataDeclaration, OpaqueData),
@@ -43,17 +48,16 @@ import Covenant.Internal.Type
 import Data.Bitraversable (Bitraversable (bitraverse))
 import Data.Coerce (coerce)
 import Data.Kind (Type)
-import Data.Tuple.Optics (_1)
 import Data.Vector (Vector)
 import Data.Vector qualified as Vector
 import Data.Vector.NonEmpty qualified as NonEmpty
-import Data.Word (Word64)
+import Data.Word (Word32, Word64)
 import Optics.Core
   ( A_Lens,
     LabelOptic (labelOptic),
-    ix,
     lens,
     over,
+    preview,
     review,
     set,
     to,
@@ -61,13 +65,36 @@ import Optics.Core
     (%),
   )
 
+{- CHANGES:
+
+  - Get rid of Vector Bool in RenameState, replace with Word32
+  - runRenameM needs to take a ScopeInfo argument (or convert before passing it in)
+  - The unrenamer:
+     * Has to have a scope stack
+     * Works like the renamer backwards
+     * If you see an abstraction
+       - If it's a rigid, un-translate it
+       - If it's a unifiable throw an error, something's broken
+       - If it's a wildcard something has gone even more wrong!
+     * If it's a datatype, recurse w/o stepping
+     * If it's a flat don't do anything
+     * If it's a thunk, step up scope and recurse
+
+     - Wildcard indices don't matter (can work in Reader)
+     - Keep the renameM as a state, do unRenameM in a reader w/ local
+     - Only need a Vector Word32 for the UnRenameM reader
+-}
+
 -- Used during renaming. Contains a source of fresh indices for wildcards, as
 -- well as tracking:
 --
 -- 1. How many variables are bound by each scope;
 -- 2. Which of these variables have been noted as used; and
 -- 3. A unique identifier for each scope (for wildcards).
-data RenameState = RenameState Word64 (Vector (Vector Bool, Word64))
+-- TODO: Update comments, the Word32 is the count for each scope
+data RenameState = RenameState Word64 Word32 (Vector (Word32, Word64)) -- replace Vector Bool w/ Word32 from ScopeInfo, set
+-- For the inherited scope stack (the thing we construct from ScopeInfo),
+-- the Word64 could be anything. We can't have wildcards in an inherited scope
   deriving stock (Eq, Show)
 
 -- Note (Koz, 11/04/2025): We need this field as a source of unique identifiers
@@ -94,33 +121,52 @@ instance
   {-# INLINEABLE labelOptic #-}
   labelOptic =
     lens
-      (\(RenameState x _) -> x)
-      (\(RenameState _ y) x' -> RenameState x' y)
+      (\(RenameState x _ _) -> x)
+      (\(RenameState _ b c) a' -> RenameState a' b c)
+
+instance
+  (k ~ A_Lens, a ~ Word32, b ~ Word32) =>
+  LabelOptic "inheritedScope" k RenameState RenameState a b
+  where
+  {-# INLINEABLE labelOptic #-}
+  labelOptic =
+    lens
+      (\(RenameState _ x _) -> x)
+      (\(RenameState a _ c) b' -> RenameState a b' c)
 
 -- The 'outer' vector represents a stack of scopes. Each entry is a combination
 -- of a vector of used variables (length is equal to the number of variables
 -- bound by that scope), together with a unique identifier not only for that
 -- scope, but also the `step` into that scope, as required by wildcard renaming.
 instance
-  (k ~ A_Lens, a ~ Vector (Vector Bool, Word64), b ~ Vector (Vector Bool, Word64)) =>
+  (k ~ A_Lens, a ~ Vector (Word32, Word64), b ~ Vector (Word32, Word64)) =>
   LabelOptic "tracker" k RenameState RenameState a b
   where
   {-# INLINEABLE labelOptic #-}
   labelOptic =
     lens
-      (\(RenameState _ y) -> y)
-      (\(RenameState x _) y' -> RenameState x y')
+      (\(RenameState _ _ y) -> y)
+      (\(RenameState x y _) z' -> RenameState x y z')
 
 -- | Ways in which the renamer can fail.
 --
 -- @since 1.1.0
 data RenameError
   = -- | An attempt to reference an abstraction in a scope where this
-    -- abstraction doesn't exist. First field is the true level, second is
-    -- the index that was requested.
+    -- abstraction doesn't exist, but where the scope itself *does* exist.
+    -- Put another way: This gets thrown when the argument index of an
+    -- abstraction inconsistent with the `Count` of the scope its DB index refers to.
+    -- First field is the true level, second is the index that was requested.
     --
-    -- @since 1.0.0
+    -- @since 1.2.0
     InvalidAbstractionReference Int (Index "tyvar")
+  | -- | An abstraction refers to a scope which does not exist. That is: The abstraction's
+    -- DeBruijn index points to a scope "higher than" the top-level scope.
+    -- @since 1.2.0
+    InvalidScopeReference Int (Index "tyvar")
+  | -- | We tried to un-rename a wildcard, which indicates something wen't horribly wrong.
+    -- @since 1.2.0
+    UnRenameWildCard Renamed -- NOTE: I'm putting this here instead of making a new type b/c it seems... not worth it to have a new type (and new wrappers in ASG) just for this
   deriving stock (Eq, Show)
 
 -- | A \'renaming monad\' which allows us to convert type representations from
@@ -156,14 +202,73 @@ newtype RenameM (a :: Type)
     )
     via (ExceptT RenameError (State RenameState))
 
+-- | The portions of the RenameState needed for unrenaming. Lacks the unique indicator for
+-- wildcards, since trying to un-rename a wildcard is an error.
+data UnRenameCxt = UnRenameCxt Word32 (Vector Word32)
+  deriving stock
+    ( -- @since 1.2.0
+      Show,
+      -- @since 1.2.0
+      Eq,
+      -- @since 1.2.0
+      Ord
+    )
+
+instance
+  (k ~ A_Lens, a ~ Word32, b ~ Word32) =>
+  LabelOptic "inheritedScopeSize" k UnRenameCxt UnRenameCxt a b
+  where
+  {-# INLINEABLE labelOptic #-}
+  labelOptic =
+    lens
+      (\(UnRenameCxt x _) -> x)
+      (\(UnRenameCxt _ y) x' -> UnRenameCxt x' y)
+
+instance
+  (k ~ A_Lens, a ~ Vector Word32, b ~ Vector Word32) =>
+  LabelOptic "scopeInfo" k UnRenameCxt UnRenameCxt a b
+  where
+  {-# INLINEABLE labelOptic #-}
+  labelOptic =
+    lens
+      (\(UnRenameCxt _ y) -> y)
+      (\(UnRenameCxt x _) y' -> UnRenameCxt x y')
+
+-- | @since 1.2.0
+newtype UnRenameM (a :: Type) = UnRenameM (ExceptT RenameError (Reader UnRenameCxt) a)
+  deriving
+    ( -- | @since 1.2.0
+      Functor,
+      -- | @since 1.2.0
+      Applicative,
+      -- | @since 1.2.0
+      Monad,
+      -- | @since 1.2.0
+      MonadReader UnRenameCxt,
+      -- | @since 1.2.0
+      MonadError RenameError
+    )
+    via (ExceptT RenameError (Reader UnRenameCxt))
+
 -- | Execute a renaming computation.
 --
--- @since 1.0.0
+-- @since 1.2.0
 runRenameM ::
   forall (a :: Type).
+  Vector Word32 ->
   RenameM a ->
   Either RenameError a
-runRenameM (RenameM comp) = evalState (runExceptT comp) . RenameState 0 $ Vector.empty
+runRenameM scopeInfo (RenameM comp) =
+  evalState (runExceptT comp)
+    . RenameState 0 (fromIntegral $ Vector.length scopeInfo)
+    $ Vector.map (,0) scopeInfo
+
+runUnRenameM ::
+  forall (a :: Type).
+  UnRenameM a ->
+  Vector Word32 ->
+  Either RenameError a
+runUnRenameM (UnRenameM comp) inherited = runReader (runExceptT comp) $ UnRenameCxt (fromIntegral $ Vector.length inherited) inherited
 
 -- | Rename a computation type.
 --
@@ -188,16 +293,16 @@ renameCompT (CompT abses (CompTBody xs)) = RenameM $ do
 --
 -- @since 1.0.0
 renameValT :: ValT AbstractTy -> RenameM (ValT Renamed)
-renameValT = \case
-  Abstraction t -> Abstraction <$> renameAbstraction t
-  ThunkT t -> ThunkT <$> renameCompT t
-  BuiltinFlat t -> pure . BuiltinFlat $ t
-  -- Assumes kind-checking has occurred
-  Datatype tn xs -> RenameM $ do
-    -- We don't step or un-step the scope here b/c a TyCon which appears as a ValT _cannot_ bind variables.
-    -- This Vector here doesn't represent a function, but a product, so we there is no "return" type to treat specially (I think!)
-    renamedXS <- Vector.mapM (coerce . renameValT) xs
-    pure $ Datatype tn renamedXS
+renameValT v =  case v of
+      Abstraction t -> Abstraction <$> renameAbstraction t
+      ThunkT t -> ThunkT <$> renameCompT t
+      BuiltinFlat t -> pure . BuiltinFlat $ t
+      -- Assumes kind-checking has occurred
+      Datatype tn xs -> RenameM $ do
+        -- We don't step or un-step the scope here b/c a TyCon which appears as a ValT _cannot_ bind variables.
+        -- This Vector here doesn't represent a function, but a product, so we there is no "return" type to treat specially (I think!)
+        renamedXS <- Vector.mapM (coerce . renameValT) xs
+        pure $ Datatype tn renamedXS
 
 -- @since 1.1.0
 renameDataDecl :: DataDeclaration AbstractTy -> RenameM (DataDeclaration Renamed)
@@ -211,8 +316,10 @@ renameDataDecl (DataDeclaration tn cnt ctors strat) = RenameM $ do
     renameCtor :: Constructor AbstractTy -> RenameM (Constructor Renamed)
     renameCtor (Constructor cn args) = Constructor cn <$> traverse renameValT args
 
+-- REVIEW: I am not sure if we really want the scope arg to runRenameM to be `mempty`.
+--         If something breaks w/ BB forms or datatypes, look here.
 renameDatatypeInfo :: DatatypeInfo AbstractTy -> Either RenameError (DatatypeInfo Renamed)
-renameDatatypeInfo (DatatypeInfo ogDecl baseFStuff bb) = runRenameM $ do
+renameDatatypeInfo (DatatypeInfo ogDecl baseFStuff bb) = runRenameM mempty $ do
   ogDecl' <- renameDataDecl ogDecl
   baseFStuff' <- traverse (bitraverse renameDataDecl renameValT) baseFStuff
   bb' <- traverse renameValT bb
@@ -221,60 +328,65 @@ renameDatatypeInfo (DatatypeInfo ogDecl baseFStuff bb) = runRenameM $ do
 -- A way of 'undoing' the renaming process. This is meant to be used only after
 -- applications, and assumes that what is being un-renamed is the result of a
 -- computation.
-undoRename :: ValT Renamed -> ValT AbstractTy
-undoRename t = runReader (go t) 1
+undoRename :: Vector Word32 -> ValT Renamed -> Either RenameError (ValT AbstractTy)
+undoRename scope t = runUnRenameM (go t) scope
   where
-    go :: ValT Renamed -> Reader Int (ValT AbstractTy)
+    go :: ValT Renamed -> UnRenameM (ValT AbstractTy)
     go = \case
       Abstraction t' ->
         Abstraction <$> case t' of
-          Unifiable index -> BoundAt <$> trueLevelToDB 1 <*> pure index
-          Rigid trueLevel index -> BoundAt <$> trueLevelToDB trueLevel <*> pure index
-          Wildcard _ trueLevel index -> BoundAt <$> trueLevelToDB trueLevel <*> pure index
+          Rigid trueLevel index -> do
+            db <- unTrueLevel trueLevel
+            pure $ BoundAt db index
+          w@(Wildcard{}) -> throwError $ UnRenameWildCard w -- error "Wildcard" --  BoundAt <$> trueLevelToDB trueLevel <*> pure index
+          Unifiable index -> pure $ BoundAt Z index
       ThunkT (CompT abses (CompTBody xs)) ->
-        ThunkT . CompT abses . CompTBody <$> local (+ 1) (traverse go xs)
+        ThunkT
+        . CompT abses
+        . CompTBody
+        <$> local (over #scopeInfo (Vector.cons $ view wordCount abses)) (traverse go xs)
       BuiltinFlat t' -> pure . BuiltinFlat $ t'
       Datatype tn args -> Datatype tn <$> traverse go args
 
--- Helpers
-
-trueLevelToDB :: Int -> Reader Int DeBruijn
-trueLevelToDB trueLevel = asks (go . subtract trueLevel)
-  where
-    go :: Int -> DeBruijn
-    go = \case
-      0 -> Z
-      n -> S . go $ n - 1
+    unTrueLevel :: Int -> UnRenameM DeBruijn
+    unTrueLevel tl = do
+      trackerLen <- asks (Vector.length . view #scopeInfo)
+      inheritedSize <- asks (fromIntegral . view #inheritedScopeSize)
+      let db = trackerLen - 1 - inheritedSize - tl
+      case preview asInt db of
+        Nothing -> error "TODO: Real error. Invalid (negative) db in unTrueLevel"
+        Just res -> pure res
 
 renameAbstraction :: AbstractTy -> RenameM Renamed
 renameAbstraction (BoundAt scope index) = RenameM $ do
-  trueLevel <- gets (\x -> view (#tracker % to Vector.length) x - review asInt scope)
+  inheritedScopeSize <- gets (fromIntegral . view #inheritedScope)
+  trueLevel <- gets (\x -> view (#tracker % to Vector.length) x - 1 - inheritedScopeSize - review asInt scope)
   scopeInfo <- gets (\x -> view #tracker x Vector.!? review asInt scope)
   let asIntIx = review intIndex index
   case scopeInfo of
-    -- This variable is bound in a scope that encloses the renaming scope. Thus,
-    -- the variable is rigid.
-    Nothing -> pure . Rigid trueLevel $ index
-    Just (occursTracker, uniqueScopeId) -> case occursTracker Vector.!? asIntIx of
-      Nothing -> throwError . InvalidAbstractionReference trueLevel $ index
-      Just beenUsed -> do
-        -- Note that this variable has occurred
-        unless beenUsed (modify (noteUsed scope index))
-        pure $
-          if trueLevel == 1
-            -- This is a unifiable variable
-            then Unifiable index
-            -- This is a wildcard variable
-            else Wildcard uniqueScopeId trueLevel index
+    Nothing -> throwError . InvalidScopeReference trueLevel $ index
+    Just (occursTracker, uniqueScopeId) ->
+        if
+          | not (checkVarIxExists asIntIx occursTracker) -> throwError . InvalidAbstractionReference trueLevel $ index
+          | trueLevel == 0 -> pure $ Unifiable index
+          | trueLevel < 0 -> pure $ Rigid trueLevel index
+          | otherwise -> pure $ Wildcard uniqueScopeId trueLevel index
+  where
+    -- NOTE: The second argument here is actually a *count*, so we have to be sure to decrement it by one to check that
+    --       that the first arg refers to a valid index
+    checkVarIxExists :: Int -> Word32 -> Bool
+    checkVarIxExists i wCount = fromIntegral i < wCount
+
+-- Helpers
 
 -- Given a number of abstractions bound by a scope, modify the state to track
 -- that scope.
 stepUpScope :: Count "tyvar" -> RenameState -> RenameState
 stepUpScope abses x =
   let fresh = view #idSource x
-      absesI = review intCount abses
+      absesW = view wordCount abses
       -- Label (speculatively) the current scope 'step' with a unique value.
-      entry = (Vector.replicate absesI False, fresh)
+      entry = (absesW, fresh)
    in -- Ensure that our source of fresh identifiers is incremented
       over #tracker (Vector.cons entry) . set #idSource (fresh + 1) $ x
 
@@ -286,9 +398,3 @@ stepUpScope abses x =
 -- achieve our goal of renaming wildcards.
 dropDownScope :: RenameState -> RenameState
 dropDownScope = over #tracker Vector.tail
-
--- Given a pair of DeBruijn index and positional index for a variable, note that
--- we've seen this variable.
-noteUsed :: DeBruijn -> Index "tyvar" -> RenameState -> RenameState
-noteUsed scope index =
-  set (#tracker % ix (review asInt scope) % _1 % ix (review intIndex index)) True

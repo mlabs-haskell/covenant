@@ -57,6 +57,7 @@ module Covenant.Test
 
     -- *** Elimination
     runRenameM,
+    undoRename,
   )
 where
 
@@ -106,12 +107,12 @@ import Covenant.Internal.Ledger
   )
 import Covenant.Internal.PrettyPrint (ScopeBoundary)
 import Covenant.Internal.Rename
-  ( RenameError (InvalidAbstractionReference),
+  ( RenameError (InvalidAbstractionReference, InvalidScopeReference),
     RenameM,
     renameCompT,
     renameDataDecl,
     renameValT,
-    runRenameM,
+    runRenameM, undoRename,
   )
 import Covenant.Internal.Strategy
   ( DataEncoding (PlutusData, SOP),
@@ -833,9 +834,10 @@ shrinkDataDecls decls = liftShrink shrinkDataDecl decls <|> (shrinkDataDecl <$> 
 genDataList :: forall (a :: Type). DataGenM a -> Gen [a]
 genDataList = runDataGenM . GT.listOf
 
+
 -- For convenience. Don't remove this, necessary for efficient development on future work
 unsafeRename :: forall (a :: Type). RenameM a -> a
-unsafeRename act = case runRenameM act of
+unsafeRename act = case runRenameM mempty act of
   Left err -> error $ show err
   Right res -> res
 

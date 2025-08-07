@@ -1,4 +1,4 @@
-{-# LANGUAGE PatternSynonyms #-}
+{-# LANGUAGE PatternSynonyms, ViewPatterns #-}
 
 -- |
 -- Module: Covenant.ASG
@@ -99,9 +99,9 @@ import Control.Monad.Reader
     runReaderT,
   )
 import Covenant.Constant (AConstant, typeConstant)
-import Covenant.Data (DatatypeInfo, mapValT, mkDatatypeInfo)
-import Covenant.DeBruijn (DeBruijn (S, Z), asInt)
-import Covenant.Index (Index, intIndex)
+import Covenant.Data (DatatypeInfo, mkDatatypeInfo)
+import Covenant.DeBruijn (DeBruijn, asInt)
+import Covenant.Index (Index, intIndex, wordCount)
 import Covenant.Internal.KindCheck (checkEncodingArgs)
 import Covenant.Internal.Ledger (ledgerTypes)
 import Covenant.Internal.Rename
@@ -136,6 +136,7 @@ import Covenant.Internal.Term
         CataWrongBuiltinType,
         CataWrongValT,
         EncodingError,
+        FailedToRenameInstantiation,
         ForceCompType,
         ForceError,
         ForceNonThunk,
@@ -150,6 +151,7 @@ import Covenant.Internal.Term
         ReturnWrapsError,
         ThunkError,
         ThunkValType,
+        UndoRenameFailure,
         UnificationError,
         WrongReturnType
       ),
@@ -161,7 +163,7 @@ import Covenant.Internal.Term
     typeRef,
   )
 import Covenant.Internal.Type
-  ( AbstractTy (BoundAt),
+  ( AbstractTy,
     BuiltinFlatT (ByteStringT, IntegerT),
     CompT (CompT),
     CompTBody (CompTBody),
@@ -184,6 +186,10 @@ import Covenant.Internal.Unification
         NoDatatypeInfo
       ),
     checkApp,
+    UnifyM,
+    runUnifyM,
+    fixUp,
+    substitute
   )
 import Covenant.Prim
   ( OneArgFunc,
@@ -195,7 +201,7 @@ import Covenant.Prim
     typeThreeArgFunc,
     typeTwoArgFunc,
   )
-import Covenant.Type (ValT (Abstraction))
+import Covenant.Type (tyvar)
 import Data.Bimap (Bimap)
 import Data.Bimap qualified as Bimap
 import Data.Coerce (coerce)
@@ -203,7 +209,7 @@ import Data.Functor.Identity (Identity, runIdentity)
 import Data.Kind (Type)
 import Data.Map.Strict (Map)
 import Data.Map.Strict qualified as Map
-import Data.Maybe (fromJust, isJust)
+import Data.Maybe (fromJust)
 import Data.Vector (Vector)
 import Data.Vector qualified as Vector
 import Data.Vector.NonEmpty qualified as NonEmpty
@@ -218,7 +224,13 @@ import Optics.Core
     review,
     view,
     (%),
+    _1,
+    _2
   )
+import Data.Wedge (Wedge, wedge)
+import Data.Void (Void, vacuous)
+import Data.Word (Word32)
+import qualified Data.Text as T
 
 -- | A fully-assembled Covenant ASG.
 --
@@ -292,12 +304,12 @@ instance
 -- the functionality provided by this module is not recommended, unless you know
 -- /exactly/ what you're doing.
 --
--- @since 1.0.0
-newtype ScopeInfo = ScopeInfo (Vector (Vector (ValT AbstractTy)))
+-- @since 1.2.0
+newtype ScopeInfo = ScopeInfo (Vector (Word32, Vector (ValT AbstractTy)))
   deriving stock
-    ( -- | @since 1.0.0
+    ( -- | @since 1.2.0
       Eq,
-      -- | @since 1.0.0
+      -- | @since 1.2.0
       Show
     )
 
@@ -307,9 +319,9 @@ newtype ScopeInfo = ScopeInfo (Vector (Vector (ValT AbstractTy)))
 -- enclosing scope, 2 is the enclosing scope of our enclosing scope, etc. The
 -- \'inner\' 'Vector's are positional lists of argument types.
 --
--- @since 1.0.0
+-- @since 1.2.0
 instance
-  (k ~ A_Lens, a ~ Vector (Vector (ValT AbstractTy)), b ~ Vector (Vector (ValT AbstractTy))) =>
+  (k ~ A_Lens, a ~ Vector (Word32, Vector (ValT AbstractTy)), b ~ Vector (Word32, Vector (ValT AbstractTy))) =>
   LabelOptic "argumentInfo" k ScopeInfo ScopeInfo a b
   where
   {-# INLINEABLE labelOptic #-}
@@ -478,7 +490,7 @@ arg ::
 arg scope index = do
   let scopeAsInt = review asInt scope
   let indexAsInt = review intIndex index
-  lookedUp <- asks (preview (#scopeInfo % #argumentInfo % ix scopeAsInt % ix indexAsInt))
+  lookedUp <- asks (preview (#scopeInfo % #argumentInfo % ix scopeAsInt %  _2 % ix indexAsInt))
   case lookedUp of
     Nothing -> throwError . NoSuchArgument scope $ index
     Just t -> pure . Arg scope index $ t
@@ -569,29 +581,25 @@ lam ::
   CompT AbstractTy ->
   m Ref ->
   m Id
-lam expectedT@(CompT _ (CompTBody xs)) bodyComp = do
+lam expectedT@(CompT cnt (CompTBody xs)) bodyComp = do
   let (args, resultT) = NonEmpty.unsnoc xs
-  bodyRef <- local (over (#scopeInfo % #argumentInfo) (Vector.cons args)) bodyComp
+      cntW = view wordCount cnt
+  bodyRef <- local (over (#scopeInfo % #argumentInfo) (Vector.cons (cntW,args))) bodyComp
   case bodyRef of
     AnArg (Arg _ _ argTy) -> do
-      let argTy' = decDb argTy
-      if argTy' == resultT
+      if argTy == resultT
         then refTo . ACompNode expectedT . LamInternal $ bodyRef
-        else throwError . WrongReturnType resultT $ argTy'
+        else throwError . WrongReturnType resultT $ argTy
     AnId bodyId ->
       lookupRef bodyId >>= \case
         Nothing -> throwError . BrokenIdReference $ bodyId
         -- This unifies with anything, so we're fine
         Just AnError -> refTo . ACompNode expectedT . LamInternal . AnId $ bodyId
         Just (AValNode ty _) -> do
-          let tyFixed = decDb ty
-          if tyFixed == resultT
+          if ty == resultT
             then refTo . ACompNode expectedT . LamInternal . AnId $ bodyId
-            else throwError . WrongReturnType resultT $ tyFixed
+            else throwError . WrongReturnType resultT $ ty
         Just (ACompNode t _) -> throwError $ LambdaResultsInCompType t
-  where
-    decDb :: ValT AbstractTy -> ValT AbstractTy
-    decDb = mapValT (\case Abstraction (BoundAt (S Z) argPos) -> Abstraction (BoundAt Z argPos); other -> other)
 
 -- | Construct the error node.
 --
@@ -610,29 +618,63 @@ err = refTo AnError
 -- * Too many or too few arguments
 -- * Not a computation type for 'Id' argument
 -- * Not value types for 'Ref's
+-- * Renaming failures (likely due to a malformed function or argument type)
 --
--- @since 1.0.0
+-- @since 1.2.0
 app ::
   forall (m :: Type -> Type).
   (MonadHashCons Id ASGNode m, MonadError CovenantTypeError m, MonadReader ASGEnv m) =>
   Id ->
   Vector Ref ->
+  Vector (Wedge BoundTyVar (ValT Void)) ->
   m Id
-app fId argRefs = do
+app fId argRefs instTys = do
   lookedUp <- typeId fId
+  let rawSubs = mkSubstitutions instTys
+  subs <- renameSubs rawSubs
+  scopeInfo <- askScope
   case lookedUp of
-    CompNodeType fT -> case runRenameM . renameCompT $ fT of
+    CompNodeType fT -> case runRenameM scopeInfo . renameCompT $ fT of
       Left err' -> throwError . RenameFunctionFailed fT $ err'
       Right renamedFT -> do
+        instantiatedFT <- instantiate subs renamedFT
         renamedArgs <- traverse renameArg argRefs
         tyDict <- asks (view #datatypeInfo)
-        result <- either (throwError . UnificationError) pure $ checkApp tyDict renamedFT (Vector.toList renamedArgs)
-        let restored = undoRename result
+        result <- either (throwError . UnificationError) pure $ checkApp tyDict instantiatedFT (Vector.toList renamedArgs)
+        restored <- undoRenameM result
         checkEncodingWithInfo tyDict restored
         refTo . AValNode restored . AppInternal fId $ argRefs
     ValNodeType t -> throwError . ApplyToValType $ t
     ErrorNodeType -> throwError ApplyToError
+  where
+    mkSubstitutions :: Vector (Wedge BoundTyVar (ValT Void)) -> [(Index "tyvar", ValT AbstractTy)]
+    mkSubstitutions =
+      Vector.ifoldl'
+        ( \acc (fromJust . preview intIndex  -> i) w ->
+            wedge
+              acc
+              (\(BoundTyVar dbIx posIx) -> (i, tyvar dbIx posIx) : acc)
+              (\v -> (i, vacuous v) : acc)
+              w
+        )
+        []
 
+    renameSubs :: [(Index "tyvar", ValT AbstractTy)] -> m [(Index "tyvar", ValT Renamed)]
+    renameSubs subs =
+      askScope >>= \scope -> case traverse (traverse (runRenameM scope . renameValT)) subs of
+        Left err' -> throwError $ FailedToRenameInstantiation err'
+        Right res -> pure res
+
+    instantiate :: [(Index "tyvar", ValT Renamed)] -> CompT Renamed -> m (CompT Renamed)
+    instantiate [] fn = pure fn
+    instantiate subs fn = do
+      instantiated <- liftUnifyM . fixUp $ foldr (\(i, t) f -> substitute i t f) (ThunkT fn) subs
+      case instantiated of
+        ThunkT res -> pure res
+        other ->
+          throwError . UnificationError . ImpossibleHappened $
+            "Impossible happened: Result of tyvar instantiation should be a thunk, but is: "
+              <> T.pack (show other)
 -- | Construct a node corresponding to the given constant.
 --
 -- @since 1.0.0
@@ -725,13 +767,14 @@ cata rAlg rVal =
 
 renameArg ::
   forall (m :: Type -> Type).
-  (MonadHashCons Id ASGNode m, MonadError CovenantTypeError m) =>
+  (MonadHashCons Id ASGNode m, MonadError CovenantTypeError m, MonadReader ASGEnv m) =>
   Ref ->
   m (Maybe (ValT Renamed))
 renameArg r =
+  askScope >>= \scope ->
   typeRef r >>= \case
     CompNodeType t -> throwError . ApplyCompType $ t
-    ValNodeType t -> case runRenameM . renameValT $ t of
+    ValNodeType t -> case runRenameM scope . renameValT $ t of
       Left err' -> throwError . RenameArgumentFailed t $ err'
       Right renamed -> pure . Just $ renamed
     ErrorNodeType -> pure Nothing
@@ -752,15 +795,15 @@ tryApply ::
   CompT AbstractTy ->
   ValT AbstractTy ->
   m (ValT AbstractTy)
-tryApply algebraT argT = case runRenameM . renameCompT $ algebraT of
+tryApply algebraT argT = askScope >>= \scope -> case runRenameM scope. renameCompT $ algebraT of
   Left err' -> throwError . RenameFunctionFailed algebraT $ err'
-  Right renamedAlgebraT -> case runRenameM . renameValT $ argT of
+  Right renamedAlgebraT -> case runRenameM scope . renameValT $ argT of
     Left err' -> throwError . RenameArgumentFailed argT $ err'
     Right renamedArgT -> do
       tyDict <- asks (view #datatypeInfo)
       case checkApp tyDict renamedAlgebraT [Just renamedArgT] of
         Left err' -> throwError . UnificationError $ err'
-        Right resultT -> pure . undoRename $ resultT
+        Right resultT -> undoRenameM  resultT
 
 -- Putting this here to reduce chance of annoying manual merge (will move later)
 
@@ -786,8 +829,50 @@ boundTyVar ::
   m BoundTyVar
 boundTyVar scope index = do
   let scopeAsInt = review asInt scope
-  let indexAsInt = review intIndex index
-  tyVarInScope <- asks (isJust . preview (#scopeInfo % #argumentInfo % ix scopeAsInt % ix indexAsInt))
+      indexAsWord :: Word32
+      indexAsWord = fromIntegral $ review intIndex index
+  tyVarInScope <-
+    asks (preview (#scopeInfo % #argumentInfo % ix scopeAsInt % _1)) >>= \case
+      Nothing -> pure False
+      Just varsBoundAtScope ->
+        -- varsBoundAtScope is the count of the CompT binding context verbatim
+        if varsBoundAtScope <= 0
+          then pure False
+          else pure $ indexAsWord <= (varsBoundAtScope - 1)
   if tyVarInScope
     then pure (BoundTyVar scope index)
     else throwError $ OutOfScopeTyVar scope index
+
+-- Helper to avoid having to manually catch and rethrow the error
+undoRenameM ::
+  forall (m :: Type -> Type).
+  (MonadError CovenantTypeError m, MonadReader ASGEnv m) =>
+  ValT Renamed ->
+  m (ValT AbstractTy)
+undoRenameM val = do
+  scope <- asks (fmap fst . view (#scopeInfo % #argumentInfo))
+  case undoRename scope val of
+    Left err' -> throwError $ UndoRenameFailure err'
+    Right renamed -> pure renamed
+
+-- To avoid annoying code duplication
+
+askScope ::
+  forall (m :: Type -> Type).
+  (MonadReader ASGEnv m) =>
+  m (Vector Word32)
+askScope = asks (fmap fst . view (#scopeInfo % #argumentInfo))
+
+
+-- Runs a UnifyM computation in our abstract monad. Again, largely to avoid superfluous code
+-- duplication.
+liftUnifyM ::
+  forall (m :: Type -> Type) (a :: Type).
+  (MonadHashCons Id ASGNode m, MonadError CovenantTypeError m, MonadReader ASGEnv m) =>
+  UnifyM a ->
+  m a
+liftUnifyM act = do
+  tyDict <- asks (view #datatypeInfo)
+  case runUnifyM tyDict act of
+    Left e -> throwError $ UnificationError e
+    Right res -> pure res

@@ -292,7 +292,7 @@ mkRenameProp ::
   Property
 mkRenameProp typingFun = forAll arbitrary $ \f ->
   let t = typingFun f
-      result = runRenameM . renameCompT $ t
+      result = runRenameM mempty . renameCompT $ t
    in case result of
         Left err -> counterexample (show err) False
         Right renamed -> property $ liftEq eqRenamedVar t renamed
@@ -309,7 +309,7 @@ withRenamedComp ::
   CompT AbstractTy ->
   (CompT Renamed -> IO ()) ->
   IO ()
-withRenamedComp t f = case runRenameM . renameCompT $ t of
+withRenamedComp t f = case runRenameM mempty . renameCompT $ t of
   Left err -> assertFailure $ "Could not rename: " <> show err
   Right t' -> f t'
 
@@ -319,7 +319,7 @@ withRenamedVals ::
   t (ValT AbstractTy) ->
   (t (ValT Renamed) -> IO ()) ->
   IO ()
-withRenamedVals vals f = case runRenameM . traverse renameValT $ vals of
+withRenamedVals vals f = case runRenameM mempty . traverse renameValT $ vals of
   Left err -> assertFailure $ "Could not rename: " <> show err
   Right vals' -> f vals'
 
