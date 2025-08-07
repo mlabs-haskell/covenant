@@ -96,7 +96,6 @@ common bench-lang
     -rtsopts
     -with-rtsopts=-N
 
-
 -- Primary library
 library
   import: lang

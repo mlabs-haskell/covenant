@@ -432,8 +432,6 @@ newLamTest2 = case runASGBuilder tyAppTestDatatypes fn of
           :--:> Datatype "Maybe" (Vector.singleton $ tyvar Z ix0)
           :--:> ReturnT (tyvar Z ix1)
 
-
-
 -- Helpers
 
 failWrongTypeError :: CovenantTypeError -> Property

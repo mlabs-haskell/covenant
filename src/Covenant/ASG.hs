@@ -1,4 +1,5 @@
-{-# LANGUAGE PatternSynonyms, ViewPatterns #-}
+{-# LANGUAGE PatternSynonyms #-}
+{-# LANGUAGE ViewPatterns #-}
 
 -- |
 -- Module: Covenant.ASG
@@ -185,11 +186,11 @@ import Covenant.Internal.Unification
         NoBBForm,
         NoDatatypeInfo
       ),
-    checkApp,
     UnifyM,
-    runUnifyM,
+    checkApp,
     fixUp,
-    substitute
+    runUnifyM,
+    substitute,
   )
 import Covenant.Prim
   ( OneArgFunc,
@@ -210,9 +211,13 @@ import Data.Kind (Type)
 import Data.Map.Strict (Map)
 import Data.Map.Strict qualified as Map
 import Data.Maybe (fromJust)
+import Data.Text qualified as T
 import Data.Vector (Vector)
 import Data.Vector qualified as Vector
 import Data.Vector.NonEmpty qualified as NonEmpty
+import Data.Void (Void, vacuous)
+import Data.Wedge (Wedge, wedge)
+import Data.Word (Word32)
 import Optics.Core
   ( A_Lens,
     LabelOptic (labelOptic),
@@ -225,12 +230,8 @@ import Optics.Core
     view,
     (%),
     _1,
-    _2
+    _2,
   )
-import Data.Wedge (Wedge, wedge)
-import Data.Void (Void, vacuous)
-import Data.Word (Word32)
-import qualified Data.Text as T
 
 -- | A fully-assembled Covenant ASG.
 --
@@ -490,7 +491,7 @@ arg ::
 arg scope index = do
   let scopeAsInt = review asInt scope
   let indexAsInt = review intIndex index
-  lookedUp <- asks (preview (#scopeInfo % #argumentInfo % ix scopeAsInt %  _2 % ix indexAsInt))
+  lookedUp <- asks (preview (#scopeInfo % #argumentInfo % ix scopeAsInt % _2 % ix indexAsInt))
   case lookedUp of
     Nothing -> throwError . NoSuchArgument scope $ index
     Just t -> pure . Arg scope index $ t
@@ -584,7 +585,7 @@ lam ::
 lam expectedT@(CompT cnt (CompTBody xs)) bodyComp = do
   let (args, resultT) = NonEmpty.unsnoc xs
       cntW = view wordCount cnt
-  bodyRef <- local (over (#scopeInfo % #argumentInfo) (Vector.cons (cntW,args))) bodyComp
+  bodyRef <- local (over (#scopeInfo % #argumentInfo) (Vector.cons (cntW, args))) bodyComp
   case bodyRef of
     AnArg (Arg _ _ argTy) -> do
       if argTy == resultT
@@ -650,7 +651,7 @@ app fId argRefs instTys = do
     mkSubstitutions :: Vector (Wedge BoundTyVar (ValT Void)) -> [(Index "tyvar", ValT AbstractTy)]
     mkSubstitutions =
       Vector.ifoldl'
-        ( \acc (fromJust . preview intIndex  -> i) w ->
+        ( \acc (fromJust . preview intIndex -> i) w ->
             wedge
               acc
               (\(BoundTyVar dbIx posIx) -> (i, tyvar dbIx posIx) : acc)
@@ -675,6 +676,7 @@ app fId argRefs instTys = do
           throwError . UnificationError . ImpossibleHappened $
             "Impossible happened: Result of tyvar instantiation should be a thunk, but is: "
               <> T.pack (show other)
+
 -- | Construct a node corresponding to the given constant.
 --
 -- @since 1.0.0
@@ -772,12 +774,12 @@ renameArg ::
   m (Maybe (ValT Renamed))
 renameArg r =
   askScope >>= \scope ->
-  typeRef r >>= \case
-    CompNodeType t -> throwError . ApplyCompType $ t
-    ValNodeType t -> case runRenameM scope . renameValT $ t of
-      Left err' -> throwError . RenameArgumentFailed t $ err'
-      Right renamed -> pure . Just $ renamed
-    ErrorNodeType -> pure Nothing
+    typeRef r >>= \case
+      CompNodeType t -> throwError . ApplyCompType $ t
+      ValNodeType t -> case runRenameM scope . renameValT $ t of
+        Left err' -> throwError . RenameArgumentFailed t $ err'
+        Right renamed -> pure . Just $ renamed
+      ErrorNodeType -> pure Nothing
 
 checkEncodingWithInfo ::
   forall (a :: Type) (m :: Type -> Type).
@@ -795,15 +797,16 @@ tryApply ::
   CompT AbstractTy ->
   ValT AbstractTy ->
   m (ValT AbstractTy)
-tryApply algebraT argT = askScope >>= \scope -> case runRenameM scope. renameCompT $ algebraT of
-  Left err' -> throwError . RenameFunctionFailed algebraT $ err'
-  Right renamedAlgebraT -> case runRenameM scope . renameValT $ argT of
-    Left err' -> throwError . RenameArgumentFailed argT $ err'
-    Right renamedArgT -> do
-      tyDict <- asks (view #datatypeInfo)
-      case checkApp tyDict renamedAlgebraT [Just renamedArgT] of
-        Left err' -> throwError . UnificationError $ err'
-        Right resultT -> undoRenameM  resultT
+tryApply algebraT argT =
+  askScope >>= \scope -> case runRenameM scope . renameCompT $ algebraT of
+    Left err' -> throwError . RenameFunctionFailed algebraT $ err'
+    Right renamedAlgebraT -> case runRenameM scope . renameValT $ argT of
+      Left err' -> throwError . RenameArgumentFailed argT $ err'
+      Right renamedArgT -> do
+        tyDict <- asks (view #datatypeInfo)
+        case checkApp tyDict renamedAlgebraT [Just renamedArgT] of
+          Left err' -> throwError . UnificationError $ err'
+          Right resultT -> undoRenameM resultT
 
 -- Putting this here to reduce chance of annoying manual merge (will move later)
 
@@ -862,7 +865,6 @@ askScope ::
   (MonadReader ASGEnv m) =>
   m (Vector Word32)
 askScope = asks (fmap fst . view (#scopeInfo % #argumentInfo))
-
 
 -- Runs a UnifyM computation in our abstract monad. Again, largely to avoid superfluous code
 -- duplication.

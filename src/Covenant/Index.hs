@@ -22,7 +22,7 @@ module Covenant.Index
     count2,
     ix3,
     count3,
-    wordCount
+    wordCount,
   )
 where
 
@@ -32,8 +32,8 @@ import Data.List.NonEmpty (NonEmpty)
 import Data.Semigroup (Semigroup (sconcat, stimes), Sum (Sum))
 import Data.Word (Word32)
 import GHC.TypeLits (Symbol)
+import Optics.Core (lens, type Lens')
 import Optics.Prism (Prism', prism)
-import Optics.Core (type Lens', lens)
 import Test.QuickCheck (Arbitrary)
 
 -- | A positional index, starting from zero. The label allows distinguishing
@@ -153,7 +153,6 @@ intCount =
 -- than a Prism if we're working with Word32s
 wordCount :: forall (ofWhat :: Symbol). Lens' (Count ofWhat) Word32
 wordCount = lens (\(Count x) -> x) (\_ w -> Count w)
-
 
 -- | Helper for a count of zero items.
 --

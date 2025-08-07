@@ -38,7 +38,7 @@ import Covenant.DeBruijn (DeBruijn (Z), asInt)
 import Covenant.Index (Count, Index, intIndex, wordCount)
 import Covenant.Internal.Type
   ( AbstractTy (BoundAt),
-    CompT (CompT), 
+    CompT (CompT),
     CompTBody (CompTBody),
     Constructor (Constructor),
     DataDeclaration (DataDeclaration, OpaqueData),
@@ -293,16 +293,16 @@ renameCompT (CompT abses (CompTBody xs)) = RenameM $ do
 --
 -- @since 1.0.0
 renameValT :: ValT AbstractTy -> RenameM (ValT Renamed)
-renameValT v =  case v of
-      Abstraction t -> Abstraction <$> renameAbstraction t
-      ThunkT t -> ThunkT <$> renameCompT t
-      BuiltinFlat t -> pure . BuiltinFlat $ t
-      -- Assumes kind-checking has occurred
-      Datatype tn xs -> RenameM $ do
-        -- We don't step or un-step the scope here b/c a TyCon which appears as a ValT _cannot_ bind variables.
-        -- This Vector here doesn't represent a function, but a product, so we there is no "return" type to treat specially (I think!)
-        renamedXS <- Vector.mapM (coerce . renameValT) xs
-        pure $ Datatype tn renamedXS
+renameValT v = case v of
+  Abstraction t -> Abstraction <$> renameAbstraction t
+  ThunkT t -> ThunkT <$> renameCompT t
+  BuiltinFlat t -> pure . BuiltinFlat $ t
+  -- Assumes kind-checking has occurred
+  Datatype tn xs -> RenameM $ do
+    -- We don't step or un-step the scope here b/c a TyCon which appears as a ValT _cannot_ bind variables.
+    -- This Vector here doesn't represent a function, but a product, so we there is no "return" type to treat specially (I think!)
+    renamedXS <- Vector.mapM (coerce . renameValT) xs
+    pure $ Datatype tn renamedXS
 
 -- @since 1.1.0
 renameDataDecl :: DataDeclaration AbstractTy -> RenameM (DataDeclaration Renamed)
@@ -338,13 +338,13 @@ undoRename scope t = runUnRenameM (go t) scope
           Rigid trueLevel index -> do
             db <- unTrueLevel trueLevel
             pure $ BoundAt db index
-          w@(Wildcard{}) -> throwError $ UnRenameWildCard w -- error "Wildcard" --  BoundAt <$> trueLevelToDB trueLevel <*> pure index
+          w@(Wildcard {}) -> throwError $ UnRenameWildCard w -- error "Wildcard" --  BoundAt <$> trueLevelToDB trueLevel <*> pure index
           Unifiable index -> pure $ BoundAt Z index
       ThunkT (CompT abses (CompTBody xs)) ->
         ThunkT
-        . CompT abses
-        . CompTBody
-        <$> local (over #scopeInfo (Vector.cons $ view wordCount abses)) (traverse go xs)
+          . CompT abses
+          . CompTBody
+          <$> local (over #scopeInfo (Vector.cons $ view wordCount abses)) (traverse go xs)
       BuiltinFlat t' -> pure . BuiltinFlat $ t'
       Datatype tn args -> Datatype tn <$> traverse go args
 
@@ -366,11 +366,11 @@ renameAbstraction (BoundAt scope index) = RenameM $ do
   case scopeInfo of
     Nothing -> throwError . InvalidScopeReference trueLevel $ index
     Just (occursTracker, uniqueScopeId) ->
-        if
-          | not (checkVarIxExists asIntIx occursTracker) -> throwError . InvalidAbstractionReference trueLevel $ index
-          | trueLevel == 0 -> pure $ Unifiable index
-          | trueLevel < 0 -> pure $ Rigid trueLevel index
-          | otherwise -> pure $ Wildcard uniqueScopeId trueLevel index
+      if
+        | not (checkVarIxExists asIntIx occursTracker) -> throwError . InvalidAbstractionReference trueLevel $ index
+        | trueLevel == 0 -> pure $ Unifiable index
+        | trueLevel < 0 -> pure $ Rigid trueLevel index
+        | otherwise -> pure $ Wildcard uniqueScopeId trueLevel index
   where
     -- NOTE: The second argument here is actually a *count*, so we have to be sure to decrement it by one to check that
     --       that the first arg refers to a valid index

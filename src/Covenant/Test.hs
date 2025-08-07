@@ -112,7 +112,8 @@ import Covenant.Internal.Rename
     renameCompT,
     renameDataDecl,
     renameValT,
-    runRenameM, undoRename,
+    runRenameM,
+    undoRename,
   )
 import Covenant.Internal.Strategy
   ( DataEncoding (PlutusData, SOP),
@@ -833,7 +834,6 @@ shrinkDataDecls decls = liftShrink shrinkDataDecl decls <|> (shrinkDataDecl <$> 
 
 genDataList :: forall (a :: Type). DataGenM a -> Gen [a]
 genDataList = runDataGenM . GT.listOf
-
 
 -- For convenience. Don't remove this, necessary for efficient development on future work
 unsafeRename :: forall (a :: Type). RenameM a -> a
