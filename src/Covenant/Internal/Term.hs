@@ -25,11 +25,14 @@ import Covenant.Internal.Type
   ( AbstractTy,
     BuiltinFlatT,
     CompT,
+    TyName,
     ValT,
   )
 import Covenant.Internal.Unification (TypeAppError)
 import Covenant.Prim (OneArgFunc, SixArgFunc, ThreeArgFunc, TwoArgFunc)
+import Covenant.Type (ConstructorName, PlutusDataConstructor, Renamed)
 import Data.Kind (Type)
+import Data.Set qualified as Set
 import Data.Vector (Vector)
 import Data.Word (Word64)
 
@@ -159,6 +162,35 @@ data CovenantTypeError
   | -- | With recent changes, undoRename is no longer deterministic, and we might get an error, which we have to "lift"
     -- @since 1.2.0
     UndoRenameFailure UnRenameError
+  | -- | We tried to lookup the DatatypeInfo corresponding to a TyName and came up empty handed
+    -- @since 1.2.0
+    TypeDoesNotExist TyName
+  | -- | We tried to rename a DatatypeInfo and failed. For now, only Intro Form helpers throw this but
+    --   something else might in the future so I'm keeping the name generic.
+    -- @since 1.2.0
+    DatatypeInfoRenameError RenameError
+  | -- | We tried to lookup a constructor for a given type. The type exists, but the constructor does not.
+    -- @since 1.2.0
+    ConstructorDoesNotExistForType TyName ConstructorName
+  | -- | When using the helper function to construct an introduction form, the type and constructor exist but the
+    --   number of fields provided as an argument does not match the number of declared fields.
+    --   The `Int` is the *incorrect* number of *supplied* fields
+    -- @since 1.2.0
+    IntroFormWrongNumArgs TyName ConstructorName Int
+  | -- | The user passed an error node as an argument to a datatype into form.
+    --   While we could theoretically handle this, there doesn't seem to be a good reason to do so, and passing
+    --   such a node is almost certainly a mistake.
+    --   We just return the arguments to `dataConstructor` since that's all we can really do.
+    -- @since 1.2.0
+    IntroFormErrorNodeField TyName ConstructorName (Vector Ref)
+  | -- | The user tried to construct an introduction form using a Plutus Data constructor not found in the
+    --   opaque datatype declaration
+    -- @since 1.2.0
+    UndeclaredOpaquePlutusDataCtor (Set.Set PlutusDataConstructor) ConstructorName
+  | -- | The user tried to construct an introduction form with a valid Plutus Data constructor, but supplied a ref
+    --   to a field of the wrong type.
+    -- @since 1.2.0
+    InvalidOpaqueField (Set.Set PlutusDataConstructor) ConstructorName [ValT Renamed]
   deriving stock
     ( -- | @since 1.0.0
       Eq,
@@ -276,6 +308,8 @@ data ValNodeInfo
   | ThunkInternal Id
   | -- | @since 1.1.0
     CataInternal Ref Ref
+  | -- | @since 1.2.0
+    DataConstructorInternal TyName ConstructorName (Vector Ref)
   deriving stock
     ( -- | @since 1.0.0
       Eq,

@@ -35,6 +35,7 @@ import Covenant.ASG
     builtin1,
     builtin2,
     builtin3,
+    dataConstructor,
     err,
     force,
     lam,
@@ -43,7 +44,7 @@ import Covenant.ASG
     thunk,
     topLevelNode,
   )
-import Covenant.Constant (typeConstant)
+import Covenant.Constant (AConstant (AUnit), typeConstant)
 import Covenant.DeBruijn (DeBruijn (S, Z))
 import Covenant.Index (Index, intIndex, ix0, ix1)
 import Covenant.Prim
@@ -51,12 +52,19 @@ import Covenant.Prim
     typeThreeArgFunc,
     typeTwoArgFunc,
   )
-import Covenant.Test (Concrete (Concrete), tyAppTestDatatypes)
+import Covenant.Test
+  ( Concrete (Concrete),
+    DebugASGBuilder,
+    debugASGBuilder,
+    tyAppTestDatatypes,
+    typeIdTest,
+  )
 import Covenant.Type
   ( AbstractTy,
+    BuiltinFlatT (UnitT),
     CompT (Comp0, Comp1, Comp2, CompN),
     CompTBody (ArgsAndResult, ReturnT, (:--:>)),
-    ValT (Datatype, ThunkT),
+    ValT (BuiltinFlat, Datatype, ThunkT),
     arity,
     tyvar,
   )
@@ -66,6 +74,7 @@ import Data.Kind (Type)
 import Data.Map qualified as M
 import Data.Maybe (fromJust)
 import Data.Vector qualified as Vector
+import Data.Wedge (Wedge (Nowhere), wedgeLeft)
 import Optics.Core (preview, review)
 import Test.QuickCheck
   ( Gen,
@@ -80,7 +89,7 @@ import Test.QuickCheck
     shrink,
     (===),
   )
-import Test.Tasty (adjustOption, defaultMain, testGroup)
+import Test.Tasty (TestTree, adjustOption, defaultMain, testGroup)
 import Test.Tasty.HUnit (Assertion, assertEqual, assertFailure, testCase)
 import Test.Tasty.QuickCheck (QuickCheckTests, testProperty)
 
@@ -107,7 +116,11 @@ main =
       testCase "db indices are well behaved (non-datatype case)" newLamTest1,
       testCase "db indices are well behaved (datatype case)" newLamTest2,
       testCase "calling down an in-scope tyvar works" boundTyVarHappy,
-      testCase "calling down an out-of-scope tyvar fails" boundTyVarShouldFail
+      testCase "calling down an out-of-scope tyvar fails" boundTyVarShouldFail,
+      nothingIntro,
+      justConcreteIntro,
+      justRigidIntro,
+      justNothingIntro
     ]
   where
     moreTests :: QuickCheckTests -> QuickCheckTests
@@ -431,6 +444,79 @@ newLamTest2 = case runASGBuilder tyAppTestDatatypes fn of
         ThunkT (Comp0 $ Datatype "Maybe" (Vector.singleton $ tyvar (S Z) ix0) :--:> ReturnT (tyvar (S Z) ix1))
           :--:> Datatype "Maybe" (Vector.singleton $ tyvar Z ix0)
           :--:> ReturnT (tyvar Z ix1)
+
+-- Intro form tests
+
+nothingIntro :: TestTree
+nothingIntro =
+  runIntroFormTest "nothing" expectNothingThunk $
+    dataConstructor "Maybe" "Nothing" mempty >>= typeIdTest
+  where
+    expectNothingThunk :: ValT AbstractTy
+    expectNothingThunk = ThunkT . Comp1 . ReturnT $ Datatype "Maybe" (Vector.fromList [tyvar Z ix0])
+
+justConcreteIntro :: TestTree
+justConcreteIntro = runIntroFormTest "justConcreteIntro" expected $ do
+  argRef <- AnId <$> lit AUnit
+  dataConstructor "Maybe" "Just" (Vector.singleton argRef) >>= typeIdTest
+  where
+    expected :: ValT AbstractTy
+    expected = ThunkT . Comp0 . ReturnT $ Datatype "Maybe" (Vector.singleton $ BuiltinFlat UnitT)
+
+justRigidIntro :: TestTree
+justRigidIntro = runIntroFormTest "justRigidIntro" expected $ do
+  lamId <- lam lamTy $ do
+    arg1 <- AnArg <$> arg Z ix0
+    justRigid <- dataConstructor "Maybe" "Just" (Vector.singleton arg1)
+    pure (AnId justRigid)
+  lamThunked <- thunk lamId
+  typeIdTest lamThunked
+  where
+    lamTy :: CompT AbstractTy
+    lamTy =
+      Comp1 $
+        tyvar Z ix0
+          :--:> ReturnT
+            ( ThunkT
+                . Comp0
+                . ReturnT
+                $ Datatype "Maybe"
+                $ Vector.singleton (tyvar (S Z) ix0)
+            )
+
+    expected :: ValT AbstractTy
+    expected = ThunkT lamTy
+
+justNothingIntro :: TestTree
+justNothingIntro = runIntroFormTest "justNothingIntro" expectedThunk $ do
+  thunkL <- lam expectedComp $ do
+    nothingThunk <- dataConstructor "Maybe" "Nothing" mempty
+    var <- boundTyVar Z ix0
+    nothingForced <- force (AnId nothingThunk)
+    nothingApplied <- app nothingForced mempty (Vector.singleton . wedgeLeft . Just $ var)
+    justNothing <- dataConstructor "Maybe" "Just" (Vector.singleton (AnId nothingApplied))
+    justNothingForced <- force (AnId justNothing)
+    justNothingApplied <- app justNothingForced mempty (Vector.singleton Nowhere)
+    pure (AnId justNothingApplied)
+  typeIdTest thunkL
+  where
+    expectedComp :: CompT AbstractTy
+    expectedComp =
+      Comp1
+        . ReturnT
+        . Datatype "Maybe"
+        . Vector.singleton
+        . Datatype "Maybe"
+        $ Vector.singleton
+        $ tyvar Z ix0
+
+    expectedThunk :: ValT AbstractTy
+    expectedThunk = ThunkT expectedComp
+
+runIntroFormTest :: String -> ValT AbstractTy -> DebugASGBuilder (ValT AbstractTy) -> TestTree
+runIntroFormTest nm expectedTy act = testCase nm $ case debugASGBuilder tyAppTestDatatypes act of
+  Left err' -> assertFailure ("ASG Error: " <> show err')
+  Right actualTy -> assertEqual nm expectedTy actualTy
 
 -- Helpers
 
