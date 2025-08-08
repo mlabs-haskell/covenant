@@ -32,7 +32,7 @@ import Data.List.NonEmpty (NonEmpty)
 import Data.Semigroup (Semigroup (sconcat, stimes), Sum (Sum))
 import Data.Word (Word32)
 import GHC.TypeLits (Symbol)
-import Optics.Core (lens, type Lens')
+import Optics.Core (lens, Lens')
 import Optics.Prism (Prism', prism)
 import Test.QuickCheck (Arbitrary)
 

@@ -308,9 +308,9 @@ instance
 -- @since 1.2.0
 newtype ScopeInfo = ScopeInfo (Vector (Word32, Vector (ValT AbstractTy)))
   deriving stock
-    ( -- | @since 1.2.0
+    ( -- | @since 1.0.0
       Eq,
-      -- | @since 1.2.0
+      -- | @since 1.0.0
       Show
     )
 
@@ -651,8 +651,9 @@ app fId argRefs instTys = do
     mkSubstitutions :: Vector (Wedge BoundTyVar (ValT Void)) -> [(Index "tyvar", ValT AbstractTy)]
     mkSubstitutions =
       Vector.ifoldl'
-        ( \acc (fromJust . preview intIndex -> i) w ->
-            wedge
+        ( \acc i' w ->
+            let i = fromJust . preview intIndex $ i'
+            in wedge
               acc
               (\(BoundTyVar dbIx posIx) -> (i, tyvar dbIx posIx) : acc)
               (\v -> (i, vacuous v) : acc)
@@ -841,7 +842,7 @@ boundTyVar scope index = do
         -- varsBoundAtScope is the count of the CompT binding context verbatim
         if varsBoundAtScope <= 0
           then pure False
-          else pure $ indexAsWord <= (varsBoundAtScope - 1)
+          else pure $ indexAsWord < varsBoundAtScope
   if tyVarInScope
     then pure (BoundTyVar scope index)
     else throwError $ OutOfScopeTyVar scope index

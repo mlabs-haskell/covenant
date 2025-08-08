@@ -20,7 +20,7 @@ import Covenant.Constant (AConstant)
 import Covenant.DeBruijn (DeBruijn)
 import Covenant.Index (Index)
 import Covenant.Internal.KindCheck (EncodingArgErr)
-import Covenant.Internal.Rename (RenameError)
+import Covenant.Internal.Rename (RenameError, UnRenameError)
 import Covenant.Internal.Type
   ( AbstractTy,
     BuiltinFlatT,
@@ -150,14 +150,15 @@ data CovenantTypeError
     -- @since 1.1.0
     CataUnsuitable (CompT AbstractTy) (ValT AbstractTy)
   | -- | Someone attempted to construct a tyvar using a DB index or argument position
-    --   which refers to a scope (or argument) that does not exist.
+    --   which refers to a scope (or argument) that does not exist.3
     -- @since 1.2.0
     OutOfScopeTyVar DeBruijn (Index "tyvar")
   | -- | We failed to rename an "instantiation type" supplied to `app`
     -- @since 1.2.0
     FailedToRenameInstantiation RenameError
-  | -- | With recent changes, undoRename is no longer deterministic, and we might get an error, which we have to "lfit"
-    UndoRenameFailure RenameError
+  | -- | With recent changes, undoRename is no longer deterministic, and we might get an error, which we have to "lift"
+    -- @since 1.2.0
+    UndoRenameFailure UnRenameError
   deriving stock
     ( -- | @since 1.0.0
       Eq,
