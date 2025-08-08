@@ -35,15 +35,16 @@ import Covenant.ASG
     builtin1,
     builtin2,
     builtin3,
+    dataConstructor,
     err,
     force,
     lam,
     lit,
     runASGBuilder,
     thunk,
-    topLevelNode, dataConstructor,
+    topLevelNode,
   )
-import Covenant.Constant (typeConstant, AConstant(AUnit))
+import Covenant.Constant (AConstant (AUnit), typeConstant)
 import Covenant.DeBruijn (DeBruijn (S, Z))
 import Covenant.Index (Index, intIndex, ix0, ix1)
 import Covenant.Prim
@@ -51,15 +52,16 @@ import Covenant.Prim
     typeThreeArgFunc,
     typeTwoArgFunc,
   )
-import Covenant.Test (Concrete (Concrete), tyAppTestDatatypes, DebugASGBuilder, debugASGBuilder, typeIdTest)
+import Covenant.Test (Concrete (Concrete), DebugASGBuilder, debugASGBuilder, tyAppTestDatatypes, typeIdTest)
 import Covenant.Type
-    ( AbstractTy,
-      CompT(Comp0, Comp1, Comp2, CompN),
-      CompTBody(ArgsAndResult, ReturnT, (:--:>)),
-      ValT(Datatype, ThunkT, BuiltinFlat),
-      arity,
-      tyvar,
-      BuiltinFlatT(UnitT) )
+  ( AbstractTy,
+    BuiltinFlatT (UnitT),
+    CompT (Comp0, Comp1, Comp2, CompN),
+    CompTBody (ArgsAndResult, ReturnT, (:--:>)),
+    ValT (BuiltinFlat, Datatype, ThunkT),
+    arity,
+    tyvar,
+  )
 import Covenant.Util (pattern ConsV, pattern NilV)
 import Data.Coerce (coerce)
 import Data.Kind (Type)
@@ -81,7 +83,7 @@ import Test.QuickCheck
     shrink,
     (===),
   )
-import Test.Tasty (adjustOption, defaultMain, testGroup, TestTree)
+import Test.Tasty (TestTree, adjustOption, defaultMain, testGroup)
 import Test.Tasty.HUnit (Assertion, assertEqual, assertFailure, testCase)
 import Test.Tasty.QuickCheck (QuickCheckTests, testProperty)
 
@@ -509,7 +511,6 @@ runIntroFormTest :: String -> ValT AbstractTy -> DebugASGBuilder (ValT AbstractT
 runIntroFormTest nm expectedTy act = testCase nm $ case debugASGBuilder tyAppTestDatatypes act of
   Left err' -> assertFailure ("ASG Error: " <> show err')
   Right actualTy -> assertEqual nm expectedTy actualTy
-
 
 -- Helpers
 

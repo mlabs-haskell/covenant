@@ -58,11 +58,10 @@ module Covenant.Test
     -- *** Elimination
     runRenameM,
     undoRename,
-
     -- Misc
-    DebugASGBuilder(..),
+    DebugASGBuilder (..),
     debugASGBuilder,
-    typeIdTest 
+    typeIdTest,
   )
 where
 
@@ -71,6 +70,9 @@ import Data.Foldable (foldl')
 #endif
 import Control.Applicative ((<|>))
 import Control.Monad (void)
+import Control.Monad.Error.Class (MonadError)
+import Control.Monad.HashCons (HashConsT, MonadHashCons, runHashConsT)
+import Control.Monad.Reader (MonadReader, ReaderT, runReaderT)
 import Control.Monad.State.Strict
   ( MonadState (get, put),
     State,
@@ -78,17 +80,14 @@ import Control.Monad.State.Strict
     gets,
     modify,
   )
-import Control.Monad.Error.Class (MonadError)
-import Control.Monad.HashCons (HashConsT, MonadHashCons, runHashConsT)
-import Control.Monad.Reader (MonadReader, ReaderT, runReaderT)
 import Control.Monad.Trans (MonadTrans (lift))
+import Control.Monad.Trans.Except (ExceptT, runExceptT)
+import Covenant.ASG (ASGEnv (ASGEnv), ASGNode, CovenantError (TypeError), CovenantTypeError, Id, ScopeInfo (ScopeInfo))
 import Covenant.Data
   ( DatatypeInfo,
     mkDatatypeInfo,
     noPhantomTyVars,
   )
-import Control.Monad.Trans.Except (ExceptT, runExceptT)
-import Covenant.ASG (ASGEnv (ASGEnv), ASGNode, CovenantError (TypeError), CovenantTypeError, Id, ScopeInfo (ScopeInfo))
 import Covenant.DeBruijn (DeBruijn (Z), asInt)
 import Covenant.Index
   ( Count,
@@ -156,7 +155,7 @@ import Covenant.Type
   )
 import Covenant.Util (prettyStr)
 import Data.Coerce (coerce)
-import Data.Functor.Identity(Identity(runIdentity))
+import Data.Functor.Identity (Identity (runIdentity))
 import Data.Kind (Type)
 import Data.Map.Strict (Map)
 import Data.Map.Strict qualified as M

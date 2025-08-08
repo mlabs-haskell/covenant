@@ -25,15 +25,16 @@ import Covenant.Internal.Type
   ( AbstractTy,
     BuiltinFlatT,
     CompT,
-    ValT, TyName,
+    TyName,
+    ValT,
   )
 import Covenant.Internal.Unification (TypeAppError)
 import Covenant.Prim (OneArgFunc, SixArgFunc, ThreeArgFunc, TwoArgFunc)
+import Covenant.Type (ConstructorName, PlutusDataConstructor, Renamed)
 import Data.Kind (Type)
+import Data.Set qualified as Set
 import Data.Vector (Vector)
 import Data.Word (Word64)
-import Covenant.Type (ConstructorName, PlutusDataConstructor, Renamed)
-import qualified Data.Set as Set
 
 -- | An error that can arise during the construction of an ASG by programmatic
 -- means.

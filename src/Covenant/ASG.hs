@@ -49,7 +49,7 @@ module Covenant.ASG
 
     -- ** Types
     CovenantError (..),
-    ScopeInfo(..),
+    ScopeInfo (..),
     ASGBuilder,
     TypeAppError (..),
     RenameError (..),
@@ -79,13 +79,12 @@ module Covenant.ASG
 
     -- *** Function
     runASGBuilder,
-
     -- only for tests
-    ASGEnv(..),
+    ASGEnv (..),
   )
 where
 
-import Control.Monad (unless, zipWithM, foldM)
+import Control.Monad (foldM, unless, zipWithM)
 import Control.Monad.Except
   ( ExceptT,
     MonadError (throwError),
@@ -105,7 +104,7 @@ import Control.Monad.Reader
 import Covenant.Constant (AConstant, typeConstant)
 import Covenant.Data (DatatypeInfo, mkDatatypeInfo)
 import Covenant.DeBruijn (DeBruijn, asInt)
-import Covenant.Index (Index, intIndex, wordCount, Count, intCount)
+import Covenant.Index (Count, Index, intCount, intIndex, wordCount)
 import Covenant.Internal.KindCheck (checkEncodingArgs)
 import Covenant.Internal.Ledger (ledgerTypes)
 import Covenant.Internal.Rename
@@ -113,9 +112,10 @@ import Covenant.Internal.Rename
       ( InvalidAbstractionReference
       ),
     renameCompT,
+    renameDatatypeInfo,
     renameValT,
     runRenameM,
-    undoRename, renameDatatypeInfo,
+    undoRename,
   )
 import Covenant.Internal.Term
   ( ASGNode (ACompNode, AValNode, AnError),
@@ -146,8 +146,8 @@ import Covenant.Internal.Term
         ForceCompType,
         ForceError,
         ForceNonThunk,
-        IntroFormWrongNumArgs,
         IntroFormErrorNodeField,
+        IntroFormWrongNumArgs,
         InvalidOpaqueField,
         LambdaResultsInCompType,
         LambdaResultsInNonReturn,
@@ -168,7 +168,7 @@ import Covenant.Internal.Term
       ),
     Id,
     Ref (AnArg, AnId),
-    ValNodeInfo (AppInternal, CataInternal, LitInternal, ThunkInternal, DataConstructorInternal),
+    ValNodeInfo (AppInternal, CataInternal, DataConstructorInternal, LitInternal, ThunkInternal),
     typeASGNode,
     typeId,
     typeRef,
@@ -199,8 +199,10 @@ import Covenant.Internal.Unification
     UnifyM,
     checkApp,
     fixUp,
+    reconcile,
     runUnifyM,
-    substitute, unify, reconcile,
+    substitute,
+    unify,
   )
 import Covenant.Prim
   ( OneArgFunc,
@@ -212,7 +214,7 @@ import Covenant.Prim
     typeThreeArgFunc,
     typeTwoArgFunc,
   )
-import Covenant.Type (tyvar, PlutusDataConstructor (PlutusI, PlutusB, PlutusConstr, PlutusList, PlutusMap), Constructor, ConstructorName, DataDeclaration (OpaqueData), ValT (Abstraction), Renamed (Unifiable), CompT (Comp0), CompTBody (ReturnT))
+import Covenant.Type (CompT (Comp0), CompTBody (ReturnT), Constructor, ConstructorName, DataDeclaration (OpaqueData), PlutusDataConstructor (PlutusB, PlutusConstr, PlutusI, PlutusList, PlutusMap), Renamed (Unifiable), ValT (Abstraction), tyvar)
 import Data.Bimap (Bimap)
 import Data.Bimap qualified as Bimap
 import Data.Coerce (coerce)
@@ -222,6 +224,7 @@ import Data.List (find)
 import Data.Map.Strict (Map)
 import Data.Map.Strict qualified as Map
 import Data.Maybe (fromJust)
+import Data.Set qualified as Set
 import Data.Text qualified as T
 import Data.Vector (Vector)
 import Data.Vector qualified as Vector
@@ -233,17 +236,18 @@ import Optics.Core
   ( A_Lens,
     LabelOptic (labelOptic),
     at,
+    folded,
     ix,
     lens,
     over,
     preview,
     review,
+    toListOf,
     view,
     (%),
     _1,
-    _2, toListOf, folded,
+    _2,
   )
-import qualified Data.Set as Set
 
 -- | A fully-assembled Covenant ASG.
 --
@@ -408,7 +412,6 @@ pattern Cata algebraRef valRef <- CataInternal algebraRef valRef
 -- @since 1.2.0
 pattern DataConstructor :: TyName -> ConstructorName -> Vector Ref -> ValNodeInfo
 pattern DataConstructor tyName ctorName fields <- DataConstructorInternal tyName ctorName fields
-
 
 {-# COMPLETE Lit, App, Thunk, Cata #-}
 
@@ -697,7 +700,6 @@ app fId argRefs instTys = do
             "Impossible happened: Result of tyvar instantiation should be a thunk, but is: "
               <> T.pack (show other)
 
-
 dataConstructor ::
   forall (m :: Type -> Type).
   (MonadHashCons Id ASGNode m, MonadError CovenantTypeError m, MonadReader ASGEnv m) =>
@@ -765,10 +767,9 @@ dataConstructor tyName ctorName fields = do
           tyConAbstract = Datatype tyName (Vector.fromList tyConAbstractArgs)
       let tyConConcrete = Map.foldlWithKey' (\acc i t -> substitute i t acc) tyConAbstract subs
       liftUnifyM . fixUp . ThunkT . Comp0 . ReturnT $ tyConConcrete
-     where
-       count = review intCount count'
-       fieldArgs = Vector.toList fieldArgs'
-
+      where
+        count = review intCount count'
+        fieldArgs = Vector.toList fieldArgs'
 
     {- Unifies the declaration fields (which may be abstract) with the supplied fields
        (which will be "concrete", in the sense that "they have to be rigid if they're tyvars").
