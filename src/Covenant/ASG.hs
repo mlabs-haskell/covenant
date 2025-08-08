@@ -214,7 +214,16 @@ import Covenant.Prim
     typeThreeArgFunc,
     typeTwoArgFunc,
   )
-import Covenant.Type (CompT (Comp0), CompTBody (ReturnT), Constructor, ConstructorName, DataDeclaration (OpaqueData), PlutusDataConstructor (PlutusB, PlutusConstr, PlutusI, PlutusList, PlutusMap), Renamed (Unifiable), ValT (Abstraction), tyvar)
+import Covenant.Type
+  (CompT (Comp0),
+   CompTBody (ReturnT),
+   Constructor,
+   ConstructorName,
+   DataDeclaration (OpaqueData),
+   PlutusDataConstructor (PlutusB, PlutusConstr, PlutusI, PlutusList, PlutusMap),
+   Renamed (Unifiable),
+   ValT (Abstraction),
+   tyvar)
 import Data.Bimap (Bimap)
 import Data.Bimap qualified as Bimap
 import Data.Coerce (coerce)
@@ -223,7 +232,7 @@ import Data.Kind (Type)
 import Data.List (find)
 import Data.Map.Strict (Map)
 import Data.Map.Strict qualified as Map
-import Data.Maybe (fromJust)
+import Data.Maybe (fromJust, mapMaybe)
 import Data.Set qualified as Set
 import Data.Text qualified as T
 import Data.Vector (Vector)
@@ -413,7 +422,7 @@ pattern Cata algebraRef valRef <- CataInternal algebraRef valRef
 pattern DataConstructor :: TyName -> ConstructorName -> Vector Ref -> ValNodeInfo
 pattern DataConstructor tyName ctorName fields <- DataConstructorInternal tyName ctorName fields
 
-{-# COMPLETE Lit, App, Thunk, Cata #-}
+{-# COMPLETE Lit, App, Thunk, Cata, DataConstructor #-}
 
 -- | Any problem that might arise when building an ASG programmatically.
 --
@@ -700,6 +709,11 @@ app fId argRefs instTys = do
             "Impossible happened: Result of tyvar instantiation should be a thunk, but is: "
               <> T.pack (show other)
 
+-- | Introduce a data constructor.
+--   First argument is the name of the type, e.g. "Maybe"
+--   Second argument is the name of the constructor, e.g. "Just" or "Nothing"
+--   Third argument is a vector of references to the arguments (which must conform with the data declaration)
+-- @since 1.2.0
 dataConstructor ::
   forall (m :: Type -> Type).
   (MonadHashCons Id ASGNode m, MonadError CovenantTypeError m, MonadReader ASGEnv m) =>
@@ -761,14 +775,15 @@ dataConstructor tyName ctorName fields = do
     mkResultThunk count' declCtors fieldArgs' = do
       declCtorFields <- Vector.toList . view #constructorArgs <$> findConstructor declCtors
       subs <- unifyFields declCtorFields fieldArgs
-      let tyConAbstractArgs
-            | count == 0 = []
-            | otherwise = Abstraction . Unifiable . fromJust . preview intIndex <$> [0 .. (count - 1)]
+      let tyConAbstractArgs = mapMaybe (fmap (Abstraction . Unifiable) . preview intIndex)  [0, 1 .. (count - 1)]
           tyConAbstract = Datatype tyName (Vector.fromList tyConAbstractArgs)
       let tyConConcrete = Map.foldlWithKey' (\acc i t -> substitute i t acc) tyConAbstract subs
       liftUnifyM . fixUp . ThunkT . Comp0 . ReturnT $ tyConConcrete
       where
+        count :: Int
         count = review intCount count'
+
+        fieldArgs :: [ValT Renamed]
         fieldArgs = Vector.toList fieldArgs'
 
     {- Unifies the declaration fields (which may be abstract) with the supplied fields
@@ -804,6 +819,7 @@ dataConstructor tyName ctorName fields = do
       "Constr" -> opaqueCheck PlutusConstr [BuiltinFlat IntegerT, Datatype "List" (Vector.fromList [Datatype "Data" mempty])]
       _ -> throwError $ UndeclaredOpaquePlutusDataCtor declCtors ctorName
       where
+        fieldArgs :: [ValT Renamed]
         fieldArgs = Vector.toList fieldArgs'
         opaqueCheck :: PlutusDataConstructor -> [ValT Renamed] -> m ()
         opaqueCheck setMustHaveThis fieldShouldBeThis = do

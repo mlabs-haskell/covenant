@@ -848,10 +848,7 @@ genDataList = runDataGenM . GT.listOf
 
 -- ASG Stuff
 
--- | A concrete monadic stack, providing the minimum amount of functionality
--- needed to build an ASG using the combinators given in this module.
---
--- This is a newtype to clearly indicate that it should be used only for testing, as it is
+-- This is a newtype over ASGBuilder to clearly indicate that it should be used only for testing, as it is
 -- useful to have a variant of the ASGBuilder monad which has a \`runner\`
 -- @since 1.2.0
 newtype DebugASGBuilder (a :: Type)
