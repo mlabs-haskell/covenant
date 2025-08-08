@@ -58,6 +58,11 @@ module Covenant.Test
     -- *** Elimination
     runRenameM,
     undoRename,
+
+    -- Misc
+    DebugASGBuilder(..),
+    debugASGBuilder,
+    typeIdTest 
   )
 where
 
@@ -73,12 +78,17 @@ import Control.Monad.State.Strict
     gets,
     modify,
   )
+import Control.Monad.Error.Class (MonadError)
+import Control.Monad.HashCons (HashConsT, MonadHashCons, runHashConsT)
+import Control.Monad.Reader (MonadReader, ReaderT, runReaderT)
 import Control.Monad.Trans (MonadTrans (lift))
 import Covenant.Data
   ( DatatypeInfo,
     mkDatatypeInfo,
     noPhantomTyVars,
   )
+import Control.Monad.Trans.Except (ExceptT, runExceptT)
+import Covenant.ASG (ASGEnv (ASGEnv), ASGNode, CovenantError (TypeError), CovenantTypeError, Id, ScopeInfo (ScopeInfo))
 import Covenant.DeBruijn (DeBruijn (Z), asInt)
 import Covenant.Index
   ( Count,
@@ -119,6 +129,7 @@ import Covenant.Internal.Strategy
   ( DataEncoding (PlutusData, SOP),
     PlutusDataStrategy (ConstrData),
   )
+import Covenant.Internal.Term (ASGNodeType (CompNodeType, ValNodeType), typeId)
 import Covenant.Internal.Type
   ( AbstractTy (BoundAt),
     BuiltinFlatT
@@ -145,6 +156,7 @@ import Covenant.Type
   )
 import Covenant.Util (prettyStr)
 import Data.Coerce (coerce)
+import Data.Functor.Identity(Identity(runIdentity))
 import Data.Kind (Type)
 import Data.Map.Strict (Map)
 import Data.Map.Strict qualified as M
@@ -834,6 +846,64 @@ shrinkDataDecls decls = liftShrink shrinkDataDecl decls <|> (shrinkDataDecl <$> 
 
 genDataList :: forall (a :: Type). DataGenM a -> Gen [a]
 genDataList = runDataGenM . GT.listOf
+
+-- ASG Stuff
+
+-- | A concrete monadic stack, providing the minimum amount of functionality
+-- needed to build an ASG using the combinators given in this module.
+--
+-- This is a newtype to clearly indicate that it should be used only for testing, as it is
+-- useful to have a variant of the ASGBuilder monad which has a \`runner\`
+-- @since 1.2.0
+newtype DebugASGBuilder (a :: Type)
+  = DebugASGBuilder (ReaderT ASGEnv (ExceptT CovenantTypeError (HashConsT Id ASGNode Identity)) a)
+  deriving
+    ( -- | @since 1.0.0
+      Functor,
+      -- | @since 1.0.0
+      Applicative,
+      -- | @since 1.0.0
+      Monad,
+      -- | @since 1.1.0
+      MonadReader ASGEnv,
+      -- | @since 1.0.0
+      MonadError CovenantTypeError,
+      -- | @since 1.0.0
+      MonadHashCons Id ASGNode
+    )
+    via ReaderT ASGEnv (ExceptT CovenantTypeError (HashConsT Id ASGNode Identity))
+
+debugASGBuilder ::
+  forall (a :: Type).
+  Map TyName (DatatypeInfo AbstractTy) ->
+  DebugASGBuilder a ->
+  Either CovenantError a
+debugASGBuilder tyDict (DebugASGBuilder comp) =
+  case runIdentity . runHashConsT . runExceptT . runReaderT comp $ ASGEnv (ScopeInfo Vector.empty) tyDict of
+    (result, bm) -> case result of
+      Left err' -> Left . TypeError bm $ err'
+      Right a -> pure a
+
+-- Helper to avoid having to export some Term internals.
+-- For intro forms tests we only care about value types, this just errors out if
+-- we don't get one of those when calling `typeId`
+
+-- | DO NOT USE THIS OUTSIDE OF TESTS
+--   This looks up the type of a node. If it's a ValT it just returns it, if it's a CompT
+--   it wraps it in a thunk and returns that.
+--   We don't *need* this but it prevents having to export ASG internals for tests and
+--   reduces the amount of pattern matching in writing tests.
+typeIdTest ::
+  forall (m :: Type -> Type).
+  (MonadHashCons Id ASGNode m, MonadError CovenantTypeError m) =>
+  Id ->
+  m (ValT AbstractTy)
+typeIdTest i =
+  typeId i >>= \case
+    ValNodeType t -> pure t
+    -- FIXME: This is quick & dirty but I need it for something
+    CompNodeType t -> pure $ ThunkT t
+    other -> error $ "Expected a ValT but got: " <> show other
 
 -- For convenience. Don't remove this, necessary for efficient development on future work
 unsafeRename :: forall (a :: Type). RenameM a -> a
