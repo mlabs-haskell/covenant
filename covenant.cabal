@@ -74,6 +74,7 @@ common test-lang
     -threaded
     -rtsopts
     -with-rtsopts=-N
+
   build-depends:
     -- temporary, maybe, for debugging tests
     QuickCheck ==2.15.0.1,
@@ -136,7 +137,7 @@ library
     prettyprinter ==1.7.1,
     quickcheck-instances ==0.3.32,
     quickcheck-transformer ==0.3.1.2,
-    smash  ==0.1.0.0,
+    smash ==0.1.0.0,
     tasty-hunit ==0.10.2,
     text >=2.1.1 && <2.2,
     transformers >=0.6.1.0 && <0.7.0.0,

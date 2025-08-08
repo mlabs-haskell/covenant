@@ -10,7 +10,7 @@ module Covenant.Internal.Rename
     undoRename,
     renameDatatypeInfo,
     UnRenameM,
-    UnRenameError(..),
+    UnRenameError (..),
     runUnRenameM,
   )
 where
@@ -149,15 +149,15 @@ data UnRenameError
   = -- | We tried to un-rename a wildcard. This means something has gone very wrong internally.
     -- @since 1.2.0
     UnRenameWildCard Renamed
-    -- | We received a negative DeBruijn in our true level calculation. This is impossible, and indicates another
+  | -- | We received a negative DeBruijn in our true level calculation. This is impossible, and indicates another
     --   internal malfunction or bug
-  | NegativeDeBruijn Int
+    NegativeDeBruijn Int
   deriving stock
-   ( -- | @since 1.2.0
-     Eq,
-     -- | @since 1.2.0
-     Show 
-   )
+    ( -- | @since 1.2.0
+      Eq,
+      -- | @since 1.2.0
+      Show
+    )
 
 -- | A \'renaming monad\' which allows us to convert type representations from
 -- ones that use /relative/ abstraction labelling to /absolute/ abstraction
@@ -283,7 +283,7 @@ renameCompT (CompT abses (CompTBody xs)) = RenameM $ do
 --
 -- @since 1.0.0
 renameValT :: ValT AbstractTy -> RenameM (ValT Renamed)
-renameValT = \case 
+renameValT = \case
   Abstraction t -> Abstraction <$> renameAbstraction t
   ThunkT t -> ThunkT <$> renameCompT t
   BuiltinFlat t -> pure . BuiltinFlat $ t
@@ -344,7 +344,7 @@ undoRename scope t = runUnRenameM (go t) scope
       inheritedSize <- asks (fromIntegral . view #inheritedScopeSize)
       let db = trackerLen - 1 - inheritedSize - tl
       case preview asInt db of
-        Nothing -> throwError $ NegativeDeBruijn db 
+        Nothing -> throwError $ NegativeDeBruijn db
         Just res -> pure res
 
 renameAbstraction :: AbstractTy -> RenameM Renamed

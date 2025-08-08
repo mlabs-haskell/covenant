@@ -1,5 +1,4 @@
 {-# LANGUAGE PatternSynonyms #-}
-{-# LANGUAGE ViewPatterns #-}
 
 -- |
 -- Module: Covenant.ASG
@@ -653,11 +652,11 @@ app fId argRefs instTys = do
       Vector.ifoldl'
         ( \acc i' w ->
             let i = fromJust . preview intIndex $ i'
-            in wedge
-              acc
-              (\(BoundTyVar dbIx posIx) -> (i, tyvar dbIx posIx) : acc)
-              (\v -> (i, vacuous v) : acc)
-              w
+             in wedge
+                  acc
+                  (\(BoundTyVar dbIx posIx) -> (i, tyvar dbIx posIx) : acc)
+                  (\v -> (i, vacuous v) : acc)
+                  w
         )
         []
 
