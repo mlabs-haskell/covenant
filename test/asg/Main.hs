@@ -272,7 +272,7 @@ propApplyToVal = forAllShrinkShow arbitrary shrink show $ \c args ->
         AnId <$> do
           args' <- traverse (fmap AnId . lit) args
           i <- lit c
-          app i args'
+          app i args' mempty
    in withCompilationFailure comp $ \case
         TypeError _ (ApplyToValType t) -> typeConstant c === t
         TypeError _ err' -> failWrongTypeError err'
@@ -284,7 +284,7 @@ propApplyToError = forAllShrinkShow arbitrary shrink show $ \args ->
         AnId <$> do
           args' <- traverse (fmap AnId . lit) args
           i <- err
-          app i args'
+          app i args' mempty
    in withCompilationFailure comp $ \case
         TypeError _ ApplyToError -> property True
         TypeError _ err' -> failWrongTypeError err'
@@ -307,7 +307,7 @@ propApplyComp = forAllShrinkShow arbitrary shrink show $ \f arg1 ->
             Left bi1 -> builtin1 bi1
             Right (Left bi2) -> builtin2 bi2
             Right (Right bi3) -> builtin3 bi3
-          app i (Vector.singleton . AnId $ arg')
+          app i (Vector.singleton . AnId $ arg') mempty
    in withCompilationFailure comp $ \case
         TypeError _ (ApplyCompType actualT) -> t === actualT
         TypeError _ err' -> failWrongTypeError err'
@@ -405,7 +405,7 @@ newLamTest1 = case runASGBuilder M.empty fn of
     fn = lam expected $ do
       f <- arg Z ix0 >>= force . AnArg
       a <- AnArg <$> arg Z ix1
-      AnId <$> app f (Vector.singleton a)
+      AnId <$> app f (Vector.singleton a) mempty
 
     expected :: CompT AbstractTy
     expected =
@@ -423,7 +423,7 @@ newLamTest2 = case runASGBuilder tyAppTestDatatypes fn of
     fn = lam expected $ do
       f <- arg Z ix0 >>= force . AnArg
       a <- AnArg <$> arg Z ix1
-      AnId <$> app f (Vector.singleton a)
+      AnId <$> app f (Vector.singleton a) mempty
 
     expected :: CompT AbstractTy
     expected =

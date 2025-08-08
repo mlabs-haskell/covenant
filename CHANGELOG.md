@@ -8,6 +8,9 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 * Helper function for safely retrieving an in-scope type variable when constructing the ASG  
 * Removed Return nodes, associated pattern synonyms, and the `ret` ASGBuilder function
+* Reworked the renamer to be context sensitive
+* Added new error types for un-renaming
+* Modified ASG helper functions and updated tests to conform with renamer rework
 
 ## 1.1.0 -- 2025-07-11
 

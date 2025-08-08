@@ -84,6 +84,7 @@ common test-lang
     nonempty-vector ==0.2.4,
     optics-core ==0.4.1.1,
     prettyprinter ==1.7.1,
+    smash ==0.1.0.0,
     tasty ==1.5.3,
     tasty-expected-failure ==0.12.3,
     tasty-hunit ==0.10.2,
@@ -92,7 +93,8 @@ common test-lang
 
 common bench-lang
   import: lang
-  ghc-options: -O2
+  ghc-options:
+    -O2
 
 -- Primary library
 library
@@ -135,6 +137,7 @@ library
     prettyprinter ==1.7.1,
     quickcheck-instances ==0.3.32,
     quickcheck-transformer ==0.3.1.2,
+    smash ==0.1.0.0,
     tasty-hunit ==0.10.2,
     text >=2.1.1 && <2.2,
     transformers >=0.6.1.0 && <0.7.0.0,

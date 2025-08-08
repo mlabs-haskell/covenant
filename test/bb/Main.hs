@@ -2,8 +2,6 @@
 
 module Main (main) where
 
--- import Data.Either (isRight)
-
 import Control.Exception (throwIO)
 import Control.Monad ((<=<))
 import Covenant.Data
@@ -69,7 +67,7 @@ bbFormRenames = forAllShrinkShow (arbitrary @(DataDeclSet 'Poly1PolyThunks)) shr
     Right (catMaybes -> bbfDecls) ->
       let results =
             mapM
-              ( \valT -> case runRenameM . renameValT $ valT of
+              ( \valT -> case runRenameM mempty . renameValT $ valT of
                   Left err -> Left (err, valT)
                   Right res -> Right res
               )
@@ -149,8 +147,8 @@ bbfWeirderList = testCase "bbfWeirderList" $ do
 testMonotypeBB :: TestTree
 testMonotypeBB = testCase "unitBbf" $ do
   let expected = Comp1 $ Abstraction (BoundAt Z ix0) :--:> ReturnT (Abstraction $ BoundAt Z ix0)
-  expected' <- failLeft . runRenameM . renameCompT $ expected
+  expected' <- failLeft . runRenameM mempty . renameCompT $ expected
   actual <- case fromJust . (view #bbForm <=< M.lookup "Unit") $ tyAppTestDatatypes of
-    ThunkT inner -> either (throwIO . userError . show) pure . runRenameM $ renameCompT inner
+    ThunkT inner -> either (throwIO . userError . show) pure . runRenameM mempty $ renameCompT inner
     _ -> assertFailure "BB form not a thunk!"
   assertEqual "unit bbf" expected' actual
