@@ -43,21 +43,29 @@ import Data.Coerce (coerce)
 import Data.Functor.Identity (Identity (Identity))
 import Data.Kind (Type)
 import Data.Map qualified as M
+import Data.Maybe (fromJust)
+import Data.Vector (Vector)
 import Data.Vector qualified as Vector
 import Data.Word (Word32)
-import Optics.Core (review)
+import Optics.Core (preview, review)
 import Test.QuickCheck
   ( Gen,
     Property,
     arbitrary,
+    chooseInt,
     counterexample,
     discard,
     elements,
+    forAll,
     forAllShrink,
+    getNonZero,
     getSize,
+    liftArbitrary,
     liftShrink,
     oneof,
     shrink,
+    suchThat,
+    suchThatMap,
     vectorOf,
     (===),
   )
@@ -84,7 +92,7 @@ main =
           testProperty "wildcard expected, unifiable actual" propUnifyWildcardUnifiable,
           adjustOption smallerTests . testProperty "concrete expected, rigid actual" $ propUnifyConcreteRigid,
           adjustOption smallerTests . testProperty "unifiable expected, rigid actual" $ propUnifyUnifiableRigid,
-          -- TODO: fix and re-enable -- testProperty "rigid expected, rigid actual" propUnifyRigid,
+          testProperty "rigid expected, rigid actual" propUnifyRigid,
           adjustOption smallerTests . testProperty "wildcard expected, rigid actual" $ propUnifyWildcardRigid,
           testProperty "thunk with unifiable result" propThunkWithUnifiableResult
         ],
@@ -294,67 +302,58 @@ propUnifyUnifiableRigid = forAllShrink arbitrary shrink $ \(scope, index) ->
               actual = checkApp M.empty f [Just arg]
            in expected === actual
 
-{- TODO/FIXME: Koz needs to fix this because I can't understand how it works (lol)
-
--- Randomly generate a scope S and an index I, then another scope S' and another
--- index I', that may or may not be different to S and/or I respectively. Let
--- `T` be the rigid type that results from `S` and `I`, and `U` be the rigid
--- type that results from `S'` and `I'`. Attempt to unify `T -> !Integer` with
--- `U`. This should unify to `Integer` if, and only if, `T == U`; otherwise, it
--- should fail to unify.
+-- Randomly generate a scope stack of height at least 2, then two indexes `I`
+-- and `J`, both valid in that scope stack. `I` and `J` may be different or the
+-- same, with equal probability. Let `T` be the rigid type corresponding to some
+-- variable index in the scope stack at the position for `I`, and `U` be the
+-- rigid type corresponding to some variable index in the scope stack at the
+-- position for `J`. Attempt to unify `T -> !Integer` with `U`. This should
+-- unify to `Integer` if, and only if, `T == U`; otherwise, it should fail to
+-- unify.
 propUnifyRigid :: Property
-propUnifyRigid = forAllShrink gen shr $ \testData ->
-  withTestData testData $ \(f, arg, expected) ->
-    let actual = checkApp M.empty f [Just arg]
-     in expected === actual
+propUnifyRigid = forAll gen $ \(scopeStack, t, u, same) ->
+  withRenamedComp scopeStack (Comp0 $ t :--:> ReturnT integerT) $ \fun ->
+    withRenamedVals scopeStack (Identity u) $ \(Identity arg) ->
+      case checkApp mempty fun [Just arg] of
+        Left err -> counterexample ("Identical rigids, but got " <> show err) $ not same
+        Right res -> counterexample ("Different rigids, but unified to " <> show res) same
   where
-    gen :: Gen (DeBruijn, Index "tyvar", Maybe (Either DeBruijn (Index "tyvar")))
+    gen :: Gen (Vector Word32, ValT AbstractTy, ValT AbstractTy, Bool)
     gen = do
-      db <- arbitrary
-      index <- arbitrary
-      (db,index,)
-        <$> oneof
-          [ pure Nothing,
-            Just . Left <$> suchThat arbitrary (db /=),
-            Just . Right <$> suchThat arbitrary (index /=)
-          ]
-    shr ::
-      (DeBruijn, Index "tyvar", Maybe (Either DeBruijn (Index "tyvar"))) ->
-      [(DeBruijn, Index "tyvar", Maybe (Either DeBruijn (Index "tyvar")))]
-    shr (db, index, mrest) = do
-      db' <- shrink db
-      index' <- shrink index
-      case mrest of
-        Nothing -> pure (db', index, Nothing) <|> pure (db, index', Nothing)
-        Just (Left db2) -> do
-          db2' <- shrink db2
-          (db', index, Just (Left db2)) <$ guard (db' /= db2)
-            <|> pure (db, index', Just (Left db2))
-            <|> (db, index, Just (Left db2')) <$ guard (db /= db2')
-        Just (Right index2) -> do
-          index2' <- shrink index2
-          pure (db', index, Just (Right index2))
-            <|> (db, index', Just (Right index2)) <$ guard (index' /= index2)
-            <|> (db, index, Just (Right index2')) <$ guard (index /= index2')
-    withTestData ::
-      (DeBruijn, Index "tyvar", Maybe (Either DeBruijn (Index "tyvar"))) ->
-      ((CompT Renamed, ValT Renamed, Either TypeAppError (ValT Renamed)) -> Property) ->
-      Property
-    withTestData (db, index, mrest) f =
-      let mockScope = Vector.replicate (review asInt db + 1) (fromIntegral $ review intIndex index + 1)
-      in withRenamedComp mockScope (Comp0 $ tyvar (S db) index :--:> ReturnT integerT) $ \fun ->
-        case mrest of
-          Nothing -> withRenamedVals mockScope (Identity . tyvar db $ index) $ \(Identity arg) ->
-            f (fun, arg, Right integerT)
-          Just rest ->
-            let level = ezTrueLevel mockScope db index
-                lhs = Abstraction . Rigid level $ index
-             in case rest of
-                  Left db2 -> withRenamedVals mockScope (Identity . tyvar db2 $ index) $ \(Identity arg) ->
-                    f (fun, arg, Left . DoesNotUnify lhs $ arg)
-                  Right index2 -> withRenamedVals mockScope (Identity . tyvar db $ index2) $ \(Identity arg) ->
-                    f (fun, arg, Left . DoesNotUnify lhs $ arg)
--}
+      -- Note (Koz, 08/08/2025): We have to use this rather odd method to ensure
+      -- that we never have any scope stack smaller than 2 elements. If we have
+      -- an empty stack, we loop forever as we can't find a valid index, and if
+      -- the scope stack is a singleton, we can never hit the 'different' case.
+      --
+      -- Furthermore, we must ensure every scope stack has at least 1 available
+      -- variable, as otherwise, our subsequent generator can 'miss'.
+      firstScope <- getNonZero <$> arbitrary
+      secondScope <- getNonZero <$> arbitrary
+      restOfScopes <- liftArbitrary (getNonZero <$> arbitrary)
+      let scopeStack = Vector.cons firstScope . Vector.cons secondScope $ restOfScopes
+      (t, u, same) <- genAbstractions scopeStack
+      pure (scopeStack, t, u, same)
+    genAbstractions :: Vector Word32 -> Gen (ValT AbstractTy, ValT AbstractTy, Bool)
+    genAbstractions scopeStack = do
+      let len = Vector.length scopeStack
+      iPosition <- chooseInt (0, len - 1)
+      jPosition <- suchThat (chooseInt (0, len - 1)) (/= iPosition)
+      let iDB = fromJust . preview asInt $ iPosition
+      let jDB = fromJust . preview asInt $ jPosition
+      let iVarsAvailable = fromIntegral $ scopeStack Vector.! iPosition
+      let jVarsAvailable = fromIntegral $ scopeStack Vector.! jPosition
+      iIx <- suchThatMap (chooseInt (0, iVarsAvailable - 1)) (preview intIndex)
+      jIx <- suchThatMap (chooseInt (0, jVarsAvailable - 1)) (preview intIndex)
+      -- Note (Koz, 08/08/2025): We have to offset `t` by 1, because it's being
+      -- bundled directly into a `Comp0`, which means that to refer to the same
+      -- position in the scope stack, it needs to be one higher.
+      elements
+        [ -- 'Same' option.
+          (tyvar (S iDB) iIx, tyvar iDB iIx, True),
+          -- 'Different' option.
+          (tyvar (S iDB) iIx, tyvar jDB jIx, False)
+        ]
+
 -- Randomly pick a rigid type A, then try to apply `(forall a . a -> !Integer)
 -- -> !Integer` to `(A -> !Integer)`. Result should fail to unify.
 propUnifyWildcardRigid :: Property
