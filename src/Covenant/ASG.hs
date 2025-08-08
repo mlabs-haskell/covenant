@@ -215,15 +215,16 @@ import Covenant.Prim
     typeTwoArgFunc,
   )
 import Covenant.Type
-  (CompT (Comp0),
-   CompTBody (ReturnT),
-   Constructor,
-   ConstructorName,
-   DataDeclaration (OpaqueData),
-   PlutusDataConstructor (PlutusB, PlutusConstr, PlutusI, PlutusList, PlutusMap),
-   Renamed (Unifiable),
-   ValT (Abstraction),
-   tyvar)
+  ( CompT (Comp0),
+    CompTBody (ReturnT),
+    Constructor,
+    ConstructorName,
+    DataDeclaration (OpaqueData),
+    PlutusDataConstructor (PlutusB, PlutusConstr, PlutusI, PlutusList, PlutusMap),
+    Renamed (Unifiable),
+    ValT (Abstraction),
+    tyvar,
+  )
 import Data.Bimap (Bimap)
 import Data.Bimap qualified as Bimap
 import Data.Coerce (coerce)
@@ -775,7 +776,7 @@ dataConstructor tyName ctorName fields = do
     mkResultThunk count' declCtors fieldArgs' = do
       declCtorFields <- Vector.toList . view #constructorArgs <$> findConstructor declCtors
       subs <- unifyFields declCtorFields fieldArgs
-      let tyConAbstractArgs = mapMaybe (fmap (Abstraction . Unifiable) . preview intIndex)  [0, 1 .. (count - 1)]
+      let tyConAbstractArgs = mapMaybe (fmap (Abstraction . Unifiable) . preview intIndex) [0, 1 .. (count - 1)]
           tyConAbstract = Datatype tyName (Vector.fromList tyConAbstractArgs)
       let tyConConcrete = Map.foldlWithKey' (\acc i t -> substitute i t acc) tyConAbstract subs
       liftUnifyM . fixUp . ThunkT . Comp0 . ReturnT $ tyConConcrete

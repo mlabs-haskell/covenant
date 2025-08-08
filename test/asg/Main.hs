@@ -52,8 +52,13 @@ import Covenant.Prim
     typeThreeArgFunc,
     typeTwoArgFunc,
   )
-import Covenant.Test (
-  Concrete (Concrete), DebugASGBuilder, debugASGBuilder, tyAppTestDatatypes, typeIdTest)
+import Covenant.Test
+  ( Concrete (Concrete),
+    DebugASGBuilder,
+    debugASGBuilder,
+    tyAppTestDatatypes,
+    typeIdTest,
+  )
 import Covenant.Type
   ( AbstractTy,
     BuiltinFlatT (UnitT),
