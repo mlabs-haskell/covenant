@@ -134,7 +134,11 @@ import Covenant.Internal.Term
         ApplyToError,
         ApplyToValType,
         BrokenIdReference,
+        CataAlgebraWrongArity,
         CataApplyToNonValT,
+        CataNoBaseFunctorForType,
+        CataNoSuchType,
+        CataNonRigidAlgebra,
         CataNotAnAlgebra,
         CataUnsuitable,
         CataWrongBuiltinType,
@@ -897,44 +901,47 @@ cata rAlg rVal =
   typeRef rVal >>= \case
     ValNodeType valT ->
       typeRef rAlg >>= \case
-        t@(ValNodeType (ThunkT algT@(CompT _ (CompTBody nev)))) -> do
-          unless (arity algT == 2) (throwError . CataNotAnAlgebra $ t)
-          case nev NonEmpty.! 0 of
-            Datatype bfName bfTyArgs -> do
-              -- If we got this far, we know at minimum that we have somewhat
-              -- sensical arguments. Now we have to make sure that we have a
-              -- suitable type for the algebra, and a suitable thing to tear
-              -- down.
-              --
-              -- After verifying this, we use `tryApply` so the unification
-              -- machinery can produce the type we expect with proper
-              -- concretifications.
-              unless (Vector.length bfTyArgs > 0) (throwError . CataNotAnAlgebra $ t)
-              let lastVar = Vector.last bfTyArgs
-              unless (nev NonEmpty.! 1 == lastVar) (throwError . CataNotAnAlgebra $ t)
-              appliedArgT <- case valT of
-                BuiltinFlat bT -> case bT of
-                  ByteStringT -> do
-                    unless (bfName == "ByteString_F") (throwError . CataUnsuitable algT $ valT)
-                    pure $ Datatype "ByteString_F" . Vector.singleton $ lastVar
-                  IntegerT -> do
-                    let isSuitableBaseFunctor = bfName == "Natural_F" || bfName == "Negative_F"
-                    unless isSuitableBaseFunctor (throwError . CataUnsuitable algT $ valT)
-                    pure $ Datatype bfName . Vector.singleton $ lastVar
-                  _ -> throwError . CataWrongBuiltinType $ bT
-                Datatype tyName tyVars -> do
-                  lookedUp <- asks (view (#datatypeInfo % at tyName))
-                  case lookedUp of
-                    Nothing -> throwError . CataUnsuitable algT $ valT
-                    Just info -> case view #baseFunctor info of
-                      Just (DataDeclaration actualBfName _ _ _, _) -> do
-                        unless (bfName == actualBfName) (throwError . CataUnsuitable algT $ valT)
-                        pure . Datatype bfName . Vector.snoc tyVars $ lastVar
-                      _ -> throwError . CataUnsuitable algT $ valT
-                _ -> throwError . CataWrongValT $ valT
-              resultT <- tryApply algT appliedArgT
-              refTo . AValNode resultT . CataInternal rAlg $ rVal
-            _ -> throwError . CataNotAnAlgebra $ t
+        t@(ValNodeType (ThunkT algT)) -> case algT of
+          Comp0 (CompTBody nev) -> do
+            let algebraArity = arity algT
+            unless (algebraArity == 1) (throwError . CataAlgebraWrongArity $ algebraArity)
+            case nev NonEmpty.! 0 of
+              Datatype bfName bfTyArgs -> do
+                -- If we got this far, we know at minimum that we have somewhat
+                -- sensical arguments. Now we have to make sure that we have a
+                -- suitable type for the algebra, and a suitable thing to tear
+                -- down.
+                --
+                -- After verifying this, we use `tryApply` so the unification
+                -- machinery can produce the type we expect with proper
+                -- concretifications.
+                unless (Vector.length bfTyArgs > 0) (throwError . CataNotAnAlgebra $ t)
+                let lastVar = Vector.last bfTyArgs
+                unless (nev NonEmpty.! 1 == lastVar) (throwError . CataNotAnAlgebra $ t)
+                appliedArgT <- case valT of
+                  BuiltinFlat bT -> case bT of
+                    ByteStringT -> do
+                      unless (bfName == "ByteString_F") (throwError . CataUnsuitable algT $ valT)
+                      pure $ Datatype "ByteString_F" . Vector.singleton $ lastVar
+                    IntegerT -> do
+                      let isSuitableBaseFunctor = bfName == "Natural_F" || bfName == "Negative_F"
+                      unless isSuitableBaseFunctor (throwError . CataUnsuitable algT $ valT)
+                      pure $ Datatype bfName . Vector.singleton $ lastVar
+                    _ -> throwError . CataWrongBuiltinType $ bT
+                  Datatype tyName tyVars -> do
+                    lookedUp <- asks (view (#datatypeInfo % at tyName))
+                    case lookedUp of
+                      Nothing -> throwError . CataNoSuchType $ tyName
+                      Just info -> case view #baseFunctor info of
+                        Just (DataDeclaration actualBfName _ _ _, _) -> do
+                          unless (bfName == actualBfName) (throwError . CataUnsuitable algT $ valT)
+                          pure . Datatype bfName . Vector.snoc tyVars $ lastVar
+                        _ -> throwError . CataNoBaseFunctorForType $ tyName
+                  _ -> throwError . CataWrongValT $ valT
+                resultT <- tryApply algT appliedArgT
+                refTo . AValNode resultT . CataInternal rAlg $ rVal
+              _ -> throwError . CataNotAnAlgebra $ t
+          _ -> throwError . CataNonRigidAlgebra $ algT
         t -> throwError . CataNotAnAlgebra $ t
     t -> throwError . CataApplyToNonValT $ t
 

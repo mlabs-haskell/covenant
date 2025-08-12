@@ -1,4 +1,5 @@
 {-# LANGUAGE CPP #-}
+{-# LANGUAGE MultiWayIf #-}
 
 module Covenant.Internal.Unification
   ( TypeAppError (..),
@@ -20,7 +21,7 @@ import Data.Foldable (foldl')
 #endif
 import Control.Monad.Except (MonadError, catchError, throwError)
 import Control.Monad.Reader (MonadReader, ReaderT (runReaderT), ask)
-import Covenant.Data (DatatypeInfo)
+import Covenant.Data (DatatypeInfo, mkDatatypeInfo)
 import Covenant.Index (Index, intCount, intIndex)
 import Covenant.Internal.Rename (RenameError, renameDatatypeInfo)
 import Covenant.Internal.Type
@@ -31,6 +32,9 @@ import Covenant.Internal.Type
     Renamed (Rigid, Unifiable, Wildcard),
     TyName,
     ValT (Abstraction, BuiltinFlat, Datatype, ThunkT),
+    byteStringBaseFunctor,
+    naturalBaseFunctor,
+    negativeBaseFunctor,
   )
 import Data.Kind (Type)
 import Data.Map (Map)
@@ -111,8 +115,25 @@ lookupDatatypeInfo ::
   UnifyM (DatatypeInfo Renamed)
 lookupDatatypeInfo tn =
   ask >>= \tyDict -> case preview (ix tn) tyDict of
-    Nothing -> throwError $ NoDatatypeInfo tn
-    Just dti -> either (throwError . DatatypeInfoRenameFailed tn) pure $ renameDatatypeInfo dti
+    Nothing ->
+      if
+        -- Note (Koz, 12/08/2025): None of these should _ever_ fail, hence the
+        -- `fromRight` here.
+        | tn == "Natural_F" ->
+            renamedToUnify . renameDatatypeInfo . fromRight . mkDatatypeInfo $ naturalBaseFunctor
+        | tn == "Negative_F" ->
+            renamedToUnify . renameDatatypeInfo . fromRight . mkDatatypeInfo $ negativeBaseFunctor
+        | tn == "ByteString_F" ->
+            renamedToUnify . renameDatatypeInfo . fromRight . mkDatatypeInfo $ byteStringBaseFunctor
+        | otherwise -> throwError $ NoDatatypeInfo tn
+    Just dti -> renamedToUnify . renameDatatypeInfo $ dti
+  where
+    renamedToUnify :: Either RenameError (DatatypeInfo Renamed) -> UnifyM (DatatypeInfo Renamed)
+    renamedToUnify = either (throwError . DatatypeInfoRenameFailed tn) pure
+    fromRight :: forall a b. (Show a) => Either a b -> b
+    fromRight = \case
+      Left err -> error . show $ err
+      Right x -> x
 
 lookupBBForm :: TyName -> UnifyM (ValT Renamed)
 lookupBBForm tn =
