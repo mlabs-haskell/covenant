@@ -30,7 +30,7 @@ import Covenant.Internal.Type
     CompT (CompT),
     CompTBody (CompTBody),
     Renamed (Rigid, Unifiable, Wildcard),
-    TyName,
+    TyName (TyName),
     ValT (Abstraction, BuiltinFlat, Datatype, ThunkT),
     byteStringBaseFunctor,
     naturalBaseFunctor,
@@ -44,6 +44,7 @@ import Data.Maybe (fromJust, mapMaybe)
 import Data.Set (Set)
 import Data.Set qualified as Set
 import Data.Text (Text)
+import Data.Text qualified as Text
 import Data.Vector (Vector)
 import Data.Vector qualified as Vector
 import Data.Vector.NonEmpty (NonEmptyVector)
@@ -113,21 +114,36 @@ runUnifyM tyDict (UnifyM act) = runReaderT act tyDict
 lookupDatatypeInfo ::
   TyName ->
   UnifyM (DatatypeInfo Renamed)
-lookupDatatypeInfo tn =
+lookupDatatypeInfo tn@(TyName rawTyName) =
   ask >>= \tyDict -> case preview (ix tn) tyDict of
-    Nothing ->
-      if
-        -- Note (Koz, 12/08/2025): None of these should _ever_ fail, hence the
-        -- `fromRight` here.
-        | tn == "Natural_F" ->
-            renamedToUnify . renameDatatypeInfo . fromRight . mkDatatypeInfo $ naturalBaseFunctor
-        | tn == "Negative_F" ->
-            renamedToUnify . renameDatatypeInfo . fromRight . mkDatatypeInfo $ negativeBaseFunctor
-        | tn == "ByteString_F" ->
-            renamedToUnify . renameDatatypeInfo . fromRight . mkDatatypeInfo $ byteStringBaseFunctor
-        | otherwise -> throwError $ NoDatatypeInfo tn
+    Nothing -> checkForBaseFunctor tyDict
     Just dti -> renamedToUnify . renameDatatypeInfo $ dti
   where
+    checkForBaseFunctor :: Map TyName (DatatypeInfo AbstractTy) -> UnifyM (DatatypeInfo Renamed)
+    checkForBaseFunctor tyDict = case Text.stripSuffix "_F" rawTyName of
+      Nothing -> throwError . NoDatatypeInfo $ tn
+      Just rawTyNameStub ->
+        if
+          -- Note (Koz, 12/08/2025): None of these specific cases should _ever_
+          -- fail. Thus, `fromRight` is safe here.
+          | rawTyNameStub == "Natural" ->
+              renamedToUnify . renameDatatypeInfo . fromRight . mkDatatypeInfo $ naturalBaseFunctor
+          | rawTyNameStub == "Negative" ->
+              renamedToUnify . renameDatatypeInfo . fromRight . mkDatatypeInfo $ negativeBaseFunctor
+          | rawTyNameStub == "ByteString" ->
+              renamedToUnify . renameDatatypeInfo . fromRight . mkDatatypeInfo $ byteStringBaseFunctor
+          -- We have something that _looks_ like a base functor, but not a
+          -- special builtin case. We thus need to ask the environment for the
+          -- recursive type it stands for, if it exists.
+          | otherwise -> do
+              let standinTyName = TyName rawTyNameStub
+              case preview (ix standinTyName) tyDict of
+                -- Now we have _truly_ missed.
+                Nothing -> throwError . NoDatatypeInfo $ tn
+                Just dti -> case view #baseFunctor dti of
+                  Nothing -> throwError . NoDatatypeInfo $ tn
+                  -- Since this is generated, it can't fail to rename
+                  Just (bfDd, _) -> renamedToUnify . renameDatatypeInfo . fromRight . mkDatatypeInfo $ bfDd
     renamedToUnify :: Either RenameError (DatatypeInfo Renamed) -> UnifyM (DatatypeInfo Renamed)
     renamedToUnify = either (throwError . DatatypeInfoRenameFailed tn) pure
     fromRight :: forall a b. (Show a) => Either a b -> b

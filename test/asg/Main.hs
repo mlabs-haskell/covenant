@@ -140,7 +140,11 @@ main =
           testCase "Negative_F can tear down an Integer" unitCataNegativeF,
           testCase "ByteString_F can tear down a ByteString" unitCataByteStringF,
           testCase "Non-recursive type cata should fail" unitCataMaybeF,
-          testCase "Cata with non-rigid algebra should fail" unitCataNonRigidF
+          testCase "Cata with non-rigid algebra should fail" unitCataNonRigidF,
+          testCase "<List_F Integer Bool -> !Bool> with List Integer should be Bool" unitCataListInteger,
+          testCase "<List_F Integer r -> !r> with List Integer should be r" unitCataListIntegerRigid,
+          testCase "<List_F r Integer -> !Integer> with List r should be Integer" unitCataListRigid,
+          testCase "<List_F r (Maybe r) -> !Maybe r> with List r should be Maybe r" unitCataListMaybeRigid
         ]
     ]
   where
@@ -255,6 +259,70 @@ unitCataNonRigidF = do
   withCompilationFailureUnit comp $ \case
     TypeError _ (CataNonRigidAlgebra t) -> assertEqual "" nonRigidCompT t
     err' -> assertFailure $ "Failed with unexpected type of error: " <> show err'
+
+-- Construct a function of type `<List_F Integer Bool -> !Bool> -> List Integer
+-- -> !Bool`, whose body performs a cata over its second argument using its
+-- first argument. This should compile, and type as expected.
+unitCataListInteger :: IO ()
+unitCataListInteger = do
+  let thunkTy = ThunkT $ Comp0 $ Datatype "List_F" [integerT, boolT] :--:> ReturnT boolT
+  let ty = Comp0 $ thunkTy :--:> Datatype "List" [integerT] :--:> ReturnT boolT
+  let comp = lam ty $ do
+        alg <- arg Z ix0
+        x <- arg Z ix1
+        result <- cata (AnArg alg) (AnArg x)
+        pure . AnId $ result
+  withCompilationSuccessUnit comp $ matchesType ty
+
+-- Construct a function of type `forall a . <List_F Integer a -> !a> -> List
+-- Integer -> !a`, whose body performs a cata over its second argument using its
+-- first argument. This should compile, and type as expected.
+unitCataListIntegerRigid :: IO ()
+unitCataListIntegerRigid = do
+  let thunkTy = ThunkT $ Comp0 $ Datatype "List_F" [integerT, tyvar (S Z) ix0] :--:> ReturnT (tyvar (S Z) ix0)
+  let ty = Comp1 $ thunkTy :--:> Datatype "List" [integerT] :--:> ReturnT (tyvar Z ix0)
+  let comp = lam ty $ do
+        alg <- arg Z ix0
+        x <- arg Z ix1
+        result <- cata (AnArg alg) (AnArg x)
+        pure . AnId $ result
+  withCompilationSuccessUnit comp $ matchesType ty
+
+-- Construct a function of type `forall a . <List_F a Integer -> !Integer> -> List
+-- a -> !Integer`, whose body performs a cata over its second argument using its
+-- first argument. This should compile, and type as expected.
+unitCataListRigid :: IO ()
+unitCataListRigid = do
+  let thunkTy = ThunkT $ Comp0 $ Datatype "List_F" [tyvar (S Z) ix0, integerT] :--:> ReturnT integerT
+  let ty = Comp1 $ thunkTy :--:> Datatype "List" [tyvar Z ix0] :--:> ReturnT integerT
+  let comp = lam ty $ do
+        alg <- arg Z ix0
+        x <- arg Z ix1
+        result <- cata (AnArg alg) (AnArg x)
+        pure . AnId $ result
+  withCompilationSuccessUnit comp $ matchesType ty
+
+-- Construct a function of type `forall a . <List_F a (Maybe a) -> !Maybe a> ->
+-- List a -> !Maybe a`, whose body performs a cata over its second argument
+-- using its first argument. This should compile, and type as expected.
+unitCataListMaybeRigid :: IO ()
+unitCataListMaybeRigid = do
+  let thunkTy =
+        ThunkT $
+          Comp0 $
+            Datatype "List_F" [tyvar (S Z) ix0, Datatype "Maybe" [tyvar (S Z) ix0]]
+              :--:> ReturnT (Datatype "Maybe" [tyvar (S Z) ix0])
+  let ty =
+        Comp1 $
+          thunkTy
+            :--:> Datatype "List" [Datatype "Maybe" [tyvar Z ix0]]
+            :--:> ReturnT (Datatype "Maybe" [tyvar Z ix0])
+  let comp = lam ty $ do
+        alg <- arg Z ix0
+        x <- arg Z ix1
+        result <- cata (AnArg alg) (AnArg x)
+        pure . AnId $ result
+  withCompilationSuccessUnit comp $ matchesType ty
 
 -- Properties
 
