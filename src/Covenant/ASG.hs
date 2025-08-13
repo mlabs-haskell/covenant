@@ -973,6 +973,14 @@ cata rAlg rVal =
 -- 3. Force the algebra argument thunk, then try and apply the result of Step 2
 --    to that.
 --
+-- Following the steps above for our example, we would proceed as follows:
+--
+-- 1. Set `last` as `Maybe r`.
+-- 2. Cook up `List_F r (Maybe r)`. Note that this matches what the algebra
+--    expects.
+-- 3. Use the unifier with `List_F r (Maybe r) -> !Maybe r`, applying the
+--    argument `List_F r (Maybe r)` from Step 2.
+--
 -- However, if `last` is a rigid, we have an 'off by one error'. To see why,
 -- consider the form of the algebra argument:
 --
