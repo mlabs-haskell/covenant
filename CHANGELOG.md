@@ -12,6 +12,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 * Added new error types for un-renaming
 * Modified ASG helper functions and updated tests to conform with renamer rework
 * Added support for introduction forms (ValNode stuff, ASG helper function, tests)
+* Added support for catamorphism elimination forms
 
 ## 1.1.0 -- 2025-07-11
 

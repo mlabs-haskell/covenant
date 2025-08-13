@@ -103,7 +103,7 @@ import Control.Monad.Reader
   )
 import Covenant.Constant (AConstant, typeConstant)
 import Covenant.Data (DatatypeInfo, mkDatatypeInfo)
-import Covenant.DeBruijn (DeBruijn, asInt)
+import Covenant.DeBruijn (DeBruijn (S, Z), asInt)
 import Covenant.Index (Count, Index, intCount, intIndex, wordCount)
 import Covenant.Internal.KindCheck (checkEncodingArgs)
 import Covenant.Internal.Ledger (ledgerTypes)
@@ -134,7 +134,11 @@ import Covenant.Internal.Term
         ApplyToError,
         ApplyToValType,
         BrokenIdReference,
+        CataAlgebraWrongArity,
         CataApplyToNonValT,
+        CataNoBaseFunctorForType,
+        CataNoSuchType,
+        CataNonRigidAlgebra,
         CataNotAnAlgebra,
         CataUnsuitable,
         CataWrongBuiltinType,
@@ -174,7 +178,7 @@ import Covenant.Internal.Term
     typeRef,
   )
 import Covenant.Internal.Type
-  ( AbstractTy,
+  ( AbstractTy (BoundAt),
     BuiltinFlatT (ByteStringT, IntegerT),
     CompT (CompT),
     CompTBody (CompTBody),
@@ -886,6 +890,11 @@ thunk i = do
 --   functor for the second argument
 -- * Second argument is not a value type
 --
+-- = Note
+--
+-- 'cata' cannot work with /non-rigid/ algebras; that is, all algebras must be
+-- functions that bind no type variables of their own.
+--
 -- @since 1.1.0
 cata ::
   forall (m :: Type -> Type).
@@ -897,48 +906,100 @@ cata rAlg rVal =
   typeRef rVal >>= \case
     ValNodeType valT ->
       typeRef rAlg >>= \case
-        t@(ValNodeType (ThunkT algT@(CompT _ (CompTBody nev)))) -> do
-          unless (arity algT == 2) (throwError . CataNotAnAlgebra $ t)
-          case nev NonEmpty.! 0 of
-            Datatype bfName bfTyArgs -> do
-              -- If we got this far, we know at minimum that we have somewhat
-              -- sensical arguments. Now we have to make sure that we have a
-              -- suitable type for the algebra, and a suitable thing to tear
-              -- down.
-              --
-              -- After verifying this, we use `tryApply` so the unification
-              -- machinery can produce the type we expect with proper
-              -- concretifications.
-              unless (Vector.length bfTyArgs > 0) (throwError . CataNotAnAlgebra $ t)
-              let lastVar = Vector.last bfTyArgs
-              unless (nev NonEmpty.! 1 == lastVar) (throwError . CataNotAnAlgebra $ t)
-              appliedArgT <- case valT of
-                BuiltinFlat bT -> case bT of
-                  ByteStringT -> do
-                    unless (bfName == "ByteString_F") (throwError . CataUnsuitable algT $ valT)
-                    pure $ Datatype "ByteString_F" . Vector.singleton $ lastVar
-                  IntegerT -> do
-                    let isSuitableBaseFunctor = bfName == "Natural_F" || bfName == "Negative_F"
-                    unless isSuitableBaseFunctor (throwError . CataUnsuitable algT $ valT)
-                    pure $ Datatype bfName . Vector.singleton $ lastVar
-                  _ -> throwError . CataWrongBuiltinType $ bT
-                Datatype tyName tyVars -> do
-                  lookedUp <- asks (view (#datatypeInfo % at tyName))
-                  case lookedUp of
-                    Nothing -> throwError . CataUnsuitable algT $ valT
-                    Just info -> case view #baseFunctor info of
-                      Just (DataDeclaration actualBfName _ _ _, _) -> do
-                        unless (bfName == actualBfName) (throwError . CataUnsuitable algT $ valT)
-                        pure . Datatype bfName . Vector.snoc tyVars $ lastVar
-                      _ -> throwError . CataUnsuitable algT $ valT
-                _ -> throwError . CataWrongValT $ valT
-              resultT <- tryApply algT appliedArgT
-              refTo . AValNode resultT . CataInternal rAlg $ rVal
-            _ -> throwError . CataNotAnAlgebra $ t
+        t@(ValNodeType (ThunkT algT)) -> case algT of
+          Comp0 (CompTBody nev) -> do
+            let algebraArity = arity algT
+            unless (algebraArity == 1) (throwError . CataAlgebraWrongArity $ algebraArity)
+            case nev NonEmpty.! 0 of
+              Datatype bfName bfTyArgs -> do
+                -- If we got this far, we know at minimum that we have somewhat
+                -- sensical arguments. Now we have to make sure that we have a
+                -- suitable type for the algebra, and a suitable thing to tear
+                -- down.
+                --
+                -- After verifying this, we use `tryApply` so the unification
+                -- machinery can produce the type we expect with proper
+                -- concretifications.
+                unless (Vector.length bfTyArgs > 0) (throwError . CataNotAnAlgebra $ t)
+                let lastTyArg = Vector.last bfTyArgs
+                unless (nev NonEmpty.! 1 == lastTyArg) (throwError . CataNotAnAlgebra $ t)
+                appliedArgT <- case valT of
+                  BuiltinFlat bT -> case bT of
+                    ByteStringT -> do
+                      unless (bfName == "ByteString_F") (throwError . CataUnsuitable algT $ valT)
+                      pure $ Datatype "ByteString_F" . Vector.singleton $ lastTyArg
+                    IntegerT -> do
+                      let isSuitableBaseFunctor = bfName == "Natural_F" || bfName == "Negative_F"
+                      unless isSuitableBaseFunctor (throwError . CataUnsuitable algT $ valT)
+                      pure $ Datatype bfName . Vector.singleton $ lastTyArg
+                    _ -> throwError . CataWrongBuiltinType $ bT
+                  Datatype tyName tyVars -> do
+                    lookedUp <- asks (view (#datatypeInfo % at tyName))
+                    case lookedUp of
+                      Nothing -> throwError . CataNoSuchType $ tyName
+                      Just info -> case view #baseFunctor info of
+                        Just (DataDeclaration actualBfName _ _ _, _) -> do
+                          unless (bfName == actualBfName) (throwError . CataUnsuitable algT $ valT)
+                          let lastTyArg' = stepDownDB lastTyArg
+                          pure . Datatype bfName . Vector.snoc tyVars $ lastTyArg'
+                        _ -> throwError . CataNoBaseFunctorForType $ tyName
+                  _ -> throwError . CataWrongValT $ valT
+                resultT <- tryApply algT appliedArgT
+                refTo . AValNode resultT . CataInternal rAlg $ rVal
+              _ -> throwError . CataNotAnAlgebra $ t
+          _ -> throwError . CataNonRigidAlgebra $ algT
         t -> throwError . CataNotAnAlgebra $ t
     t -> throwError . CataApplyToNonValT $ t
 
 -- Helpers
+
+-- Note (Koz, 13/08/2025): We need this procedure specifically for `cata`. The
+-- reason for this has to do with how we construct the 'base functor form' of
+-- the value to be torn down by the catamorphism, in order to use the
+-- unification machinery to get the type of the final result.
+--
+-- To be specific, suppose we have `<List_F r (Maybe r) -> !Maybe r>` as our algebra
+-- argument (where `r` is some rigid), and `List r` as the value to be torn
+-- down. If we assume the rigid is bound one scope away, `r`'s DeBruijn index
+-- will be `S Z` for
+-- the value to be torn down, but `S (S Z)` for the algebra argument. The way
+-- our approach works is:
+--
+-- 1. Look at the algebra argument, specifically the base functor type. Take its
+--    last type argument, which we will call `last`.
+-- 2. Determine the base functor for the value to be torn down. Cook up a new
+--    instance of the base functor type, copying all the type arguments from the
+--    value to be torn down in the same order. Then put `last` at the end.
+-- 3. Force the algebra argument thunk, then try and apply the result of Step 2
+--    to that.
+--
+-- Following the steps above for our example, we would proceed as follows:
+--
+-- 1. Set `last` as `Maybe r`.
+-- 2. Cook up `List_F r (Maybe r)`. Note that this matches what the algebra
+--    expects.
+-- 3. Use the unifier with `List_F r (Maybe r) -> !Maybe r`, applying the
+--    argument `List_F r (Maybe r)` from Step 2.
+--
+-- However, if `last` is a rigid, we have an 'off by one error'. To see why,
+-- consider the form of the algebra argument:
+--
+-- `ThunkT . Comp0 $ Datatype "List_F" [tyvar (S (S Z)) ix0, ....`
+--
+-- However, `tyvar (S (S Z)) ix0` is not valid in the scope of the value to be
+-- torn down: that same rigid would have DeBruijn index `S Z` there instead.
+-- This applies the same if the tyvar is part of a datatype.
+--
+-- As we prohibit non-rigid algebras, this requires us to lower the DeBruijn
+-- index by one for our process.
+stepDownDB :: ValT AbstractTy -> ValT AbstractTy
+stepDownDB = \case
+  Abstraction (BoundAt db i) -> case db of
+    -- This is impossible, so we just return it unmodified
+    Z -> Abstraction (BoundAt db i)
+    (S db') -> Abstraction (BoundAt db' i)
+  Datatype tyName tyArgs -> Datatype tyName . fmap stepDownDB $ tyArgs
+  x -> x
 
 renameArg ::
   forall (m :: Type -> Type).
