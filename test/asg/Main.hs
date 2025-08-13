@@ -315,7 +315,7 @@ unitCataListMaybeRigid = do
   let ty =
         Comp1 $
           thunkTy
-            :--:> Datatype "List" [Datatype "Maybe" [tyvar Z ix0]]
+            :--:> Datatype "List" [tyvar Z ix0]
             :--:> ReturnT (Datatype "Maybe" [tyvar Z ix0])
   let comp = lam ty $ do
         alg <- arg Z ix0
