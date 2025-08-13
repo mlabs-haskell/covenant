@@ -87,7 +87,7 @@ import Data.Kind (Type)
 import Data.Map qualified as M
 import Data.Maybe (fromJust)
 import Data.Vector qualified as Vector
-import Data.Wedge (Wedge (Nowhere), wedgeLeft)
+import Data.Wedge (Wedge (Here, Nowhere), wedgeLeft)
 import Optics.Core (preview, review)
 import Test.QuickCheck
   ( Gen,
@@ -144,7 +144,8 @@ main =
           testCase "<List_F Integer Bool -> !Bool> with List Integer should be Bool" unitCataListInteger,
           testCase "<List_F Integer r -> !r> with List Integer should be r" unitCataListIntegerRigid,
           testCase "<List_F r Integer -> !Integer> with List r should be Integer" unitCataListRigid,
-          testCase "<List_F r (Maybe r) -> !Maybe r> with List r should be Maybe r" unitCataListMaybeRigid
+          testCase "<List_F r (Maybe r) -> !Maybe r> with List r should be Maybe r" unitCataListMaybeRigid,
+          testCase "introduction then cata elimination" unitCataIntroThenEliminate
         ]
     ]
   where
@@ -321,6 +322,36 @@ unitCataListMaybeRigid = do
         alg <- arg Z ix0
         x <- arg Z ix1
         result <- cata (AnArg alg) (AnArg x)
+        pure . AnId $ result
+  withCompilationSuccessUnit comp $ matchesType ty
+
+-- Construct a function of type `forall a b . <List_F a (Maybe b) -> !Maybe b> ->
+-- a -> !Maybe b`. In its body, we construct a singleton list, then eliminate it
+-- using a cata with the first argument as the algebra. THis should compile and
+-- type as expected.
+unitCataIntroThenEliminate :: IO ()
+unitCataIntroThenEliminate = do
+  let thunkTy =
+        ThunkT $
+          Comp0 $
+            Datatype "List_F" [tyvar (S Z) ix0, Datatype "Maybe" [tyvar (S Z) ix1]]
+              :--:> ReturnT (Datatype "Maybe" [tyvar (S Z) ix1])
+  let ty =
+        Comp2 $
+          thunkTy
+            :--:> tyvar Z ix0
+            :--:> ReturnT (Datatype "Maybe" [tyvar Z ix1])
+  let comp = lam ty $ do
+        alg <- arg Z ix0
+        x <- arg Z ix1
+        nilThunk <- dataConstructor "List" "Nil" []
+        nilForced <- force (AnId nilThunk)
+        aT <- boundTyVar Z ix0
+        nilApplied <- app nilForced [] [Here aT]
+        singleThunk <- dataConstructor "List" "Cons" [AnArg x, AnId nilApplied]
+        singleForced <- force (AnId singleThunk)
+        singleApplied <- app singleForced [] [Nowhere]
+        result <- cata (AnArg alg) (AnId singleApplied)
         pure . AnId $ result
   withCompilationSuccessUnit comp $ matchesType ty
 
