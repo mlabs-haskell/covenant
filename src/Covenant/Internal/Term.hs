@@ -310,6 +310,8 @@ data ValNodeInfo
     CataInternal Ref Ref
   | -- | @since 1.2.0
     DataConstructorInternal TyName ConstructorName (Vector Ref)
+  | -- | @since 1.2.0
+    MatchInternal Ref (Vector Ref)
   deriving stock
     ( -- | @since 1.0.0
       Eq,

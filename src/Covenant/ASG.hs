@@ -39,7 +39,7 @@ module Covenant.ASG
         Lam,
         Force
       ),
-    ValNodeInfo (Lit, App, Thunk, Cata, DataConstructor),
+    ValNodeInfo (Lit, App, Thunk, Cata, DataConstructor, Match),
     ASGNode (..),
 
     -- ** Functions
@@ -168,7 +168,7 @@ import Covenant.Internal.Term
       ),
     Id,
     Ref (AnArg, AnId),
-    ValNodeInfo (AppInternal, CataInternal, DataConstructorInternal, LitInternal, ThunkInternal),
+    ValNodeInfo (AppInternal, CataInternal, DataConstructorInternal, LitInternal, ThunkInternal, MatchInternal),
     typeASGNode,
     typeId,
     typeRef,
@@ -423,7 +423,14 @@ pattern Cata algebraRef valRef <- CataInternal algebraRef valRef
 pattern DataConstructor :: TyName -> ConstructorName -> Vector Ref -> ValNodeInfo
 pattern DataConstructor tyName ctorName fields <- DataConstructorInternal tyName ctorName fields
 
-{-# COMPLETE Lit, App, Thunk, Cata, DataConstructor #-}
+-- | Deconstruct a value of a data type using the supplied handlers for each arm
+--
+-- @since 1.2.0
+
+pattern Match :: Ref -> Vector Ref -> ValNodeInfo
+pattern Match scrutinee handlers <- MatchInternal scrutinee handlers
+
+{-# COMPLETE Lit, App, Thunk, Cata, DataConstructor, Match #-}
 
 -- | Any problem that might arise when building an ASG programmatically.
 --
@@ -937,6 +944,21 @@ cata rAlg rVal =
             _ -> throwError . CataNotAnAlgebra $ t
         t -> throwError . CataNotAnAlgebra $ t
     t -> throwError . CataApplyToNonValT $ t
+
+match ::
+  forall (m :: Type -> Type).
+  (MonadHashCons Id ASGNode m, MonadError CovenantTypeError m, MonadReader ASGEnv m) =>
+  Ref ->
+  Vector Ref ->
+  m Id
+match scrutinee handlers = do
+  scrutTy <- typeRef scrutinee
+  isRecursive scrutTy >>= \case
+    True -> goRecursive scrutTy scrutinee handlers
+    False -> goNonRecursive scrutTy scrutinee handlers
+ where
+   isRecursive :: ValT AbstractTy -> m Bool
+   isRecursive _ = undefined
 
 -- Helpers
 
