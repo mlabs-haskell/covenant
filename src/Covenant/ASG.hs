@@ -168,7 +168,7 @@ import Covenant.Internal.Term
       ),
     Id,
     Ref (AnArg, AnId),
-    ValNodeInfo (AppInternal, CataInternal, DataConstructorInternal, LitInternal, ThunkInternal, MatchInternal),
+    ValNodeInfo (AppInternal, CataInternal, DataConstructorInternal, LitInternal, MatchInternal, ThunkInternal),
     typeASGNode,
     typeId,
     typeRef,
@@ -426,7 +426,6 @@ pattern DataConstructor tyName ctorName fields <- DataConstructorInternal tyName
 -- | Deconstruct a value of a data type using the supplied handlers for each arm
 --
 -- @since 1.2.0
-
 pattern Match :: Ref -> Vector Ref -> ValNodeInfo
 pattern Match scrutinee handlers <- MatchInternal scrutinee handlers
 
@@ -956,9 +955,9 @@ match scrutinee handlers = do
   isRecursive scrutTy >>= \case
     True -> goRecursive scrutTy scrutinee handlers
     False -> goNonRecursive scrutTy scrutinee handlers
- where
-   isRecursive :: ValT AbstractTy -> m Bool
-   isRecursive _ = undefined
+  where
+    isRecursive :: ValT AbstractTy -> m Bool
+    isRecursive _ = undefined
 
 -- Helpers
 
