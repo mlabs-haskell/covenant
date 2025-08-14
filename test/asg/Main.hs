@@ -1,3 +1,4 @@
+{-# LANGUAGE OverloadedLists #-}
 {-# LANGUAGE PatternSynonyms #-}
 
 module Main (main) where
@@ -7,17 +8,24 @@ import Control.Monad (guard, void)
 import Covenant.ASG
   ( ASG,
     ASGBuilder,
-    ASGNode (ACompNode),
+    ASGNode (ACompNode, AValNode, AnError),
     CompNodeInfo
       ( Builtin1,
         Builtin2,
         Builtin3
       ),
-    CovenantError (EmptyASG, TopLevelError, TopLevelValue, TypeError),
+    CovenantError
+      ( EmptyASG,
+        TopLevelError,
+        TopLevelValue,
+        TypeError
+      ),
     CovenantTypeError
       ( ApplyCompType,
         ApplyToError,
         ApplyToValType,
+        CataNoBaseFunctorForType,
+        CataNonRigidAlgebra,
         ForceCompType,
         ForceError,
         ForceNonThunk,
@@ -35,7 +43,9 @@ import Covenant.ASG
     builtin1,
     builtin2,
     builtin3,
+    cata,
     dataConstructor,
+    defaultDatatypes,
     err,
     force,
     lam,
@@ -66,6 +76,9 @@ import Covenant.Type
     CompTBody (ArgsAndResult, ReturnT, (:--:>)),
     ValT (BuiltinFlat, Datatype, ThunkT),
     arity,
+    boolT,
+    byteStringT,
+    integerT,
     tyvar,
   )
 import Covenant.Util (pattern ConsV, pattern NilV)
@@ -74,7 +87,7 @@ import Data.Kind (Type)
 import Data.Map qualified as M
 import Data.Maybe (fromJust)
 import Data.Vector qualified as Vector
-import Data.Wedge (Wedge (Nowhere), wedgeLeft)
+import Data.Wedge (Wedge (Here, Nowhere), wedgeLeft)
 import Optics.Core (preview, review)
 import Test.QuickCheck
   ( Gen,
@@ -120,7 +133,20 @@ main =
       nothingIntro,
       justConcreteIntro,
       justRigidIntro,
-      justNothingIntro
+      justNothingIntro,
+      testGroup
+        "Catamorphisms"
+        [ testCase "Natural_F can tear down an Integer" unitCataNaturalF,
+          testCase "Negative_F can tear down an Integer" unitCataNegativeF,
+          testCase "ByteString_F can tear down a ByteString" unitCataByteStringF,
+          testCase "Non-recursive type cata should fail" unitCataMaybeF,
+          testCase "Cata with non-rigid algebra should fail" unitCataNonRigidF,
+          testCase "<List_F Integer Bool -> !Bool> with List Integer should be Bool" unitCataListInteger,
+          testCase "<List_F Integer r -> !r> with List Integer should be r" unitCataListIntegerRigid,
+          testCase "<List_F r Integer -> !Integer> with List r should be Integer" unitCataListRigid,
+          testCase "<List_F r (Maybe r) -> !Maybe r> with List r should be Maybe r" unitCataListMaybeRigid,
+          testCase "introduction then cata elimination" unitCataIntroThenEliminate
+        ]
     ]
   where
     moreTests :: QuickCheckTests -> QuickCheckTests
@@ -157,6 +183,177 @@ unitThunkError = do
   case result of
     Left (TypeError _ ThunkError) -> pure ()
     _ -> assertFailure $ "Unexpected result: " <> show result
+
+-- Construct a function of type `<Natural_F Bool -> !Bool> -> Integer -> !Bool`, whose
+-- body performs a cata over its second argument using its first argument. This
+-- should compile, and type as expected.
+unitCataNaturalF :: IO ()
+unitCataNaturalF = do
+  let thunkTy = ThunkT $ Comp0 $ Datatype "Natural_F" [boolT] :--:> ReturnT boolT
+  let ty = Comp0 $ thunkTy :--:> integerT :--:> ReturnT boolT
+  let comp = lam ty $ do
+        alg <- arg Z ix0
+        x <- arg Z ix1
+        result <- cata (AnArg alg) (AnArg x)
+        pure . AnId $ result
+  withCompilationSuccessUnit comp $ matchesType ty
+
+-- Construct a function of type `<Negative_F Bool -> !Bool> -> Integer -> !Bool`, whose
+-- body performs a cata over its second argument using its first argument. This
+-- should compile, and type as expected.
+unitCataNegativeF :: IO ()
+unitCataNegativeF = do
+  let thunkTy = ThunkT $ Comp0 $ Datatype "Negative_F" [boolT] :--:> ReturnT boolT
+  let ty = Comp0 $ thunkTy :--:> integerT :--:> ReturnT boolT
+  let comp = lam ty $ do
+        alg <- arg Z ix0
+        x <- arg Z ix1
+        result <- cata (AnArg alg) (AnArg x)
+        pure . AnId $ result
+  withCompilationSuccessUnit comp $ matchesType ty
+
+-- Construct a function of type `<ByteString_F Integer -> !Integer> -> ByteString
+-- -> !Bool`, whose body performs a cata over its second argument using its
+-- first argument. This should compile, and type as expected.
+unitCataByteStringF :: IO ()
+unitCataByteStringF = do
+  let thunkTy = ThunkT $ Comp0 $ Datatype "ByteString_F" [integerT] :--:> ReturnT integerT
+  let ty = Comp0 $ thunkTy :--:> byteStringT :--:> ReturnT integerT
+  let comp = lam ty $ do
+        alg <- arg Z ix0
+        x <- arg Z ix1
+        result <- cata (AnArg alg) (AnArg x)
+        pure . AnId $ result
+  withCompilationSuccessUnit comp $ matchesType ty
+
+-- Construct a function of type `forall a . <Maybe_F a Integer -> !Integer> -> Maybe
+-- a -> !Integer`, whose body performs a cata over its second argument
+-- using its first argument. This should fail to compile, indicating that
+-- `Maybe` doesn't have a base functor.
+unitCataMaybeF :: IO ()
+unitCataMaybeF = do
+  let thunkTy = ThunkT $ Comp0 $ Datatype "Maybe_F" [tyvar (S Z) ix0, integerT] :--:> ReturnT integerT
+  let ty = Comp1 $ thunkTy :--:> Datatype "Maybe" [tyvar Z ix0] :--:> ReturnT integerT
+  let comp = lam ty $ do
+        alg <- arg Z ix0
+        x <- arg Z ix1
+        result <- cata (AnArg alg) (AnArg x)
+        pure . AnId $ result
+  withCompilationFailureUnit comp $ \case
+    TypeError _ (CataNoBaseFunctorForType tyName) -> assertEqual "" "Maybe" tyName
+    err' -> assertFailure $ "Failed with unexpected type of error: " <> show err'
+
+-- Construct a function of type `<forall a . ListF a (Maybe a) -> !Maybe a> -> List
+-- Integer -> !Maybe Integer`, whose body performs a cata over its second
+-- argument using its first argument. This should fail to compile due to a
+-- non-rigid algebra.
+unitCataNonRigidF :: IO ()
+unitCataNonRigidF = do
+  let nonRigidCompT = Comp1 $ Datatype "List_F" [tyvar Z ix0, Datatype "Maybe" [tyvar Z ix0]] :--:> ReturnT (Datatype "Maybe" [tyvar Z ix0])
+  let thunkTy = ThunkT nonRigidCompT
+  let ty = Comp0 $ thunkTy :--:> Datatype "List" [integerT] :--:> ReturnT (Datatype "Maybe" [integerT])
+  let comp = lam ty $ do
+        alg <- arg Z ix0
+        x <- arg Z ix1
+        result <- cata (AnArg alg) (AnArg x)
+        pure . AnId $ result
+  withCompilationFailureUnit comp $ \case
+    TypeError _ (CataNonRigidAlgebra t) -> assertEqual "" nonRigidCompT t
+    err' -> assertFailure $ "Failed with unexpected type of error: " <> show err'
+
+-- Construct a function of type `<List_F Integer Bool -> !Bool> -> List Integer
+-- -> !Bool`, whose body performs a cata over its second argument using its
+-- first argument. This should compile, and type as expected.
+unitCataListInteger :: IO ()
+unitCataListInteger = do
+  let thunkTy = ThunkT $ Comp0 $ Datatype "List_F" [integerT, boolT] :--:> ReturnT boolT
+  let ty = Comp0 $ thunkTy :--:> Datatype "List" [integerT] :--:> ReturnT boolT
+  let comp = lam ty $ do
+        alg <- arg Z ix0
+        x <- arg Z ix1
+        result <- cata (AnArg alg) (AnArg x)
+        pure . AnId $ result
+  withCompilationSuccessUnit comp $ matchesType ty
+
+-- Construct a function of type `forall a . <List_F Integer a -> !a> -> List
+-- Integer -> !a`, whose body performs a cata over its second argument using its
+-- first argument. This should compile, and type as expected.
+unitCataListIntegerRigid :: IO ()
+unitCataListIntegerRigid = do
+  let thunkTy = ThunkT $ Comp0 $ Datatype "List_F" [integerT, tyvar (S Z) ix0] :--:> ReturnT (tyvar (S Z) ix0)
+  let ty = Comp1 $ thunkTy :--:> Datatype "List" [integerT] :--:> ReturnT (tyvar Z ix0)
+  let comp = lam ty $ do
+        alg <- arg Z ix0
+        x <- arg Z ix1
+        result <- cata (AnArg alg) (AnArg x)
+        pure . AnId $ result
+  withCompilationSuccessUnit comp $ matchesType ty
+
+-- Construct a function of type `forall a . <List_F a Integer -> !Integer> -> List
+-- a -> !Integer`, whose body performs a cata over its second argument using its
+-- first argument. This should compile, and type as expected.
+unitCataListRigid :: IO ()
+unitCataListRigid = do
+  let thunkTy = ThunkT $ Comp0 $ Datatype "List_F" [tyvar (S Z) ix0, integerT] :--:> ReturnT integerT
+  let ty = Comp1 $ thunkTy :--:> Datatype "List" [tyvar Z ix0] :--:> ReturnT integerT
+  let comp = lam ty $ do
+        alg <- arg Z ix0
+        x <- arg Z ix1
+        result <- cata (AnArg alg) (AnArg x)
+        pure . AnId $ result
+  withCompilationSuccessUnit comp $ matchesType ty
+
+-- Construct a function of type `forall a . <List_F a (Maybe a) -> !Maybe a> ->
+-- List a -> !Maybe a`, whose body performs a cata over its second argument
+-- using its first argument. This should compile, and type as expected.
+unitCataListMaybeRigid :: IO ()
+unitCataListMaybeRigid = do
+  let thunkTy =
+        ThunkT $
+          Comp0 $
+            Datatype "List_F" [tyvar (S Z) ix0, Datatype "Maybe" [tyvar (S Z) ix0]]
+              :--:> ReturnT (Datatype "Maybe" [tyvar (S Z) ix0])
+  let ty =
+        Comp1 $
+          thunkTy
+            :--:> Datatype "List" [tyvar Z ix0]
+            :--:> ReturnT (Datatype "Maybe" [tyvar Z ix0])
+  let comp = lam ty $ do
+        alg <- arg Z ix0
+        x <- arg Z ix1
+        result <- cata (AnArg alg) (AnArg x)
+        pure . AnId $ result
+  withCompilationSuccessUnit comp $ matchesType ty
+
+-- Construct a function of type `forall a b . <List_F a (Maybe b) -> !Maybe b> ->
+-- a -> !Maybe b`. In its body, we construct a singleton list, then eliminate it
+-- using a cata with the first argument as the algebra. THis should compile and
+-- type as expected.
+unitCataIntroThenEliminate :: IO ()
+unitCataIntroThenEliminate = do
+  let thunkTy =
+        ThunkT $
+          Comp0 $
+            Datatype "List_F" [tyvar (S Z) ix0, Datatype "Maybe" [tyvar (S Z) ix1]]
+              :--:> ReturnT (Datatype "Maybe" [tyvar (S Z) ix1])
+  let ty =
+        Comp2 $
+          thunkTy
+            :--:> tyvar Z ix0
+            :--:> ReturnT (Datatype "Maybe" [tyvar Z ix1])
+  let comp = lam ty $ do
+        alg <- arg Z ix0
+        x <- arg Z ix1
+        nilThunk <- dataConstructor "List" "Nil" []
+        nilForced <- force (AnId nilThunk)
+        aT <- boundTyVar Z ix0
+        nilApplied <- app nilForced [] [Here aT]
+        singleThunk <- dataConstructor "List" "Cons" [AnArg x, AnId nilApplied]
+        singleForced <- force (AnId singleThunk)
+        singleApplied <- app singleForced [] [Nowhere]
+        result <- cata (AnArg alg) (AnId singleApplied)
+        pure . AnId $ result
+  withCompilationSuccessUnit comp $ matchesType ty
 
 -- Properties
 
@@ -513,12 +710,12 @@ justNothingIntro = runIntroFormTest "justNothingIntro" expectedThunk $ do
     expectedThunk :: ValT AbstractTy
     expectedThunk = ThunkT expectedComp
 
+-- Helpers
+
 runIntroFormTest :: String -> ValT AbstractTy -> DebugASGBuilder (ValT AbstractTy) -> TestTree
 runIntroFormTest nm expectedTy act = testCase nm $ case debugASGBuilder tyAppTestDatatypes act of
   Left err' -> assertFailure ("ASG Error: " <> show err')
   Right actualTy -> assertEqual nm expectedTy actualTy
-
--- Helpers
 
 failWrongTypeError :: CovenantTypeError -> Property
 failWrongTypeError err' = failWithCounterExample ("Unexpected type error: " <> show err')
@@ -551,6 +748,22 @@ failUnexpectedCompNodeInfo info =
 failUnexpectedValNodeInfo :: ValNodeInfo -> Property
 failUnexpectedValNodeInfo info =
   failWithCounterExample ("Unexpected ValNodeInfo: " <> show info)
+
+withCompilationSuccessUnit :: ASGBuilder Id -> (ASG -> IO ()) -> IO ()
+withCompilationSuccessUnit comp cb = case runASGBuilder defaultDatatypes comp of
+  Left err' -> assertFailure $ "Did not compile: " <> show err'
+  Right asg -> cb asg
+
+withCompilationFailureUnit :: ASGBuilder Id -> (CovenantError -> IO ()) -> IO ()
+withCompilationFailureUnit comp cb = case runASGBuilder defaultDatatypes comp of
+  Left err' -> cb err'
+  Right asg -> assertFailure $ "Unexpected compilation success: " <> show asg
+
+matchesType :: CompT AbstractTy -> ASG -> IO ()
+matchesType expectedTy asg = case topLevelNode asg of
+  ACompNode actualTy _ -> assertEqual "" expectedTy actualTy
+  u@(AValNode _ _) -> assertFailure $ "Got a value node: " <> show u
+  AnError -> assertFailure "Got an error node"
 
 {- NOTE: Not 100% sure I won't need these
 withExpectedId :: Ref -> (Id -> Property) -> Property

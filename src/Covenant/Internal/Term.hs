@@ -130,6 +130,11 @@ data CovenantTypeError
 
     -- | Wraps an encoding argument mismatch error from KindCheck
     EncodingError (EncodingArgErr AbstractTy)
+  | -- | The first argument to a catamorphism wasn't an algebra, as
+    -- it had the wrong arity.
+    --
+    -- @since 1.2.0
+    CataAlgebraWrongArity Int
   | -- | The first argument to a catamorphism wasn't an algebra.
     --
     -- @since 1.1.0
@@ -138,6 +143,11 @@ data CovenantTypeError
     --
     -- @since 1.1.0
     CataApplyToNonValT ASGNodeType
+  | -- The algebra given to this catamorphism is not rigid (that is, its
+    -- computation type binds variables).
+    --
+    -- @since 1.2.0
+    CataNonRigidAlgebra (CompT AbstractTy)
   | -- | The second argument to a catamorphism is a builtin type, but not one
     -- we can eliminate with a catamorphism.
     --
@@ -148,6 +158,14 @@ data CovenantTypeError
     --
     -- @since 1.1.0
     CataWrongValT (ValT AbstractTy)
+  | -- | We requested a catamorphism for a type that doesn't exist.
+    --
+    -- @since 1.2.0
+    CataNoSuchType TyName
+  | -- | We requested a catamorphism for a type without a base functor.
+    --
+    -- @since 1.2.0
+    CataNoBaseFunctorForType TyName
   | -- | The provided algebra is not suitable for the given type.
     --
     -- @since 1.1.0
