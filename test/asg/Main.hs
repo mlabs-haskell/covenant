@@ -76,8 +76,18 @@ import Covenant.Test
     tyAppTestDatatypes,
     typeIdTest,
   )
-import Covenant.Type (AbstractTy,
-                      BuiltinFlatT (IntegerT, UnitT), CompT (Comp0, Comp1, Comp2, CompN), CompTBody (ArgsAndResult, ReturnT, (:--:>)), ValT (BuiltinFlat, Datatype, ThunkT), arity, boolT, byteStringT, integerT, tyvar)
+import Covenant.Type
+  ( AbstractTy,
+    BuiltinFlatT (IntegerT, UnitT),
+    CompT (Comp0, Comp1, Comp2, CompN),
+    CompTBody (ArgsAndResult, ReturnT, (:--:>)),
+    ValT (BuiltinFlat, Datatype, ThunkT),
+    arity,
+    boolT,
+    byteStringT,
+    integerT,
+    tyvar,
+  )
 import Covenant.Util (pattern ConsV, pattern NilV)
 import Data.Coerce (coerce)
 import Data.Kind (Type)
@@ -728,7 +738,6 @@ matchMaybe = runIntroFormTest "matchMaybe" (BuiltinFlat IntegerT) $ do
   justHandler <- lazyLam (Comp0 $ BuiltinFlat UnitT :--:> ReturnT (BuiltinFlat IntegerT)) (AnId <$> lit (AnInteger 1))
   result <- match (AnId scrutinee) (AnId <$> Vector.fromList [justHandler, nothingHandler])
   typeIdTest result
-
 
 {- Construct a pattern match on 'List Unit' that returns an integer.
 

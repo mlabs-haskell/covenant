@@ -168,6 +168,7 @@ import Covenant.Internal.Term
         LambdaResultsInNonReturn,
         MatchErrorAsHandler,
         MatchNoBBForm,
+        MatchNoDatatypeInfo,
         MatchNonDatatypeScrutinee,
         MatchNonThunkBBF,
         MatchNonValTy,
@@ -187,7 +188,7 @@ import Covenant.Internal.Term
         UndeclaredOpaquePlutusDataCtor,
         UndoRenameFailure,
         UnificationError,
-        WrongReturnType, MatchNoDatatypeInfo
+        WrongReturnType
       ),
     Id,
     Ref (AnArg, AnId),
@@ -995,7 +996,7 @@ match scrutinee handlers = do
   where
     isRecursive :: ValT AbstractTy -> m Bool
     isRecursive (Datatype tyName _) = do
-      datatypeInfoExists <- asks ( isJust . preview (#datatypeInfo % ix tyName))
+      datatypeInfoExists <- asks (isJust . preview (#datatypeInfo % ix tyName))
       if datatypeInfoExists
         then asks (isJust . join . preview (#datatypeInfo % ix tyName % #baseFunctor))
         else throwError $ MatchNoDatatypeInfo tyName
