@@ -187,7 +187,7 @@ import Covenant.Internal.Term
         UndeclaredOpaquePlutusDataCtor,
         UndoRenameFailure,
         UnificationError,
-        WrongReturnType
+        WrongReturnType, MatchNoDatatypeInfo
       ),
     Id,
     Ref (AnArg, AnId),
@@ -995,9 +995,10 @@ match scrutinee handlers = do
   where
     isRecursive :: ValT AbstractTy -> m Bool
     isRecursive (Datatype tyName _) = do
-      -- TODO: We want to throw an error here if the datatype info doesn't exist
-      --       (since we'll have to throw it later in any case when it doesn't exist)
-      asks (isJust . join . preview (#datatypeInfo % ix tyName % #baseFunctor))
+      datatypeInfoExists <- asks ( isJust . preview (#datatypeInfo % ix tyName))
+      if datatypeInfoExists
+        then asks (isJust . join . preview (#datatypeInfo % ix tyName % #baseFunctor))
+        else throwError $ MatchNoDatatypeInfo tyName
     isRecursive _ = pure False
 
     goRecursive :: TyName -> Vector (ValT AbstractTy) -> m Id
@@ -1047,13 +1048,10 @@ match scrutinee handlers = do
             other -> throwError $ MatchNonThunkBBF other
 
     -- Unwraps a thunk handler if it is a handler for a nullary constructor.
-    -- REVIEW @Koz: Is the the right way to do this? It's easier to just look at the type of the handler vs
-    --              trying to associate it with a particular constructor at this point.
     cleanupHandler :: Ref -> m (ValT Renamed)
     cleanupHandler r =
       renameArg r >>= \case
         Nothing ->
-          -- A `Nothing` here means the Ref points to an error node (I THINK)
           throwError $ MatchErrorAsHandler r
         Just hVal -> case hVal of
           hdlr@(ThunkT (CompT cnt (ReturnT v)))

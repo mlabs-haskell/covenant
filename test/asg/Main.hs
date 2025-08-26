@@ -76,7 +76,8 @@ import Covenant.Test
     tyAppTestDatatypes,
     typeIdTest,
   )
-import Covenant.Type (AbstractTy, BuiltinFlatT (IntegerT, UnitT), CompT (Comp0, Comp1, Comp2, CompN), CompTBody (ArgsAndResult, ReturnT, (:--:>)), ValT (BuiltinFlat, Datatype, ThunkT), arity, boolT, byteStringT, integerT, tyvar)
+import Covenant.Type (AbstractTy,
+                      BuiltinFlatT (IntegerT, UnitT), CompT (Comp0, Comp1, Comp2, CompN), CompTBody (ArgsAndResult, ReturnT, (:--:>)), ValT (BuiltinFlat, Datatype, ThunkT), arity, boolT, byteStringT, integerT, tyvar)
 import Covenant.Util (pattern ConsV, pattern NilV)
 import Data.Coerce (coerce)
 import Data.Kind (Type)
@@ -84,7 +85,6 @@ import Data.Map qualified as M
 import Data.Maybe (fromJust)
 import Data.Vector qualified as Vector
 import Data.Wedge (Wedge (Here, Nowhere, There), wedgeLeft)
-import Debug.Trace (traceM)
 import Optics.Core (preview, review)
 import Test.QuickCheck
   ( Gen,
@@ -715,6 +715,11 @@ justNothingIntro = runIntroFormTest "justNothingIntro" expectedThunk $ do
 
 -- pattern matching
 
+{- Construct a pattern match on 'Maybe Unit' that returns an integer.
+
+   This is effectively the simplest possible pattern matching test: The type is non-recursive and the
+   parameters to the type constructor are all concrete.
+-}
 matchMaybe :: TestTree
 matchMaybe = runIntroFormTest "matchMaybe" (BuiltinFlat IntegerT) $ do
   unit <- AnId <$> lit AUnit
@@ -724,6 +729,11 @@ matchMaybe = runIntroFormTest "matchMaybe" (BuiltinFlat IntegerT) $ do
   result <- match (AnId scrutinee) (AnId <$> Vector.fromList [justHandler, nothingHandler])
   typeIdTest result
 
+
+{- Construct a pattern match on 'List Unit' that returns an integer.
+
+   A simple test for pattern matches on values of recursive types.
+-}
 matchList :: TestTree
 matchList = runIntroFormTest "matchList" (BuiltinFlat IntegerT) $ do
   unit <- AnId <$> lit AUnit
@@ -740,7 +750,12 @@ matchList = runIntroFormTest "matchList" (BuiltinFlat IntegerT) $ do
   result <- match (AnId scrutinee) (AnId <$> Vector.fromList [nilHandler, consHandler])
   typeIdTest result
 
--- forall a. Maybe a -> List a
+{- This differs from the two above tests in that we're using pattern matching to construct the
+   'maybeToList :: forall a. Maybe a -> List a' function. This is very useful, because if successful, it provides good evidence that:
+     1. Pattern matching works on datatypes with rigid parameters.
+     2. Pattern matching works inside the body of a lambda.
+     3. Nothing breaks renaming anywhere.
+-}
 maybeToList :: TestTree
 maybeToList = runIntroFormTest "maybeToList" maybeToListTy $ do
   thonk <- lazyLam maybeToListCompTy $ do
@@ -749,13 +764,11 @@ maybeToList = runIntroFormTest "maybeToList" maybeToListTy $ do
     nothingHandler <- lazyLam nothingHandlerTy $ do
       tvA <- boundTyVar (S Z) ix0
       AnId <$> ctor "List" "Nil" mempty (Vector.singleton (Here tvA))
-    traceM "nothingHandler"
     justHandler <- lazyLam justHandlerTy $ do
       tvA <- boundTyVar (S Z) ix0
       vA <- AnArg <$> arg Z ix0
       nil <- AnId <$> ctor "List" "Nil" mempty (Vector.singleton (Here tvA))
       AnId <$> ctor "List" "Cons" (Vector.fromList [vA, nil]) (Vector.singleton Nowhere)
-    traceM "justHandler"
     scrutinee <- AnArg <$> arg Z ix0
     AnId <$> match scrutinee (AnId <$> Vector.fromList [justHandler, nothingHandler])
   typeIdTest thonk
