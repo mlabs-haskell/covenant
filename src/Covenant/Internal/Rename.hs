@@ -129,7 +129,7 @@ instance
 -- @since 1.1.0
 data RenameError
   = -- | An attempt to reference an abstraction in a scope where this
-    -- abstraction doesn't exist, but where the scope itself *does* exist.
+    -- abstraction doesn't exist, but where the scope itself /does/ exist.
     -- Put another way: This gets thrown when the argument index of an
     -- abstraction inconsistent with the `Count` of the scope its DB index refers to.
     -- First field is the true level, second is the index that was requested.
@@ -138,11 +138,12 @@ data RenameError
     InvalidAbstractionReference Int (Index "tyvar")
   | -- | An abstraction refers to a scope which does not exist. That is: The abstraction's
     -- DeBruijn index points to a scope "higher than" the top-level scope.
+    --
     -- @since 1.2.0
     InvalidScopeReference Int (Index "tyvar")
   deriving stock (Eq, Show)
 
--- | Ways in which the un-renamer can fail
+-- | Ways in which the un-renamer can fail.
 --
 -- @since 1.2.0
 data UnRenameError

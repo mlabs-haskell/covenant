@@ -126,9 +126,9 @@ data CovenantTypeError
     --
     -- @since 1.0.0
     WrongReturnType (ValT AbstractTy) (ValT AbstractTy)
-  | -- @since 1.1.0
-
-    -- | Wraps an encoding argument mismatch error from KindCheck
+  | -- | Wraps an encoding argument mismatch error from KindCheck
+    --
+    -- @since 1.1.0
     EncodingError (EncodingArgErr AbstractTy)
   | -- | The first argument to a catamorphism wasn't an algebra, as
     -- it had the wrong arity.
@@ -171,76 +171,95 @@ data CovenantTypeError
     -- @since 1.1.0
     CataUnsuitable (CompT AbstractTy) (ValT AbstractTy)
   | -- | Someone attempted to construct a tyvar using a DB index or argument position
-    --   which refers to a scope (or argument) that does not exist.3
+    --   which refers to a scope (or argument) that does not exist.
+    --
     -- @since 1.2.0
     OutOfScopeTyVar DeBruijn (Index "tyvar")
-  | -- | We failed to rename an "instantiation type" supplied to `app`
+  | -- | We failed to rename an "instantiation type" supplied to 'Covenant.ASG.app'.
+    --
     -- @since 1.2.0
     FailedToRenameInstantiation RenameError
-  | -- | With recent changes, undoRename is no longer deterministic, and we might get an error, which we have to "lift"
+  | -- | Un-renaming failed.
+    --
     -- @since 1.2.0
     UndoRenameFailure UnRenameError
-  | -- | We tried to lookup the DatatypeInfo corresponding to a TyName and came up empty handed
+  | -- | We tried to look up the 'DatatypeInfo' corresponding to a 'TyName' and came up empty handed.
+    --
     -- @since 1.2.0
     TypeDoesNotExist TyName
-  | -- | We tried to rename a DatatypeInfo and failed. For now, only Intro Form helpers throw this but
-    --   something else might in the future so I'm keeping the name generic.
+  | -- | We tried to rename a 'DatatypeInfo' and failed.
+    --
     -- @since 1.2.0
     DatatypeInfoRenameError RenameError
-  | -- | We tried to lookup a constructor for a given type. The type exists, but the constructor does not.
+  | -- | We tried to look up a constructor for a given type. The type exists, but the constructor does not.
+    --
     -- @since 1.2.0
     ConstructorDoesNotExistForType TyName ConstructorName
   | -- | When using the helper function to construct an introduction form, the type and constructor exist but the
     --   number of fields provided as an argument does not match the number of declared fields.
-    --   The `Int` is the *incorrect* number of *supplied* fields
+    --   The 'Int' is the /incorrect/ number of /supplied/ fields.
+    --
     -- @since 1.2.0
     IntroFormWrongNumArgs TyName ConstructorName Int
-  | -- | The user passed an error node as an argument to a datatype into form.
-    --   While we could theoretically handle this, there doesn't seem to be a good reason to do so, and passing
-    --   such a node is almost certainly a mistake.
-    --   We just return the arguments to `dataConstructor` since that's all we can really do.
+  | -- | The user passed an error node as an argument to a datatype into form. We return the arguments given
+    --   to 'Covenant.ASG.dataConstructor' in the error.
+    --
     -- @since 1.2.0
     IntroFormErrorNodeField TyName ConstructorName (Vector Ref)
-  | -- | The user tried to construct an introduction form using a Plutus Data constructor not found in the
-    --   opaque datatype declaration
+  | -- | The user tried to construct an introduction form using a Plutus @Data@ constructor not found in the
+    --   opaque datatype declaration.
+    --
     -- @since 1.2.0
     UndeclaredOpaquePlutusDataCtor (Set.Set PlutusDataConstructor) ConstructorName
-  | -- | The user tried to construct an introduction form with a valid Plutus Data constructor, but supplied a ref
-    --   to a field of the wrong type.
+  | -- | The user tried to construct an introduction form with a valid Plutus @Data@ constructor, but
+    --   supplied a 'Covenant.ASG.Ref' to a field of the wrong type.
+    --
     -- @since 1.2.0
     InvalidOpaqueField (Set.Set PlutusDataConstructor) ConstructorName [ValT Renamed]
-  | -- The user tried to match on (i.e. use as a scrutinee) a node that wasn't a ValNode
+  | -- The user tried to match on (i.e. use as a scrutinee) a node that wasn't a value.
+    --
     -- @since 1.2.0
     MatchNonValTy ASGNodeType
-  | -- | Somehow we got a BFBB that is something other than a thunk after instantiation during pattern matching.
-    --   This is really an "internal" error since there's nothing the user can do, but it's useful as
-    --   a clear indication to *us* that we've made a mistake in this particular place.
+  | -- | Internal error: we found a base functor Boehm-Berrarducci form that isn't a thunk after instantiation
+    --   during pattern matching.Somehow we got a BFBB that is something other than a thunk after instantiation during pattern matching.
+    --
+    --   This should not normally happen: let us know if you see this error!
+    --
     -- @since 1.2.0
     MatchNonThunkBBF (ValT Renamed)
-  | -- | We encountered a rename error during pattern matching. This will either refer to the BB form or BBF form,
-    --   depending on which branch we are in.
+  | -- | We encountered a rename error during pattern matching. This will refer
+    -- to either the Boehm-Berrarducci form, or the base functor Boehm-Berrarducci form, depending on what type we tried to match.
+    --
     -- @since 1.2.0
     MatchRenameBBFail RenameError
   | -- | This indicates that we encountered an error when renaming the arguments to the type constructor of the
-    --   *scrutinee type* during pattern matching. That is, if we're matching on `Either a b`, this means that
-    --   either `a` or `b` failed to rename. Again, this is largely internal and should be impossible on the assumption
-    --   that everything in the ASG was constructed with our helper functions.
+    --   /scrutinee type/ during pattern matching. That is, if we're matching on @Either a b@, this means that
+    --   either @a@ or @b@ failed to rename.
+    --
+    --  This should not normally happen: let us know if you see this error!
+    --
     -- @since 1.2.0
     MatchRenameTyConArgFail RenameError
-  | -- | A user tried to use a polymorphic handler in a pattern match. We forbid this (because it gives rise to
-    --   an annoying problem and the restriction does not meainginfully limit the power of the language)
+  | -- | A user tried to use a polymorphic handler in a pattern match, which is not currently allowed.
+    --
     -- @since 1.2.0
     MatchPolymorphicHandler (ValT Renamed)
-  | -- | Someone tried to use an error node as a handler, which isn't allowed.
+  | -- | We tried to use an error node as a pattern match handler.
+    --
     -- @since 1.2.0
     MatchErrorAsHandler Ref
-  | -- | The non-recursive branch of a pattern match needs a BBF for the given type name, but none was found.
+  | -- | The non-recursive branch of a pattern match needs a Boehm-Berrarducci form for the given type
+    -- name, but it doesn't exist.
+    --
     -- @since 1.2.0
     MatchNoBBForm TyName
   | -- | Someone tried to match on something that isn't a datatype.
+    --
     -- @since 1.2.0
     MatchNonDatatypeScrutinee (ValT AbstractTy)
-  | -- | The scrutinee is a datatype, be don't have it in our datatype dictionary
+  | -- | The scrutinee is a datatype, be don't have it in our datatype dictionary.
+    --
+    -- @since 1.2.0
     MatchNoDatatypeInfo TyName
   deriving stock
     ( -- | @since 1.0.0
