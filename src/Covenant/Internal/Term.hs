@@ -212,33 +212,33 @@ data CovenantTypeError
   | -- The user tried to match on (i.e. use as a scrutinee) a node that wasn't a ValNode
     -- @since 1.2.0
     MatchNonValTy ASGNodeType
-    -- | Somehow we got a BFBB that is something other than a thunk after instantiation during pattern matching.
+  | -- | Somehow we got a BFBB that is something other than a thunk after instantiation during pattern matching.
     --   This is really an "internal" error since there's nothing the user can do, but it's useful as
     --   a clear indication to *us* that we've made a mistake in this particular place.
     -- @since 1.2.0
-  | MatchNonThunkBBF (ValT Renamed)
-    -- | We encountered a rename error during pattern matching. This will either refer to the BB form or BBF form,
+    MatchNonThunkBBF (ValT Renamed)
+  | -- | We encountered a rename error during pattern matching. This will either refer to the BB form or BBF form,
     --   depending on which branch we are in.
     -- @since 1.2.0
-  | MatchRenameBBFail RenameError
-    -- | This indicates that we encountered an error when renaming the arguments to the type constructor of the
+    MatchRenameBBFail RenameError
+  | -- | This indicates that we encountered an error when renaming the arguments to the type constructor of the
     --   *scrutinee type* during pattern matching. That is, if we're matching on `Either a b`, this means that
     --   either `a` or `b` failed to rename. Again, this is largely internal and should be impossible on the assumption
     --   that everything in the ASG was constructed with our helper functions.
     -- @since 1.2.0
-  | MatchRenameTyConArgFail RenameError
-  -- | A user tried to use a polymorphic handler in a pattern match. We forbid this (because it gives rise to
-  --   an annoying problem and the restriction does not meainginfully limit the power of the language)
-  -- @since 1.2.0
-  | MatchPolymorphicHandler (ValT Renamed)
-  -- | Someone tried to use an error node as a handler, which isn't allowed.
-  -- @since 1.2.0
-  | MatchErrorAsHandler Ref
-  -- | The non-recursive branch of a pattern match needs a BBF for the given type name, but none was found.
-  -- @since 1.2.0
-  | MatchNoBBForm TyName
-  -- | Someone tried to match on something that isn't a datatype.
-  | MatchNonDatatypeScrutinee (ValT AbstractTy)
+    MatchRenameTyConArgFail RenameError
+  | -- | A user tried to use a polymorphic handler in a pattern match. We forbid this (because it gives rise to
+    --   an annoying problem and the restriction does not meainginfully limit the power of the language)
+    -- @since 1.2.0
+    MatchPolymorphicHandler (ValT Renamed)
+  | -- | Someone tried to use an error node as a handler, which isn't allowed.
+    -- @since 1.2.0
+    MatchErrorAsHandler Ref
+  | -- | The non-recursive branch of a pattern match needs a BBF for the given type name, but none was found.
+    -- @since 1.2.0
+    MatchNoBBForm TyName
+  | -- | Someone tried to match on something that isn't a datatype.
+    MatchNonDatatypeScrutinee (ValT AbstractTy)
   deriving stock
     ( -- | @since 1.0.0
       Eq,

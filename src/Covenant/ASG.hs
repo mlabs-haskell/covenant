@@ -85,13 +85,12 @@ module Covenant.ASG
     ctor,
     lazyLam,
     dtype,
-    
     -- only for tests
     ASGEnv (..),
   )
 where
 
-import Control.Monad (foldM, unless, zipWithM, join)
+import Control.Monad (foldM, join, unless, zipWithM)
 import Control.Monad.Except
   ( ExceptT,
     MonadError (throwError),
@@ -111,7 +110,7 @@ import Control.Monad.Reader
 import Covenant.Constant (AConstant, typeConstant)
 import Covenant.Data (DatatypeInfo, mkDatatypeInfo)
 import Covenant.DeBruijn (DeBruijn (S, Z), asInt)
-import Covenant.Index (Count, Index, intCount, intIndex, wordCount, count0)
+import Covenant.Index (Count, Index, count0, intCount, intIndex, wordCount)
 import Covenant.Internal.KindCheck (checkEncodingArgs)
 import Covenant.Internal.Ledger (ledgerTypes)
 import Covenant.Internal.Rename
@@ -162,6 +161,14 @@ import Covenant.Internal.Term
         InvalidOpaqueField,
         LambdaResultsInCompType,
         LambdaResultsInNonReturn,
+        MatchErrorAsHandler,
+        MatchNoBBForm,
+        MatchNonDatatypeScrutinee,
+        MatchNonThunkBBF,
+        MatchNonValTy,
+        MatchPolymorphicHandler,
+        MatchRenameBBFail,
+        MatchRenameTyConArgFail,
         NoSuchArgument,
         OutOfScopeTyVar,
         RenameArgumentFailed,
@@ -175,7 +182,7 @@ import Covenant.Internal.Term
         UndeclaredOpaquePlutusDataCtor,
         UndoRenameFailure,
         UnificationError,
-        WrongReturnType, MatchNonValTy, MatchNonThunkBBF, MatchRenameBBFail, MatchRenameTyConArgFail, MatchPolymorphicHandler, MatchErrorAsHandler, MatchNoBBForm, MatchNonDatatypeScrutinee
+        WrongReturnType
       ),
     Id,
     Ref (AnArg, AnId),
@@ -233,8 +240,9 @@ import Covenant.Type
     DataDeclaration (OpaqueData),
     PlutusDataConstructor (PlutusB, PlutusConstr, PlutusI, PlutusList, PlutusMap),
     Renamed (Unifiable),
+    TyName (TyName),
     ValT (Abstraction),
-    tyvar, TyName (TyName),
+    tyvar,
   )
 import Data.Bimap (Bimap)
 import Data.Bimap qualified as Bimap
@@ -244,7 +252,7 @@ import Data.Kind (Type)
 import Data.List (find, foldl')
 import Data.Map.Strict (Map)
 import Data.Map.Strict qualified as Map
-import Data.Maybe (fromJust, mapMaybe, isJust)
+import Data.Maybe (fromJust, isJust, mapMaybe)
 import Data.Set qualified as Set
 import Data.Text qualified as T
 import Data.Vector (Vector)
@@ -269,6 +277,7 @@ import Optics.Core
     _1,
     _2,
   )
+
 -- | A fully-assembled Covenant ASG.
 --
 -- @since 1.0.0
@@ -972,11 +981,12 @@ match ::
 match scrutinee handlers = do
   scrutNodeTy <- typeRef scrutinee
   case scrutNodeTy of
-    ValNodeType scrutTy@(Datatype tn args) -> isRecursive scrutTy >>= \case
-      True ->  goRecursive tn args
-      False -> goNonRecursive tn args
+    ValNodeType scrutTy@(Datatype tn args) ->
+      isRecursive scrutTy >>= \case
+        True -> goRecursive tn args
+        False -> goNonRecursive tn args
     ValNodeType other -> throwError $ MatchNonDatatypeScrutinee other
-    other -> throwError $ MatchNonValTy other 
+    other -> throwError $ MatchNonValTy other
   where
     isRecursive :: ValT AbstractTy -> m Bool
     isRecursive (Datatype tyName _) = do
@@ -986,7 +996,7 @@ match scrutinee handlers = do
     isRecursive _ = pure False
 
     goRecursive :: TyName -> Vector (ValT AbstractTy) -> m Id
-    goRecursive  tn@(TyName rawTn) tyConArgs = do
+    goRecursive tn@(TyName rawTn) tyConArgs = do
       -- This fromJust is safe b/c the presence of absence of base functor data is the condition that
       -- determines whether we're in this branch or the non-recursive one
       rawBFBB <- asks (snd . fromJust . join . preview (#datatypeInfo % ix tn % #baseFunctor))
@@ -998,51 +1008,53 @@ match scrutinee handlers = do
           result <- undoRenameM appliedBfbb
           refTo $ AValNode result (MatchInternal scrutinee handlers)
         Left err' -> throwError . UnificationError $ err'
-     where
-       instantiateBFBB :: ValT AbstractTy ->  m (CompT Renamed)
-       instantiateBFBB bfbb  = do
-         -- we have a BFBB like:
-         -- listBB :: forall a r . r -> <a -> r -> !r> -> !r
-         -- And we need to:
-         --   1. Instantiate all of the type arguments to the original datatype (e.g. the 'a' in List a)
-         --      into the BFBB
-         --   2. Instantiate the *last* tyvar bound by the BBBF to the type of the original datatype
-         --      giving us, e.g. ListF a (List a)
-         scope <- askScope
-         renamedBFBB <- case runRenameM scope (renameValT bfbb) of
-                        Left err' -> throwError $ MatchRenameBBFail err'
-                        Right res -> pure res
-         -- The type constructor for the base-functor variant of the scrutinee type.
-         let scrut = Datatype tn tyConArgs
-         let scrutF = Datatype (TyName $ rawTn <> "_F") (Vector.snoc tyConArgs scrut)
-         -- These are arguments to the original type constructor plus the snoc'd original type.
-         -- E.g. if we have:
-         --      Scrutinee: List Int
-         --   this should be:
-         --   [Int, List Int]
-         let bfInstArgs = Vector.snoc tyConArgs scrutF
-         renamedArgs <- case runRenameM scope (traverse renameValT  bfInstArgs) of
-                         Left err' -> throwError $ MatchRenameTyConArgFail err'
-                         Right res -> pure res
-         let subs :: Vector (Index "tyvar", ValT Renamed)
-             subs = Vector.imap (\i v -> (fromJust . preview intIndex $ i, v)) renamedArgs
-             subbed = foldl' (\bbf (i,v) -> substitute i v bbf) renamedBFBB subs
-         case subbed of
-           ThunkT bfComp -> pure bfComp
-           other -> throwError $ MatchNonThunkBBF other
+      where
+        instantiateBFBB :: ValT AbstractTy -> m (CompT Renamed)
+        instantiateBFBB bfbb = do
+          -- we have a BFBB like:
+          -- listBB :: forall a r . r -> <a -> r -> !r> -> !r
+          -- And we need to:
+          --   1. Instantiate all of the type arguments to the original datatype (e.g. the 'a' in List a)
+          --      into the BFBB
+          --   2. Instantiate the *last* tyvar bound by the BBBF to the type of the original datatype
+          --      giving us, e.g. ListF a (List a)
+          scope <- askScope
+          renamedBFBB <- case runRenameM scope (renameValT bfbb) of
+            Left err' -> throwError $ MatchRenameBBFail err'
+            Right res -> pure res
+          -- The type constructor for the base-functor variant of the scrutinee type.
+          let scrut = Datatype tn tyConArgs
+          let scrutF = Datatype (TyName $ rawTn <> "_F") (Vector.snoc tyConArgs scrut)
+          -- These are arguments to the original type constructor plus the snoc'd original type.
+          -- E.g. if we have:
+          --      Scrutinee: List Int
+          --   this should be:
+          --   [Int, List Int]
+          let bfInstArgs = Vector.snoc tyConArgs scrutF
+          renamedArgs <- case runRenameM scope (traverse renameValT bfInstArgs) of
+            Left err' -> throwError $ MatchRenameTyConArgFail err'
+            Right res -> pure res
+          let subs :: Vector (Index "tyvar", ValT Renamed)
+              subs = Vector.imap (\i v -> (fromJust . preview intIndex $ i, v)) renamedArgs
+              subbed = foldl' (\bbf (i, v) -> substitute i v bbf) renamedBFBB subs
+          case subbed of
+            ThunkT bfComp -> pure bfComp
+            other -> throwError $ MatchNonThunkBBF other
 
     -- Unwraps a thunk handler if it is a handler for a nullary constructor.
     -- REVIEW @Koz: Is the the right way to do this? It's easier to just look at the type of the handler vs
-    --              trying to associate it with a particular constructor at this point. 
-    cleanupHandler ::  Ref -> m (ValT Renamed)
-    cleanupHandler r = renameArg r >>= \case
-         Nothing -> -- A `Nothing` here means the Ref points to an error node (I THINK)
-           throwError $ MatchErrorAsHandler r 
-         Just hVal -> case hVal of
-           hdlr@(ThunkT (CompT cnt (ReturnT v)))
-             | cnt == count0 -> pure v
-             | otherwise -> throwError $ MatchPolymorphicHandler hdlr
-           other -> pure other
+    --              trying to associate it with a particular constructor at this point.
+    cleanupHandler :: Ref -> m (ValT Renamed)
+    cleanupHandler r =
+      renameArg r >>= \case
+        Nothing ->
+          -- A `Nothing` here means the Ref points to an error node (I THINK)
+          throwError $ MatchErrorAsHandler r
+        Just hVal -> case hVal of
+          hdlr@(ThunkT (CompT cnt (ReturnT v)))
+            | cnt == count0 -> pure v
+            | otherwise -> throwError $ MatchPolymorphicHandler hdlr
+          other -> pure other
 
     goNonRecursive :: TyName -> Vector (ValT AbstractTy) -> m Id
     goNonRecursive tn tyConArgs = do
@@ -1050,31 +1062,28 @@ match scrutinee handlers = do
       (instantiatedBBF :: CompT Renamed) <- instantiateBB rawBBF tyConArgs
       handlers' <- Vector.toList <$> traverse cleanupHandler handlers
       tyDict <- asks (view #datatypeInfo)
-      case  checkApp tyDict instantiatedBBF (Just <$> handlers') of
+      case checkApp tyDict instantiatedBBF (Just <$> handlers') of
         Right appliedBBF -> do
           result <- undoRenameM appliedBBF
-          refTo  $ AValNode result (MatchInternal scrutinee handlers)
+          refTo $ AValNode result (MatchInternal scrutinee handlers)
         Left err' -> throwError . UnificationError $ err'
-     where
-       instantiateBB :: Maybe (ValT AbstractTy) -> Vector (ValT AbstractTy) -> m (CompT Renamed)
-       instantiateBB Nothing _ = throwError $ MatchNoBBForm tn
-       instantiateBB (Just bb) tyArgs = do
-         scope <- askScope
-         renamedBB <- case runRenameM scope (renameValT bb) of
-                        Left err' -> throwError $ MatchRenameBBFail err'
-                        Right res -> pure res
-         renamedArgs <- case runRenameM scope (traverse renameValT tyArgs) of
-                         Left err' -> throwError $ MatchRenameTyConArgFail err'
-                         Right res -> pure res
-         let subs :: Vector (Index "tyvar", ValT Renamed)
-             subs = Vector.imap (\i v -> (fromJust . preview intIndex $ i, v)) renamedArgs
-             subbed =  foldl' (\bbf (i,v) -> substitute i v bbf) renamedBB subs
-         case subbed of
-           ThunkT bbComp -> pure bbComp
-           other -> throwError $ MatchNonThunkBBF other
-
-
-
+      where
+        instantiateBB :: Maybe (ValT AbstractTy) -> Vector (ValT AbstractTy) -> m (CompT Renamed)
+        instantiateBB Nothing _ = throwError $ MatchNoBBForm tn
+        instantiateBB (Just bb) tyArgs = do
+          scope <- askScope
+          renamedBB <- case runRenameM scope (renameValT bb) of
+            Left err' -> throwError $ MatchRenameBBFail err'
+            Right res -> pure res
+          renamedArgs <- case runRenameM scope (traverse renameValT tyArgs) of
+            Left err' -> throwError $ MatchRenameTyConArgFail err'
+            Right res -> pure res
+          let subs :: Vector (Index "tyvar", ValT Renamed)
+              subs = Vector.imap (\i v -> (fromJust . preview intIndex $ i, v)) renamedArgs
+              subbed = foldl' (\bbf (i, v) -> substitute i v bbf) renamedBB subs
+          case subbed of
+            ThunkT bbComp -> pure bbComp
+            other -> throwError $ MatchNonThunkBBF other
 
 -- Helpers
 
@@ -1251,13 +1260,14 @@ liftUnifyM act = do
 -- `dataConstructor` will yield a thunk with a type analogous to `forall a. Either Integer a`. This lets you specify the
 -- 'a' and get a "real" datatype value, such as `Either Integer Bool`, in one step.
 -- @since 1.2.0
-ctor :: forall (m :: Type -> Type)
-        . (MonadHashCons Id ASGNode m, MonadError CovenantTypeError m, MonadReader ASGEnv m)
-       => TyName
-       -> ConstructorName
-       -> Vector.Vector Ref
-       -> Vector.Vector (Wedge BoundTyVar (ValT Void))
-       -> m Id
+ctor ::
+  forall (m :: Type -> Type).
+  (MonadHashCons Id ASGNode m, MonadError CovenantTypeError m, MonadReader ASGEnv m) =>
+  TyName ->
+  ConstructorName ->
+  Vector.Vector Ref ->
+  Vector.Vector (Wedge BoundTyVar (ValT Void)) ->
+  m Id
 ctor tn cn args instTys = do
   dataThunk <- dataConstructor tn cn args
   dataForced <- force (AnId dataThunk)
@@ -1267,7 +1277,8 @@ ctor tn cn args instTys = do
 -- function values as arguments to other functions. This is identical to `lam` except it wraps the result in a Thunk,
 -- which is what you want if you're creating functions meant to serve as arguments to other functions.
 -- @since 1.2.0
-lazyLam :: forall (m :: Type -> Type).
+lazyLam ::
+  forall (m :: Type -> Type).
   (MonadHashCons Id ASGNode m, MonadError CovenantTypeError m, MonadReader ASGEnv m) =>
   CompT AbstractTy ->
   m Ref ->
@@ -1278,4 +1289,4 @@ lazyLam expected bodyComp = lam expected bodyComp >>= thunk
 -- (which can get very verbose and hard to read if you're creating a lot of these)
 -- @since 1.2.0
 dtype :: TyName -> [ValT AbstractTy] -> ValT AbstractTy
-dtype tn  = Datatype tn . Vector.fromList
+dtype tn = Datatype tn . Vector.fromList
