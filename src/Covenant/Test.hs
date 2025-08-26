@@ -928,4 +928,4 @@ unitT =
       (PlutusData ConstrData)
 
 testDatatypes :: [DataDeclaration AbstractTy]
-testDatatypes = [maybeT, eitherT, unitT, pair]
+testDatatypes = [maybeT, eitherT, unitT, pair, list]

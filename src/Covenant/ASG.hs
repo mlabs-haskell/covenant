@@ -1,3 +1,4 @@
+{-# LANGUAGE CPP #-}
 {-# LANGUAGE PatternSynonyms #-}
 
 -- |
@@ -39,7 +40,7 @@ module Covenant.ASG
         Lam,
         Force
       ),
-    ValNodeInfo (Lit, App, Thunk, Cata, DataConstructor),
+    ValNodeInfo (Lit, App, Thunk, Cata, DataConstructor, Match),
     ASGNode (..),
 
     -- ** Functions
@@ -71,6 +72,7 @@ module Covenant.ASG
     cata,
     boundTyVar,
     dataConstructor,
+    match,
 
     -- ** Elimination
 
@@ -79,12 +81,21 @@ module Covenant.ASG
 
     -- *** Function
     runASGBuilder,
+
+    -- ** Convenience Functions
+    ctor,
+    lazyLam,
+    dtype,
     -- only for tests
     ASGEnv (..),
   )
 where
 
-import Control.Monad (foldM, unless, zipWithM)
+#if __GLASGOW_HASKELL__==908
+import Data.Foldable (foldl')
+#endif
+
+import Control.Monad (foldM, join, unless, zipWithM)
 import Control.Monad.Except
   ( ExceptT,
     MonadError (throwError),
@@ -104,7 +115,7 @@ import Control.Monad.Reader
 import Covenant.Constant (AConstant, typeConstant)
 import Covenant.Data (DatatypeInfo, mkDatatypeInfo)
 import Covenant.DeBruijn (DeBruijn (S, Z), asInt)
-import Covenant.Index (Count, Index, intCount, intIndex, wordCount)
+import Covenant.Index (Count, Index, count0, intCount, intIndex, wordCount)
 import Covenant.Internal.KindCheck (checkEncodingArgs)
 import Covenant.Internal.Ledger (ledgerTypes)
 import Covenant.Internal.Rename
@@ -155,6 +166,15 @@ import Covenant.Internal.Term
         InvalidOpaqueField,
         LambdaResultsInCompType,
         LambdaResultsInNonReturn,
+        MatchErrorAsHandler,
+        MatchNoBBForm,
+        MatchNoDatatypeInfo,
+        MatchNonDatatypeScrutinee,
+        MatchNonThunkBBF,
+        MatchNonValTy,
+        MatchPolymorphicHandler,
+        MatchRenameBBFail,
+        MatchRenameTyConArgFail,
         NoSuchArgument,
         OutOfScopeTyVar,
         RenameArgumentFailed,
@@ -172,7 +192,7 @@ import Covenant.Internal.Term
       ),
     Id,
     Ref (AnArg, AnId),
-    ValNodeInfo (AppInternal, CataInternal, DataConstructorInternal, LitInternal, ThunkInternal),
+    ValNodeInfo (AppInternal, CataInternal, DataConstructorInternal, LitInternal, MatchInternal, ThunkInternal),
     typeASGNode,
     typeId,
     typeRef,
@@ -226,6 +246,7 @@ import Covenant.Type
     DataDeclaration (OpaqueData),
     PlutusDataConstructor (PlutusB, PlutusConstr, PlutusI, PlutusList, PlutusMap),
     Renamed (Unifiable),
+    TyName (TyName),
     ValT (Abstraction),
     tyvar,
   )
@@ -237,7 +258,7 @@ import Data.Kind (Type)
 import Data.List (find)
 import Data.Map.Strict (Map)
 import Data.Map.Strict qualified as Map
-import Data.Maybe (fromJust, mapMaybe)
+import Data.Maybe (fromJust, isJust, mapMaybe)
 import Data.Set qualified as Set
 import Data.Text qualified as T
 import Data.Vector (Vector)
@@ -427,7 +448,13 @@ pattern Cata algebraRef valRef <- CataInternal algebraRef valRef
 pattern DataConstructor :: TyName -> ConstructorName -> Vector Ref -> ValNodeInfo
 pattern DataConstructor tyName ctorName fields <- DataConstructorInternal tyName ctorName fields
 
-{-# COMPLETE Lit, App, Thunk, Cata, DataConstructor #-}
+-- | Deconstruct a value of a data type using the supplied handlers for each arm
+--
+-- @since 1.2.0
+pattern Match :: Ref -> Vector Ref -> ValNodeInfo
+pattern Match scrutinee handlers <- MatchInternal scrutinee handlers
+
+{-# COMPLETE Lit, App, Thunk, Cata, DataConstructor, Match #-}
 
 -- | Any problem that might arise when building an ASG programmatically.
 --
@@ -842,7 +869,7 @@ dataConstructor tyName ctorName fields = do
       m (Constructor a)
     findConstructor xs = case find (\x -> view #constructorName x == ctorName) xs of
       Nothing -> throwError $ ConstructorDoesNotExistForType tyName ctorName
-      Just ctor -> pure ctor
+      Just ctor' -> pure ctor'
 
     -- Looks up the DatatypeInfo for the type argument supplied
     -- and also renames (and rethrows the rename error if renaming fails)
@@ -950,6 +977,117 @@ cata rAlg rVal =
           _ -> throwError . CataNonRigidAlgebra $ algT
         t -> throwError . CataNotAnAlgebra $ t
     t -> throwError . CataApplyToNonValT $ t
+
+match ::
+  forall (m :: Type -> Type).
+  (MonadHashCons Id ASGNode m, MonadError CovenantTypeError m, MonadReader ASGEnv m) =>
+  Ref ->
+  Vector Ref ->
+  m Id
+match scrutinee handlers = do
+  scrutNodeTy <- typeRef scrutinee
+  case scrutNodeTy of
+    ValNodeType scrutTy@(Datatype tn args) ->
+      isRecursive scrutTy >>= \case
+        True -> goRecursive tn args
+        False -> goNonRecursive tn args
+    ValNodeType other -> throwError $ MatchNonDatatypeScrutinee other
+    other -> throwError $ MatchNonValTy other
+  where
+    isRecursive :: ValT AbstractTy -> m Bool
+    isRecursive (Datatype tyName _) = do
+      datatypeInfoExists <- asks (isJust . preview (#datatypeInfo % ix tyName))
+      if datatypeInfoExists
+        then asks (isJust . join . preview (#datatypeInfo % ix tyName % #baseFunctor))
+        else throwError $ MatchNoDatatypeInfo tyName
+    isRecursive _ = pure False
+
+    goRecursive :: TyName -> Vector (ValT AbstractTy) -> m Id
+    goRecursive tn@(TyName rawTn) tyConArgs = do
+      -- This fromJust is safe b/c the presence of absence of base functor data is the condition that
+      -- determines whether we're in this branch or the non-recursive one
+      rawBFBB <- asks (snd . fromJust . join . preview (#datatypeInfo % ix tn % #baseFunctor))
+      bfbb <- instantiateBFBB rawBFBB
+      handlers' <- Vector.toList <$> traverse cleanupHandler handlers
+      tyDict <- asks (view #datatypeInfo)
+      case checkApp tyDict bfbb (Just <$> handlers') of
+        Right appliedBfbb -> do
+          result <- undoRenameM appliedBfbb
+          refTo $ AValNode result (MatchInternal scrutinee handlers)
+        Left err' -> throwError . UnificationError $ err'
+      where
+        instantiateBFBB :: ValT AbstractTy -> m (CompT Renamed)
+        instantiateBFBB bfbb = do
+          -- we have a BFBB like:
+          -- listBB :: forall a r . r -> <a -> r -> !r> -> !r
+          -- And we need to:
+          --   1. Instantiate all of the type arguments to the original datatype (e.g. the 'a' in List a)
+          --      into the BFBB
+          --   2. Instantiate the *last* tyvar bound by the BBBF to the type of the original datatype
+          --      giving us, e.g. ListF a (List a)
+          scope <- askScope
+          renamedBFBB <- case runRenameM scope (renameValT bfbb) of
+            Left err' -> throwError $ MatchRenameBBFail err'
+            Right res -> pure res
+          -- The type constructor for the base-functor variant of the scrutinee type.
+          let scrut = Datatype tn tyConArgs
+          let scrutF = Datatype (TyName $ rawTn <> "_F") (Vector.snoc tyConArgs scrut)
+          -- These are arguments to the original type constructor plus the snoc'd original type.
+          -- E.g. if we have:
+          --      Scrutinee: List Int
+          --   this should be:
+          --   [Int, List Int]
+          let bfInstArgs = Vector.snoc tyConArgs scrutF
+          renamedArgs <- case runRenameM scope (traverse renameValT bfInstArgs) of
+            Left err' -> throwError $ MatchRenameTyConArgFail err'
+            Right res -> pure res
+          let subs :: Vector (Index "tyvar", ValT Renamed)
+              subs = Vector.imap (\i v -> (fromJust . preview intIndex $ i, v)) renamedArgs
+              subbed = foldl' (\bbf (i, v) -> substitute i v bbf) renamedBFBB subs
+          case subbed of
+            ThunkT bfComp -> pure bfComp
+            other -> throwError $ MatchNonThunkBBF other
+
+    -- Unwraps a thunk handler if it is a handler for a nullary constructor.
+    cleanupHandler :: Ref -> m (ValT Renamed)
+    cleanupHandler r =
+      renameArg r >>= \case
+        Nothing ->
+          throwError $ MatchErrorAsHandler r
+        Just hVal -> case hVal of
+          hdlr@(ThunkT (CompT cnt (ReturnT v)))
+            | cnt == count0 -> pure v
+            | otherwise -> throwError $ MatchPolymorphicHandler hdlr
+          other -> pure other
+
+    goNonRecursive :: TyName -> Vector (ValT AbstractTy) -> m Id
+    goNonRecursive tn tyConArgs = do
+      rawBBF <- asks (fromJust . preview (#datatypeInfo % ix tn % #bbForm))
+      (instantiatedBBF :: CompT Renamed) <- instantiateBB rawBBF tyConArgs
+      handlers' <- Vector.toList <$> traverse cleanupHandler handlers
+      tyDict <- asks (view #datatypeInfo)
+      case checkApp tyDict instantiatedBBF (Just <$> handlers') of
+        Right appliedBBF -> do
+          result <- undoRenameM appliedBBF
+          refTo $ AValNode result (MatchInternal scrutinee handlers)
+        Left err' -> throwError . UnificationError $ err'
+      where
+        instantiateBB :: Maybe (ValT AbstractTy) -> Vector (ValT AbstractTy) -> m (CompT Renamed)
+        instantiateBB Nothing _ = throwError $ MatchNoBBForm tn
+        instantiateBB (Just bb) tyArgs = do
+          scope <- askScope
+          renamedBB <- case runRenameM scope (renameValT bb) of
+            Left err' -> throwError $ MatchRenameBBFail err'
+            Right res -> pure res
+          renamedArgs <- case runRenameM scope (traverse renameValT tyArgs) of
+            Left err' -> throwError $ MatchRenameTyConArgFail err'
+            Right res -> pure res
+          let subs :: Vector (Index "tyvar", ValT Renamed)
+              subs = Vector.imap (\i v -> (fromJust . preview intIndex $ i, v)) renamedArgs
+              subbed = foldl' (\bbf (i, v) -> substitute i v bbf) renamedBB subs
+          case subbed of
+            ThunkT bbComp -> pure bbComp
+            other -> throwError $ MatchNonThunkBBF other
 
 -- Helpers
 
@@ -1112,3 +1250,47 @@ liftUnifyM act = do
   case runUnifyM tyDict act of
     Left e -> throwError $ UnificationError e
     Right res -> pure res
+
+-- Utility functions for ASG construction. These are not strictly necessary, but are extremely convenient.
+
+-- | Constructs a datatype value at given constructor.
+-- Whereas 'dataConstructor' results in a thunk, this results in a
+-- non-thunked datatype value.
+-- The third argument is a vector of arguments to the constructor and the fourth argument is a
+-- vector of "type instantiations", which is used to instantiate any lingering polymorphic
+-- type variables which are not determined by arguments to the constructor.
+--
+-- For example, the argument to `Left 3` only determines the first argument to the `Either` type constructor, and
+-- `dataConstructor` will yield a thunk with a type analogous to `forall a. Either Integer a`. This lets you specify the
+-- 'a' and get a "real" datatype value, such as `Either Integer Bool`, in one step.
+-- @since 1.2.0
+ctor ::
+  forall (m :: Type -> Type).
+  (MonadHashCons Id ASGNode m, MonadError CovenantTypeError m, MonadReader ASGEnv m) =>
+  TyName ->
+  ConstructorName ->
+  Vector.Vector Ref ->
+  Vector.Vector (Wedge BoundTyVar (ValT Void)) ->
+  m Id
+ctor tn cn args instTys = do
+  dataThunk <- dataConstructor tn cn args
+  dataForced <- force (AnId dataThunk)
+  app dataForced mempty instTys
+
+-- | `lam` results in a computation node, which may not be what you want if you are (e.g.) passing around
+-- function values as arguments to other functions. This is identical to `lam` except it wraps the result in a Thunk,
+-- which is what you want if you're creating functions meant to serve as arguments to other functions.
+-- @since 1.2.0
+lazyLam ::
+  forall (m :: Type -> Type).
+  (MonadHashCons Id ASGNode m, MonadError CovenantTypeError m, MonadReader ASGEnv m) =>
+  CompT AbstractTy ->
+  m Ref ->
+  m Id
+lazyLam expected bodyComp = lam expected bodyComp >>= thunk
+
+-- | Lets you construct types for datatype values without having to `Vector.fromList` everywhere
+-- (which can get very verbose and hard to read if you're creating a lot of these)
+-- @since 1.2.0
+dtype :: TyName -> [ValT AbstractTy] -> ValT AbstractTy
+dtype tn = Datatype tn . Vector.fromList

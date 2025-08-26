@@ -44,17 +44,24 @@ import Covenant.ASG
     builtin2,
     builtin3,
     cata,
+    ctor,
     dataConstructor,
     defaultDatatypes,
+    dtype,
     err,
     force,
     lam,
+    lazyLam,
     lit,
+    match,
     runASGBuilder,
     thunk,
     topLevelNode,
   )
-import Covenant.Constant (AConstant (AUnit), typeConstant)
+import Covenant.Constant
+  ( AConstant (AUnit, AnInteger),
+    typeConstant,
+  )
 import Covenant.DeBruijn (DeBruijn (S, Z))
 import Covenant.Index (Index, intIndex, ix0, ix1)
 import Covenant.Prim
@@ -71,7 +78,7 @@ import Covenant.Test
   )
 import Covenant.Type
   ( AbstractTy,
-    BuiltinFlatT (UnitT),
+    BuiltinFlatT (IntegerT, UnitT),
     CompT (Comp0, Comp1, Comp2, CompN),
     CompTBody (ArgsAndResult, ReturnT, (:--:>)),
     ValT (BuiltinFlat, Datatype, ThunkT),
@@ -87,7 +94,7 @@ import Data.Kind (Type)
 import Data.Map qualified as M
 import Data.Maybe (fromJust)
 import Data.Vector qualified as Vector
-import Data.Wedge (Wedge (Here, Nowhere), wedgeLeft)
+import Data.Wedge (Wedge (Here, Nowhere, There), wedgeLeft)
 import Optics.Core (preview, review)
 import Test.QuickCheck
   ( Gen,
@@ -146,6 +153,12 @@ main =
           testCase "<List_F r Integer -> !Integer> with List r should be Integer" unitCataListRigid,
           testCase "<List_F r (Maybe r) -> !Maybe r> with List r should be Maybe r" unitCataListMaybeRigid,
           testCase "introduction then cata elimination" unitCataIntroThenEliminate
+        ],
+      testGroup
+        "Matching"
+        [ matchMaybe,
+          matchList,
+          maybeToList
         ]
     ]
   where
@@ -709,6 +722,71 @@ justNothingIntro = runIntroFormTest "justNothingIntro" expectedThunk $ do
 
     expectedThunk :: ValT AbstractTy
     expectedThunk = ThunkT expectedComp
+
+-- pattern matching
+
+{- Construct a pattern match on 'Maybe Unit' that returns an integer.
+
+   This is effectively the simplest possible pattern matching test: The type is non-recursive and the
+   parameters to the type constructor are all concrete.
+-}
+matchMaybe :: TestTree
+matchMaybe = runIntroFormTest "matchMaybe" (BuiltinFlat IntegerT) $ do
+  unit <- AnId <$> lit AUnit
+  scrutinee <- ctor "Maybe" "Just" (Vector.singleton unit) (Vector.singleton Nowhere)
+  nothingHandler <- lazyLam (Comp0 $ ReturnT (BuiltinFlat IntegerT)) (AnId <$> lit (AnInteger 0))
+  justHandler <- lazyLam (Comp0 $ BuiltinFlat UnitT :--:> ReturnT (BuiltinFlat IntegerT)) (AnId <$> lit (AnInteger 1))
+  result <- match (AnId scrutinee) (AnId <$> Vector.fromList [justHandler, nothingHandler])
+  typeIdTest result
+
+{- Construct a pattern match on 'List Unit' that returns an integer.
+
+   A simple test for pattern matches on values of recursive types.
+-}
+matchList :: TestTree
+matchList = runIntroFormTest "matchList" (BuiltinFlat IntegerT) $ do
+  unit <- AnId <$> lit AUnit
+  nilUnit <- ctor "List" "Nil" mempty (Vector.singleton $ There (BuiltinFlat UnitT))
+  scrutinee <- ctor "List" "Cons" (Vector.fromList [unit, AnId nilUnit]) (Vector.singleton Nowhere)
+  let nilHandlerTy = Comp0 $ ReturnT (BuiltinFlat IntegerT)
+      consHandlerTy =
+        Comp0 $
+          BuiltinFlat UnitT
+            :--:> Datatype "List_F" (Vector.fromList [BuiltinFlat UnitT, Datatype "List" (Vector.singleton $ BuiltinFlat UnitT)])
+            :--:> ReturnT (BuiltinFlat IntegerT)
+  nilHandler <- lazyLam nilHandlerTy (AnId <$> lit (AnInteger 0))
+  consHandler <- lazyLam consHandlerTy (AnId <$> lit (AnInteger 0))
+  result <- match (AnId scrutinee) (AnId <$> Vector.fromList [nilHandler, consHandler])
+  typeIdTest result
+
+{- This differs from the two above tests in that we're using pattern matching to construct the
+   'maybeToList :: forall a. Maybe a -> List a' function. This is very useful, because if successful, it provides good evidence that:
+     1. Pattern matching works on datatypes with rigid parameters.
+     2. Pattern matching works inside the body of a lambda.
+     3. Nothing breaks renaming anywhere.
+-}
+maybeToList :: TestTree
+maybeToList = runIntroFormTest "maybeToList" maybeToListTy $ do
+  thonk <- lazyLam maybeToListCompTy $ do
+    let nothingHandlerTy = Comp0 $ ReturnT (dtype "List" [tyvar (S Z) ix0])
+        justHandlerTy = Comp0 $ tyvar (S Z) ix0 :--:> ReturnT (dtype "List" [tyvar (S Z) ix0])
+    nothingHandler <- lazyLam nothingHandlerTy $ do
+      tvA <- boundTyVar (S Z) ix0
+      AnId <$> ctor "List" "Nil" mempty (Vector.singleton (Here tvA))
+    justHandler <- lazyLam justHandlerTy $ do
+      tvA <- boundTyVar (S Z) ix0
+      vA <- AnArg <$> arg Z ix0
+      nil <- AnId <$> ctor "List" "Nil" mempty (Vector.singleton (Here tvA))
+      AnId <$> ctor "List" "Cons" (Vector.fromList [vA, nil]) (Vector.singleton Nowhere)
+    scrutinee <- AnArg <$> arg Z ix0
+    AnId <$> match scrutinee (AnId <$> Vector.fromList [justHandler, nothingHandler])
+  typeIdTest thonk
+  where
+    maybeToListCompTy :: CompT AbstractTy
+    maybeToListCompTy = Comp1 (dtype "Maybe" [tyvar Z ix0] :--:> ReturnT (dtype "List" [tyvar Z ix0]))
+
+    maybeToListTy :: ValT AbstractTy
+    maybeToListTy = ThunkT maybeToListCompTy
 
 -- Helpers
 
