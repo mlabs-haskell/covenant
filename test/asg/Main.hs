@@ -52,9 +52,10 @@ import Covenant.ASG
     lit,
     runASGBuilder,
     thunk,
-    topLevelNode,
+    topLevelNode, match, ctor, lazyLam, dtype
   )
-import Covenant.Constant (AConstant (AUnit), typeConstant)
+import Covenant.Constant
+    ( AConstant(AUnit), typeConstant, AConstant(AnInteger) )
 import Covenant.DeBruijn (DeBruijn (S, Z))
 import Covenant.Index (Index, intIndex, ix0, ix1)
 import Covenant.Prim
@@ -87,7 +88,7 @@ import Data.Kind (Type)
 import Data.Map qualified as M
 import Data.Maybe (fromJust)
 import Data.Vector qualified as Vector
-import Data.Wedge (Wedge (Here, Nowhere), wedgeLeft)
+import Data.Wedge (Wedge (Here, Nowhere, There), wedgeLeft)
 import Optics.Core (preview, review)
 import Test.QuickCheck
   ( Gen,
@@ -105,6 +106,9 @@ import Test.QuickCheck
 import Test.Tasty (TestTree, adjustOption, defaultMain, testGroup)
 import Test.Tasty.HUnit (Assertion, assertEqual, assertFailure, testCase)
 import Test.Tasty.QuickCheck (QuickCheckTests, testProperty)
+import Covenant.Type (BuiltinFlatT(IntegerT))
+
+import Debug.Trace (traceM)
 
 main :: IO ()
 main =
@@ -146,7 +150,11 @@ main =
           testCase "<List_F r Integer -> !Integer> with List r should be Integer" unitCataListRigid,
           testCase "<List_F r (Maybe r) -> !Maybe r> with List r should be Maybe r" unitCataListMaybeRigid,
           testCase "introduction then cata elimination" unitCataIntroThenEliminate
-        ]
+        ],
+      testGroup "Matching"
+       [ matchMaybe
+       , matchList
+       , maybeToList ]
     ]
   where
     moreTests :: QuickCheckTests -> QuickCheckTests
@@ -709,6 +717,61 @@ justNothingIntro = runIntroFormTest "justNothingIntro" expectedThunk $ do
 
     expectedThunk :: ValT AbstractTy
     expectedThunk = ThunkT expectedComp
+
+-- pattern matching
+
+
+matchMaybe :: TestTree
+matchMaybe = runIntroFormTest "matchMaybe" (BuiltinFlat IntegerT) $ do
+  unit <- AnId <$> lit AUnit
+  scrutinee <- ctor "Maybe" "Just" (Vector.singleton unit) (Vector.singleton Nowhere)
+  nothingHandler <- lazyLam (Comp0 $ ReturnT (BuiltinFlat IntegerT)) (AnId <$> lit (AnInteger 0))
+  justHandler <- lazyLam (Comp0 $ BuiltinFlat UnitT :--:> ReturnT (BuiltinFlat IntegerT)) (AnId <$> lit (AnInteger 1))
+  result <- match (AnId scrutinee) (AnId <$> Vector.fromList [justHandler,nothingHandler])
+  typeIdTest result
+
+matchList :: TestTree
+matchList = runIntroFormTest "matchList" (BuiltinFlat IntegerT) $ do
+  unit <- AnId <$> lit AUnit
+  nilUnit <- ctor "List" "Nil" mempty (Vector.singleton $ There (BuiltinFlat UnitT))
+  scrutinee <- ctor "List" "Cons" (Vector.fromList [unit,AnId nilUnit]) (Vector.singleton Nowhere)
+  let nilHandlerTy = Comp0 $ ReturnT (BuiltinFlat IntegerT)
+      consHandlerTy = Comp0
+                      $ BuiltinFlat UnitT
+                        :--:> Datatype "List_F" (Vector.fromList [BuiltinFlat UnitT, Datatype "List" (Vector.singleton $ BuiltinFlat UnitT)])
+                        :--:> ReturnT (BuiltinFlat IntegerT)
+  nilHandler <- lazyLam nilHandlerTy (AnId <$> lit (AnInteger 0))
+  consHandler <- lazyLam consHandlerTy (AnId <$> lit (AnInteger 0))
+  result <- match (AnId scrutinee) (AnId <$> Vector.fromList [nilHandler,consHandler])
+  typeIdTest result
+
+
+-- forall a. Maybe a -> List a
+maybeToList :: TestTree
+maybeToList = runIntroFormTest "maybeToList" maybeToListTy $ do
+  thonk <- lazyLam maybeToListCompTy $ do
+            let nothingHandlerTy = Comp0 $ ReturnT (dtype "List" [tyvar (S Z) ix0])
+                justHandlerTy    = Comp0 $ tyvar (S Z) ix0 :--:> ReturnT (dtype "List" [tyvar (S Z) ix0])
+            nothingHandler <- lazyLam nothingHandlerTy $ do
+                                tvA <- boundTyVar (S Z) ix0
+                                AnId <$> ctor "List" "Nil" mempty (Vector.singleton (Here tvA))
+            traceM "nothingHandler"
+            justHandler <- lazyLam justHandlerTy $ do
+                             tvA <- boundTyVar (S Z) ix0
+                             vA <- AnArg <$> arg Z ix0
+                             nil <- AnId <$> ctor "List" "Nil" mempty (Vector.singleton (Here tvA))
+                             AnId <$> ctor "List" "Cons" (Vector.fromList [vA,nil]) (Vector.singleton Nowhere)
+            traceM "justHandler"
+            scrutinee <- AnArg <$> arg Z ix0
+            AnId <$> match scrutinee (AnId <$> Vector.fromList [justHandler,nothingHandler])
+  typeIdTest thonk
+ where
+   maybeToListCompTy :: CompT AbstractTy
+   maybeToListCompTy = Comp1 (dtype "Maybe" [tyvar Z ix0] :--:> ReturnT (dtype "List" [tyvar Z ix0]))
+
+   maybeToListTy :: ValT AbstractTy
+   maybeToListTy = ThunkT maybeToListCompTy
+
 
 -- Helpers
 
