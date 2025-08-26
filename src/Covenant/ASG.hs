@@ -1,4 +1,4 @@
-{-# LANGUAGE PatternSynonyms #-}
+{-# LANGUAGE PatternSynonyms, CPP #-}
 
 -- |
 -- Module: Covenant.ASG
@@ -89,6 +89,10 @@ module Covenant.ASG
     ASGEnv (..),
   )
 where
+
+#if __GLASGOW_HASKELL__==908
+import Data.Foldable (foldl')
+#endif
 
 import Control.Monad (foldM, join, unless, zipWithM)
 import Control.Monad.Except
@@ -249,7 +253,7 @@ import Data.Bimap qualified as Bimap
 import Data.Coerce (coerce)
 import Data.Functor.Identity (Identity, runIdentity)
 import Data.Kind (Type)
-import Data.List (find, foldl')
+import Data.List (find)
 import Data.Map.Strict (Map)
 import Data.Map.Strict qualified as Map
 import Data.Maybe (fromJust, isJust, mapMaybe)
