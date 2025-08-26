@@ -58,7 +58,8 @@ module Covenant.Test
     -- *** Elimination
     runRenameM,
     undoRename,
-    -- Misc
+
+    -- ** ASG
     DebugASGBuilder (..),
     debugASGBuilder,
     typeIdTest,
@@ -848,8 +849,9 @@ genDataList = runDataGenM . GT.listOf
 
 -- ASG Stuff
 
--- This is a newtype over ASGBuilder to clearly indicate that it should be used only for testing, as it is
--- useful to have a variant of the ASGBuilder monad which has a \`runner\`
+-- | This is a @newtype@ over 'ASGBuilder' to clearly indicate that it should be used only for testing, as it is
+-- useful to have a variant of the 'ASGBuilder' monad which has a \'runner\'.
+--
 -- @since 1.2.0
 newtype DebugASGBuilder (a :: Type)
   = DebugASGBuilder (ReaderT ASGEnv (ExceptT CovenantTypeError (HashConsT Id ASGNode Identity)) a)
@@ -869,6 +871,9 @@ newtype DebugASGBuilder (a :: Type)
     )
     via ReaderT ASGEnv (ExceptT CovenantTypeError (HashConsT Id ASGNode Identity))
 
+-- | \'Runner\' for 'DebugASGBuilder'.
+--
+-- @since 1.2.0
 debugASGBuilder ::
   forall (a :: Type).
   Map TyName (DatatypeInfo AbstractTy) ->
@@ -880,15 +885,11 @@ debugASGBuilder tyDict (DebugASGBuilder comp) =
       Left err' -> Left . TypeError bm $ err'
       Right a -> pure a
 
--- Helper to avoid having to export some Term internals.
--- For intro forms tests we only care about value types, this just errors out if
--- we don't get one of those when calling `typeId`
-
--- | DO NOT USE THIS OUTSIDE OF TESTS
---   This looks up the type of a node. If it's a ValT it just returns it, if it's a CompT
---   it wraps it in a thunk and returns that.
---   We don't *need* this but it prevents having to export ASG internals for tests and
---   reduces the amount of pattern matching in writing tests.
+-- | Looks up the type of a node, wrapping computation node types into a thunk.
+--
+-- This is /only/ for use in testing!
+--
+-- @since 1.2.0
 typeIdTest ::
   forall (m :: Type -> Type).
   (MonadHashCons Id ASGNode m, MonadError CovenantTypeError m) =>

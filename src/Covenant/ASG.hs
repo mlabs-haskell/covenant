@@ -42,6 +42,7 @@ module Covenant.ASG
       ),
     ValNodeInfo (Lit, App, Thunk, Cata, DataConstructor, Match),
     ASGNode (..),
+    ASGNodeType (..),
 
     -- ** Functions
     typeASGNode,
@@ -54,10 +55,13 @@ module Covenant.ASG
     ASGBuilder,
     TypeAppError (..),
     RenameError (..),
+    UnRenameError (..),
+    EncodingArgErr (..),
     CovenantTypeError (..),
     BoundTyVar,
 
     -- ** Introducers
+    boundTyVar,
     arg,
     builtin1,
     builtin2,
@@ -68,24 +72,23 @@ module Covenant.ASG
     err,
     lit,
     thunk,
+    dataConstructor,
+
+    -- ** Eliminators
     app,
     cata,
-    boundTyVar,
-    dataConstructor,
     match,
 
-    -- ** Elimination
+    -- ** Helpers
+    ctor,
+    lazyLam,
+    dtype,
 
     -- *** Environment
     defaultDatatypes,
 
     -- *** Function
     runASGBuilder,
-
-    -- ** Convenience Functions
-    ctor,
-    lazyLam,
-    dtype,
     -- only for tests
     ASGEnv (..),
   )
@@ -116,12 +119,14 @@ import Covenant.Constant (AConstant, typeConstant)
 import Covenant.Data (DatatypeInfo, mkDatatypeInfo)
 import Covenant.DeBruijn (DeBruijn (S, Z), asInt)
 import Covenant.Index (Count, Index, count0, intCount, intIndex, wordCount)
-import Covenant.Internal.KindCheck (checkEncodingArgs)
+import Covenant.Internal.KindCheck (EncodingArgErr (EncodingArgMismatch), checkEncodingArgs)
 import Covenant.Internal.Ledger (ledgerTypes)
 import Covenant.Internal.Rename
   ( RenameError
-      ( InvalidAbstractionReference
+      ( InvalidAbstractionReference,
+        InvalidScopeReference
       ),
+    UnRenameError (NegativeDeBruijn, UnRenameWildCard),
     renameCompT,
     renameDatatypeInfo,
     renameValT,
@@ -324,8 +329,14 @@ topLevelNode asg@(ASG (rootId, _)) = nodeAt rootId asg
 nodeAt :: Id -> ASG -> ASGNode
 nodeAt i (ASG (_, mappings)) = fromJust . Map.lookup i $ mappings
 
+-- | The environment used when \'building up\' an 'ASG'. This type is exposed
+-- only for testing, or debugging, and should /not/ be used in general by those
+-- who just want to build an 'ASG'.
+--
+-- @since 1.2.0
 data ASGEnv = ASGEnv ScopeInfo (Map TyName (DatatypeInfo AbstractTy))
 
+-- | @since 1.2.0
 instance
   (k ~ A_Lens, a ~ ScopeInfo, b ~ ScopeInfo) =>
   LabelOptic "scopeInfo" k ASGEnv ASGEnv a b
@@ -336,6 +347,7 @@ instance
       (\(ASGEnv si _) -> si)
       (\(ASGEnv _ dti) si -> ASGEnv si dti)
 
+-- | @since 1.2.0
 instance
   (k ~ A_Lens, a ~ Map TyName (DatatypeInfo AbstractTy), b ~ Map TyName (DatatypeInfo AbstractTy)) =>
   LabelOptic "datatypeInfo" k ASGEnv ASGEnv a b
@@ -674,15 +686,31 @@ err ::
   m Id
 err = refTo AnError
 
--- | Given an 'Id' referring to a computation, and a 'Vector' of 'Ref's to the
--- desired arguments, construct the application of the arguments to that
--- computation. This can fail for a range of reasons:
+-- | Performs both term and type application. More precisely, given:
+--
+-- * An 'Id' referring to a computation; and
+-- * A 'Vector' of 'Ref's for the desired term arguments to the computation, in
+--   order; and
+-- * A 'Vector' of (optional) type arguments to the computation, also in order.
+--
+-- we produce the result of that application.
+--
+-- This can fail for a range of reasons:
 --
 -- * Type mismatch between what the computation expects and what it's given
 -- * Too many or too few arguments
 -- * Not a computation type for 'Id' argument
 -- * Not value types for 'Ref's
 -- * Renaming failures (likely due to a malformed function or argument type)
+--
+-- = Note
+--
+-- We use the 'Wedge' data type to designate type arguments, as it can represent
+-- the three possibilities we need:
+--
+-- * \'Infer this argument\', specified as 'Nowhere'.
+-- * \'Use this type variable in our scope\', specified as 'Here'.
+-- * \'Use this concrete type\', specified as 'There'.
 --
 -- @since 1.2.0
 app ::
@@ -742,9 +770,25 @@ app fId argRefs instTys = do
               <> T.pack (show other)
 
 -- | Introduce a data constructor.
---   First argument is the name of the type, e.g. "Maybe"
---   Second argument is the name of the constructor, e.g. "Just" or "Nothing"
---   Third argument is a vector of references to the arguments (which must conform with the data declaration)
+--
+-- The first argument is a type name (for example, @\"Maybe\"@). The second
+-- argument is a constructor of that type (for example, @\"Just\"@ or
+-- @\"Nothing\"@). The third argument are the values to \'fill in\' all the fields
+-- of the constructor requested.
+--
+-- = Note
+--
+-- 'dataConstructor' yields thunks, which must be forced, and then possibly have
+-- type arguments applied to them. The reason for this is subtle, but important.
+-- Consider the @Nothing@ constructor of @Maybe@: as this has no fields, we
+-- cannot use the field type to determine what the type argument to @Maybe@
+-- should be in this case. As datatype terms are values, they do not bind type
+-- variables, and thus, we cannot have a return type that makes sense in this
+-- case.
+--
+-- We resolve this problem by returning a thunk. In the case of our example,
+-- @Nothing@ would produce @<forall a . !Maybe a>@.
+--
 -- @since 1.2.0
 dataConstructor ::
   forall (m :: Type -> Type).
@@ -978,6 +1022,15 @@ cata rAlg rVal =
         t -> throwError . CataNotAnAlgebra $ t
     t -> throwError . CataApplyToNonValT $ t
 
+-- | Perform a pattern match. The first argument is the value to be matched on,
+-- and the second argument is a 'Vector' of \'handlers\' for each possible
+-- \'arm\' of the type of the value to be matched on.
+--
+-- All handlers must be thunks, and must all return the same (concrete) result.
+-- Polymorphic \'handlers\' (that is, thunks whose computation binds type
+-- variables of its own) will fail to compile.
+--
+-- @since 1.2.0
 match ::
   forall (m :: Type -> Type).
   (MonadHashCons Id ASGNode m, MonadError CovenantTypeError m, MonadReader ASGEnv m) =>
@@ -1194,7 +1247,13 @@ data BoundTyVar = BoundTyVar DeBruijn (Index "tyvar")
       Ord
     )
 
--- | Given a DB Index and position index, safely retrieve an in-scope type variable.
+-- | Given a DeBruijn index (designating scope) and positional index (designating
+-- which variable in that scope we are interested in), retrieve an in-scope type
+-- variable.
+--
+-- This will error if we request a type variable in a scope that doesn't exist,
+-- or at a position that doesn't exist in that scope.
+--
 -- @since 1.2.0
 boundTyVar ::
   forall (m :: Type -> Type).
@@ -1218,6 +1277,8 @@ boundTyVar scope index = do
     then pure (BoundTyVar scope index)
     else throwError $ OutOfScopeTyVar scope index
 
+-- To avoid annoying code duplication
+
 -- Helper to avoid having to manually catch and rethrow the error
 undoRenameM ::
   forall (m :: Type -> Type).
@@ -1229,8 +1290,6 @@ undoRenameM val = do
   case undoRename scope val of
     Left err' -> throwError $ UndoRenameFailure err'
     Right renamed -> pure renamed
-
--- To avoid annoying code duplication
 
 askScope ::
   forall (m :: Type -> Type).
@@ -1253,16 +1312,22 @@ liftUnifyM act = do
 
 -- Utility functions for ASG construction. These are not strictly necessary, but are extremely convenient.
 
--- | Constructs a datatype value at given constructor.
--- Whereas 'dataConstructor' results in a thunk, this results in a
--- non-thunked datatype value.
--- The third argument is a vector of arguments to the constructor and the fourth argument is a
--- vector of "type instantiations", which is used to instantiate any lingering polymorphic
--- type variables which are not determined by arguments to the constructor.
+-- | Constructs a datatype value at given constructor. This is different to
+-- 'dataConstructor', as it doesn't produce a thunk.
 --
--- For example, the argument to `Left 3` only determines the first argument to the `Either` type constructor, and
--- `dataConstructor` will yield a thunk with a type analogous to `forall a. Either Integer a`. This lets you specify the
--- 'a' and get a "real" datatype value, such as `Either Integer Bool`, in one step.
+-- The third argument is a 'Vector' of values to \'fill in\' all the fields
+-- required by the stated constructor. The fourth argument is a 'Vector' of
+-- \'type instantiations\', which allow \'concretification\' of any lingering
+-- polymorphic type variables which are not determined by the field values given
+-- as the third argument.
+--
+-- = Example
+--
+-- Consider @Left 3@. In this case, the field only determines the first type
+-- argument to the @Either@ data type, and if we used 'dataConstructor', we
+-- would be left with a thunk of type @<forall a . !Either Integer a>@. Using
+-- 'ctor', we can immediately specify what @a@ should be, and unwrap the thunk.
+--
 -- @since 1.2.0
 ctor ::
   forall (m :: Type -> Type).
@@ -1277,9 +1342,8 @@ ctor tn cn args instTys = do
   dataForced <- force (AnId dataThunk)
   app dataForced mempty instTys
 
--- | `lam` results in a computation node, which may not be what you want if you are (e.g.) passing around
--- function values as arguments to other functions. This is identical to `lam` except it wraps the result in a Thunk,
--- which is what you want if you're creating functions meant to serve as arguments to other functions.
+-- | As 'lam', but produces a thunk value instead of a computation.
+--
 -- @since 1.2.0
 lazyLam ::
   forall (m :: Type -> Type).
@@ -1289,8 +1353,8 @@ lazyLam ::
   m Id
 lazyLam expected bodyComp = lam expected bodyComp >>= thunk
 
--- | Lets you construct types for datatype values without having to `Vector.fromList` everywhere
--- (which can get very verbose and hard to read if you're creating a lot of these)
+-- | Helper to avoid using 'Vector.fromList' when defining data types.
+--
 -- @since 1.2.0
 dtype :: TyName -> [ValT AbstractTy] -> ValT AbstractTy
 dtype tn = Datatype tn . Vector.fromList

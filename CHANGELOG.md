@@ -4,7 +4,7 @@ All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
-## UNRELEASED
+## 1.2.0 -- 2025-08-27
 
 * Helper function for safely retrieving an in-scope type variable when constructing the ASG  
 * Removed Return nodes, associated pattern synonyms, and the `ret` ASGBuilder function

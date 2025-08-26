@@ -186,8 +186,18 @@ cycleCheck' visited (DataDeclaration tn _ ctors _) = traverse_ (checkCtor visite
 
 -}
 
--- First arg is the name of the type constructor w/ a bad argument, second arg is the bad argument.
-data EncodingArgErr a = EncodingArgMismatch TyName (ValT a)
+-- | Indicates that we tried to instantiate a polymorphic data type using a type
+-- whose encoding is incompatible. The most common case of this is when we have
+-- a \'polymorphic\' data type that uses some kind of @Data@ encoding and we try
+-- to instantiate it with a type which has a SOP encoding.
+--
+-- @since 1.2.0
+data EncodingArgErr a
+  = -- | First field is a constructor name for the type we tried to instantiate,
+    -- second field is the bad instantiator.
+    --
+    -- @since 1.2.0
+    EncodingArgMismatch TyName (ValT a)
   deriving stock (Show, Eq)
 
 -- | Verifies that a datatype (third argument) is valid according to its stated
