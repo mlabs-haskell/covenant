@@ -319,6 +319,8 @@ renameDatatypeInfo (DatatypeInfo ogDecl baseFStuff bb) = runRenameM mempty $ do
 -- A way of 'undoing' the renaming process. This is meant to be used only after
 -- applications, and assumes that what is being un-renamed is the result of a
 -- computation.
+--
+-- @since 1.2.0
 undoRename :: Vector Word32 -> ValT Renamed -> Either UnRenameError (ValT AbstractTy)
 undoRename scope t = runUnRenameM (go t) scope
   where
