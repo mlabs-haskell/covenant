@@ -105,6 +105,7 @@ import Covenant.Internal.Type
     Renamed (Rigid, Unifiable, Wildcard),
     TyName (TyName),
     ValT (Abstraction, BuiltinFlat, Datatype, ThunkT),
+    arity,
   )
 import Data.Coerce (coerce)
 import Data.Kind (Type)
@@ -176,13 +177,6 @@ pattern ArgsAndResult args result <- (argsAndResultHelper -> (args, result))
 {-# COMPLETE ArgsAndResult #-}
 
 {-# COMPLETE ReturnT, (:--:>) #-}
-
--- | Determine the arity of a computation type: that is, how many arguments a
--- function of this type must be given.
---
--- @since 1.0.0
-arity :: forall (a :: Type). CompT a -> Int
-arity (CompT _ (CompTBody xs)) = NonEmpty.length xs - 1
 
 -- | A computation type that does not bind any type variables. Use this like a
 -- data constructor.

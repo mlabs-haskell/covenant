@@ -1,30 +1,36 @@
+{-# LANGUAGE OverloadedLists #-}
 {-# LANGUAGE PatternSynonyms #-}
 
 module Main (main) where
 
 import Control.Applicative ((<|>))
-import Control.Monad (guard)
+import Control.Monad (guard, void)
 import Covenant.ASG
   ( ASG,
     ASGBuilder,
-    ASGNode (ACompNode, AValNode),
+    ASGNode (ACompNode, AValNode, AnError),
     CompNodeInfo
       ( Builtin1,
         Builtin2,
-        Builtin3,
-        Return
+        Builtin3
       ),
-    CovenantError (EmptyASG, TopLevelError, TopLevelValue, TypeError),
+    CovenantError
+      ( EmptyASG,
+        TopLevelError,
+        TopLevelValue,
+        TypeError
+      ),
     CovenantTypeError
       ( ApplyCompType,
         ApplyToError,
         ApplyToValType,
+        CataNoBaseFunctorForType,
+        CataNonRigidAlgebra,
         ForceCompType,
         ForceError,
         ForceNonThunk,
-        LambdaResultsInValType,
         NoSuchArgument,
-        ReturnCompType,
+        OutOfScopeTyVar,
         ThunkError,
         ThunkValType
       ),
@@ -33,34 +39,54 @@ import Covenant.ASG
     ValNodeInfo (Lit),
     app,
     arg,
+    boundTyVar,
     builtin1,
     builtin2,
     builtin3,
+    cata,
+    ctor,
+    dataConstructor,
+    defaultDatatypes,
+    dtype,
     err,
     force,
     lam,
+    lazyLam,
     lit,
-    nodeAt,
-    ret,
+    match,
     runASGBuilder,
     thunk,
     topLevelNode,
   )
-import Covenant.Constant (typeConstant)
-import Covenant.DeBruijn (DeBruijn (Z))
-import Covenant.Index (Index, intIndex, ix0)
+import Covenant.Constant
+  ( AConstant (AUnit, AnInteger),
+    typeConstant,
+  )
+import Covenant.DeBruijn (DeBruijn (S, Z))
+import Covenant.Index (Index, intIndex, ix0, ix1)
 import Covenant.Prim
   ( typeOneArgFunc,
     typeThreeArgFunc,
     typeTwoArgFunc,
   )
-import Covenant.Test (Concrete (Concrete))
+import Covenant.Test
+  ( Concrete (Concrete),
+    DebugASGBuilder,
+    debugASGBuilder,
+    tyAppTestDatatypes,
+    typeIdTest,
+  )
 import Covenant.Type
   ( AbstractTy,
-    CompT (Comp0, CompN),
-    CompTBody (ArgsAndResult, ReturnT),
-    ValT,
+    BuiltinFlatT (IntegerT, UnitT),
+    CompT (Comp0, Comp1, Comp2, CompN),
+    CompTBody (ArgsAndResult, ReturnT, (:--:>)),
+    ValT (BuiltinFlat, Datatype, ThunkT),
     arity,
+    boolT,
+    byteStringT,
+    integerT,
+    tyvar,
   )
 import Covenant.Util (pattern ConsV, pattern NilV)
 import Data.Coerce (coerce)
@@ -68,6 +94,7 @@ import Data.Kind (Type)
 import Data.Map qualified as M
 import Data.Maybe (fromJust)
 import Data.Vector qualified as Vector
+import Data.Wedge (Wedge (Here, Nowhere, There), wedgeLeft)
 import Optics.Core (preview, review)
 import Test.QuickCheck
   ( Gen,
@@ -82,8 +109,8 @@ import Test.QuickCheck
     shrink,
     (===),
   )
-import Test.Tasty (adjustOption, defaultMain, testGroup)
-import Test.Tasty.HUnit (assertEqual, assertFailure, testCase)
+import Test.Tasty (TestTree, adjustOption, defaultMain, testGroup)
+import Test.Tasty.HUnit (Assertion, assertEqual, assertFailure, testCase)
 import Test.Tasty.QuickCheck (QuickCheckTests, testProperty)
 
 main :: IO ()
@@ -97,9 +124,7 @@ main =
       testProperty "toplevel one-arg builtin compiles and has the right type" propTopLevelBuiltin1,
       testProperty "toplevel two-arg builtin compiles and has the right type" propTopLevelBuiltin2,
       testProperty "toplevel three-arg builtin compiles and has the right type" propTopLevelBuiltin3,
-      testProperty "toplevel return compiles and has the right type" propTopLevelReturn,
       testProperty "forcing a thunk has the same type as what the thunk wraps" propForceThunk,
-      testProperty "applying zero arguments to a return has the same type as what the return wraps" propApplyReturn,
       testProperty "forcing a computation type does not compile" propForceComp,
       testProperty "forcing a non-thunk value type does not compile" propForceNonThunk,
       testProperty "thunking a value type does not compile" propThunkValType,
@@ -108,8 +133,33 @@ main =
       testProperty "passing computations as arguments does not compile" propApplyComp,
       testProperty "requesting a non-existent argument does not compile" propNonExistentArg,
       testProperty "requesting an argument that exists compiles" propExistingArg,
-      testProperty "returning a computation from a lambda does not compile" propReturnComp,
-      testProperty "a lambda body having a value type does not compile" propLambdaValBody
+      testCase "db indices are well behaved (non-datatype case)" newLamTest1,
+      testCase "db indices are well behaved (datatype case)" newLamTest2,
+      testCase "calling down an in-scope tyvar works" boundTyVarHappy,
+      testCase "calling down an out-of-scope tyvar fails" boundTyVarShouldFail,
+      nothingIntro,
+      justConcreteIntro,
+      justRigidIntro,
+      justNothingIntro,
+      testGroup
+        "Catamorphisms"
+        [ testCase "Natural_F can tear down an Integer" unitCataNaturalF,
+          testCase "Negative_F can tear down an Integer" unitCataNegativeF,
+          testCase "ByteString_F can tear down a ByteString" unitCataByteStringF,
+          testCase "Non-recursive type cata should fail" unitCataMaybeF,
+          testCase "Cata with non-rigid algebra should fail" unitCataNonRigidF,
+          testCase "<List_F Integer Bool -> !Bool> with List Integer should be Bool" unitCataListInteger,
+          testCase "<List_F Integer r -> !r> with List Integer should be r" unitCataListIntegerRigid,
+          testCase "<List_F r Integer -> !Integer> with List r should be Integer" unitCataListRigid,
+          testCase "<List_F r (Maybe r) -> !Maybe r> with List r should be Maybe r" unitCataListMaybeRigid,
+          testCase "introduction then cata elimination" unitCataIntroThenEliminate
+        ],
+      testGroup
+        "Matching"
+        [ matchMaybe,
+          matchList,
+          maybeToList
+        ]
     ]
   where
     moreTests :: QuickCheckTests -> QuickCheckTests
@@ -147,11 +197,182 @@ unitThunkError = do
     Left (TypeError _ ThunkError) -> pure ()
     _ -> assertFailure $ "Unexpected result: " <> show result
 
+-- Construct a function of type `<Natural_F Bool -> !Bool> -> Integer -> !Bool`, whose
+-- body performs a cata over its second argument using its first argument. This
+-- should compile, and type as expected.
+unitCataNaturalF :: IO ()
+unitCataNaturalF = do
+  let thunkTy = ThunkT $ Comp0 $ Datatype "Natural_F" [boolT] :--:> ReturnT boolT
+  let ty = Comp0 $ thunkTy :--:> integerT :--:> ReturnT boolT
+  let comp = lam ty $ do
+        alg <- arg Z ix0
+        x <- arg Z ix1
+        result <- cata (AnArg alg) (AnArg x)
+        pure . AnId $ result
+  withCompilationSuccessUnit comp $ matchesType ty
+
+-- Construct a function of type `<Negative_F Bool -> !Bool> -> Integer -> !Bool`, whose
+-- body performs a cata over its second argument using its first argument. This
+-- should compile, and type as expected.
+unitCataNegativeF :: IO ()
+unitCataNegativeF = do
+  let thunkTy = ThunkT $ Comp0 $ Datatype "Negative_F" [boolT] :--:> ReturnT boolT
+  let ty = Comp0 $ thunkTy :--:> integerT :--:> ReturnT boolT
+  let comp = lam ty $ do
+        alg <- arg Z ix0
+        x <- arg Z ix1
+        result <- cata (AnArg alg) (AnArg x)
+        pure . AnId $ result
+  withCompilationSuccessUnit comp $ matchesType ty
+
+-- Construct a function of type `<ByteString_F Integer -> !Integer> -> ByteString
+-- -> !Bool`, whose body performs a cata over its second argument using its
+-- first argument. This should compile, and type as expected.
+unitCataByteStringF :: IO ()
+unitCataByteStringF = do
+  let thunkTy = ThunkT $ Comp0 $ Datatype "ByteString_F" [integerT] :--:> ReturnT integerT
+  let ty = Comp0 $ thunkTy :--:> byteStringT :--:> ReturnT integerT
+  let comp = lam ty $ do
+        alg <- arg Z ix0
+        x <- arg Z ix1
+        result <- cata (AnArg alg) (AnArg x)
+        pure . AnId $ result
+  withCompilationSuccessUnit comp $ matchesType ty
+
+-- Construct a function of type `forall a . <Maybe_F a Integer -> !Integer> -> Maybe
+-- a -> !Integer`, whose body performs a cata over its second argument
+-- using its first argument. This should fail to compile, indicating that
+-- `Maybe` doesn't have a base functor.
+unitCataMaybeF :: IO ()
+unitCataMaybeF = do
+  let thunkTy = ThunkT $ Comp0 $ Datatype "Maybe_F" [tyvar (S Z) ix0, integerT] :--:> ReturnT integerT
+  let ty = Comp1 $ thunkTy :--:> Datatype "Maybe" [tyvar Z ix0] :--:> ReturnT integerT
+  let comp = lam ty $ do
+        alg <- arg Z ix0
+        x <- arg Z ix1
+        result <- cata (AnArg alg) (AnArg x)
+        pure . AnId $ result
+  withCompilationFailureUnit comp $ \case
+    TypeError _ (CataNoBaseFunctorForType tyName) -> assertEqual "" "Maybe" tyName
+    err' -> assertFailure $ "Failed with unexpected type of error: " <> show err'
+
+-- Construct a function of type `<forall a . ListF a (Maybe a) -> !Maybe a> -> List
+-- Integer -> !Maybe Integer`, whose body performs a cata over its second
+-- argument using its first argument. This should fail to compile due to a
+-- non-rigid algebra.
+unitCataNonRigidF :: IO ()
+unitCataNonRigidF = do
+  let nonRigidCompT = Comp1 $ Datatype "List_F" [tyvar Z ix0, Datatype "Maybe" [tyvar Z ix0]] :--:> ReturnT (Datatype "Maybe" [tyvar Z ix0])
+  let thunkTy = ThunkT nonRigidCompT
+  let ty = Comp0 $ thunkTy :--:> Datatype "List" [integerT] :--:> ReturnT (Datatype "Maybe" [integerT])
+  let comp = lam ty $ do
+        alg <- arg Z ix0
+        x <- arg Z ix1
+        result <- cata (AnArg alg) (AnArg x)
+        pure . AnId $ result
+  withCompilationFailureUnit comp $ \case
+    TypeError _ (CataNonRigidAlgebra t) -> assertEqual "" nonRigidCompT t
+    err' -> assertFailure $ "Failed with unexpected type of error: " <> show err'
+
+-- Construct a function of type `<List_F Integer Bool -> !Bool> -> List Integer
+-- -> !Bool`, whose body performs a cata over its second argument using its
+-- first argument. This should compile, and type as expected.
+unitCataListInteger :: IO ()
+unitCataListInteger = do
+  let thunkTy = ThunkT $ Comp0 $ Datatype "List_F" [integerT, boolT] :--:> ReturnT boolT
+  let ty = Comp0 $ thunkTy :--:> Datatype "List" [integerT] :--:> ReturnT boolT
+  let comp = lam ty $ do
+        alg <- arg Z ix0
+        x <- arg Z ix1
+        result <- cata (AnArg alg) (AnArg x)
+        pure . AnId $ result
+  withCompilationSuccessUnit comp $ matchesType ty
+
+-- Construct a function of type `forall a . <List_F Integer a -> !a> -> List
+-- Integer -> !a`, whose body performs a cata over its second argument using its
+-- first argument. This should compile, and type as expected.
+unitCataListIntegerRigid :: IO ()
+unitCataListIntegerRigid = do
+  let thunkTy = ThunkT $ Comp0 $ Datatype "List_F" [integerT, tyvar (S Z) ix0] :--:> ReturnT (tyvar (S Z) ix0)
+  let ty = Comp1 $ thunkTy :--:> Datatype "List" [integerT] :--:> ReturnT (tyvar Z ix0)
+  let comp = lam ty $ do
+        alg <- arg Z ix0
+        x <- arg Z ix1
+        result <- cata (AnArg alg) (AnArg x)
+        pure . AnId $ result
+  withCompilationSuccessUnit comp $ matchesType ty
+
+-- Construct a function of type `forall a . <List_F a Integer -> !Integer> -> List
+-- a -> !Integer`, whose body performs a cata over its second argument using its
+-- first argument. This should compile, and type as expected.
+unitCataListRigid :: IO ()
+unitCataListRigid = do
+  let thunkTy = ThunkT $ Comp0 $ Datatype "List_F" [tyvar (S Z) ix0, integerT] :--:> ReturnT integerT
+  let ty = Comp1 $ thunkTy :--:> Datatype "List" [tyvar Z ix0] :--:> ReturnT integerT
+  let comp = lam ty $ do
+        alg <- arg Z ix0
+        x <- arg Z ix1
+        result <- cata (AnArg alg) (AnArg x)
+        pure . AnId $ result
+  withCompilationSuccessUnit comp $ matchesType ty
+
+-- Construct a function of type `forall a . <List_F a (Maybe a) -> !Maybe a> ->
+-- List a -> !Maybe a`, whose body performs a cata over its second argument
+-- using its first argument. This should compile, and type as expected.
+unitCataListMaybeRigid :: IO ()
+unitCataListMaybeRigid = do
+  let thunkTy =
+        ThunkT $
+          Comp0 $
+            Datatype "List_F" [tyvar (S Z) ix0, Datatype "Maybe" [tyvar (S Z) ix0]]
+              :--:> ReturnT (Datatype "Maybe" [tyvar (S Z) ix0])
+  let ty =
+        Comp1 $
+          thunkTy
+            :--:> Datatype "List" [tyvar Z ix0]
+            :--:> ReturnT (Datatype "Maybe" [tyvar Z ix0])
+  let comp = lam ty $ do
+        alg <- arg Z ix0
+        x <- arg Z ix1
+        result <- cata (AnArg alg) (AnArg x)
+        pure . AnId $ result
+  withCompilationSuccessUnit comp $ matchesType ty
+
+-- Construct a function of type `forall a b . <List_F a (Maybe b) -> !Maybe b> ->
+-- a -> !Maybe b`. In its body, we construct a singleton list, then eliminate it
+-- using a cata with the first argument as the algebra. THis should compile and
+-- type as expected.
+unitCataIntroThenEliminate :: IO ()
+unitCataIntroThenEliminate = do
+  let thunkTy =
+        ThunkT $
+          Comp0 $
+            Datatype "List_F" [tyvar (S Z) ix0, Datatype "Maybe" [tyvar (S Z) ix1]]
+              :--:> ReturnT (Datatype "Maybe" [tyvar (S Z) ix1])
+  let ty =
+        Comp2 $
+          thunkTy
+            :--:> tyvar Z ix0
+            :--:> ReturnT (Datatype "Maybe" [tyvar Z ix1])
+  let comp = lam ty $ do
+        alg <- arg Z ix0
+        x <- arg Z ix1
+        nilThunk <- dataConstructor "List" "Nil" []
+        nilForced <- force (AnId nilThunk)
+        aT <- boundTyVar Z ix0
+        nilApplied <- app nilForced [] [Here aT]
+        singleThunk <- dataConstructor "List" "Cons" [AnArg x, AnId nilApplied]
+        singleForced <- force (AnId singleThunk)
+        singleApplied <- app singleForced [] [Nowhere]
+        result <- cata (AnArg alg) (AnId singleApplied)
+        pure . AnId $ result
+  withCompilationSuccessUnit comp $ matchesType ty
+
 -- Properties
 
 propTopLevelConstant :: Property
 propTopLevelConstant = forAllShrinkShow arbitrary shrink show $ \c ->
-  let builtUp = lit c
+  let builtUp = AnId <$> lit c
    in withCompilationFailure builtUp $ \case
         TopLevelValue _ t info -> case info of
           Lit c' ->
@@ -201,25 +422,6 @@ propTopLevelBuiltin3 = forAllShrinkShow arbitrary shrink show $ \bi3 ->
                 ]
             _ -> failUnexpectedCompNodeInfo info
 
-propTopLevelReturn :: Property
-propTopLevelReturn = forAllShrinkShow arbitrary shrink show $ \c ->
-  let builtUp = lit c >>= \i -> ret (AnId i)
-   in withCompilationSuccess builtUp $ \asg ->
-        withToplevelCompNode asg $ \t info ->
-          case info of
-            Return r -> withExpectedId r $ \i ->
-              withExpectedValNode i asg $ \t' info' ->
-                case info' of
-                  Lit c' ->
-                    let cT = typeConstant c
-                     in conjoin
-                          [ c' === c,
-                            cT === t',
-                            t === Comp0 (ReturnT cT)
-                          ]
-                  _ -> failUnexpectedValNodeInfo info'
-            _ -> failUnexpectedCompNodeInfo info
-
 -- We use builtins only for this test, but this should demonstrate the
 -- properties well enough
 propForceThunk :: Property
@@ -247,30 +449,15 @@ propForceThunk = forAllShrinkShow arbitrary shrink show $ \x ->
             force (AnId thunkI)
        in (comp, forceThunkComp)
 
--- As we can't build toplevel value ASGs, this has to be a bit roundabout
-propApplyReturn :: Property
-propApplyReturn = forAllShrinkShow arbitrary shrink show $ \c ->
-  let comp = do
-        i <- lit c
-        ret (AnId i)
-      applyReturnComp = do
-        i <- comp
-        applied <- app i Vector.empty
-        ret (AnId applied)
-   in withCompilationSuccess comp $ \expectedASG ->
-        withCompilationSuccess applyReturnComp $ \applyReturnASG ->
-          withToplevelCompNode expectedASG $ \expectedT _ ->
-            withToplevelCompNode applyReturnASG $ \actualT _ ->
-              expectedT === actualT
-
 propForceComp :: Property
 propForceComp = forAllShrinkShow arbitrary shrink show $ \x ->
-  let comp = do
-        i <- case x of
-          Left bi1 -> builtin1 bi1
-          Right (Left bi2) -> builtin2 bi2
-          Right (Right bi3) -> builtin3 bi3
-        force (AnId i)
+  let comp =
+        AnId <$> do
+          i <- case x of
+            Left bi1 -> builtin1 bi1
+            Right (Left bi2) -> builtin2 bi2
+            Right (Right bi3) -> builtin3 bi3
+          force (AnId i)
       expectedT = case x of
         Left bi1 -> typeOneArgFunc bi1
         Right (Left bi2) -> typeTwoArgFunc bi2
@@ -282,9 +469,10 @@ propForceComp = forAllShrinkShow arbitrary shrink show $ \x ->
 
 propForceNonThunk :: Property
 propForceNonThunk = forAllShrinkShow arbitrary shrink show $ \c ->
-  let comp = do
-        i <- lit c
-        force (AnId i)
+  let comp =
+        AnId <$> do
+          i <- lit c
+          force (AnId i)
    in withCompilationFailure comp $ \case
         TypeError _ (ForceNonThunk actualT) -> typeConstant c === actualT
         TypeError _ err' -> failWrongTypeError err'
@@ -292,9 +480,10 @@ propForceNonThunk = forAllShrinkShow arbitrary shrink show $ \c ->
 
 propThunkValType :: Property
 propThunkValType = forAllShrinkShow arbitrary shrink show $ \c ->
-  let comp = do
-        i <- lit c
-        thunk i
+  let comp =
+        AnId <$> do
+          i <- lit c
+          thunk i
    in withCompilationFailure comp $ \case
         TypeError _ (ThunkValType actualT) -> typeConstant c === actualT
         TypeError _ err' -> failWrongTypeError err'
@@ -302,10 +491,11 @@ propThunkValType = forAllShrinkShow arbitrary shrink show $ \c ->
 
 propApplyToVal :: Property
 propApplyToVal = forAllShrinkShow arbitrary shrink show $ \c args ->
-  let comp = do
-        args' <- traverse (fmap AnId . lit) args
-        i <- lit c
-        app i args'
+  let comp =
+        AnId <$> do
+          args' <- traverse (fmap AnId . lit) args
+          i <- lit c
+          app i args' mempty
    in withCompilationFailure comp $ \case
         TypeError _ (ApplyToValType t) -> typeConstant c === t
         TypeError _ err' -> failWrongTypeError err'
@@ -313,10 +503,11 @@ propApplyToVal = forAllShrinkShow arbitrary shrink show $ \c args ->
 
 propApplyToError :: Property
 propApplyToError = forAllShrinkShow arbitrary shrink show $ \args ->
-  let comp = do
-        args' <- traverse (fmap AnId . lit) args
-        i <- err
-        app i args'
+  let comp =
+        AnId <$> do
+          args' <- traverse (fmap AnId . lit) args
+          i <- err
+          app i args' mempty
    in withCompilationFailure comp $ \case
         TypeError _ ApplyToError -> property True
         TypeError _ err' -> failWrongTypeError err'
@@ -332,13 +523,14 @@ propApplyComp = forAllShrinkShow arbitrary shrink show $ \f arg1 ->
         Right (Left bi2) -> typeTwoArgFunc bi2
         Right (Right bi3) -> typeThreeArgFunc bi3
 
-      comp = do
-        i <- builtin1 f
-        arg' <- case arg1 of
-          Left bi1 -> builtin1 bi1
-          Right (Left bi2) -> builtin2 bi2
-          Right (Right bi3) -> builtin3 bi3
-        app i (Vector.singleton . AnId $ arg')
+      comp =
+        AnId <$> do
+          i <- builtin1 f
+          arg' <- case arg1 of
+            Left bi1 -> builtin1 bi1
+            Right (Left bi2) -> builtin2 bi2
+            Right (Right bi3) -> builtin3 bi3
+          app i (Vector.singleton . AnId $ arg') mempty
    in withCompilationFailure comp $ \case
         TypeError _ (ApplyCompType actualT) -> t === actualT
         TypeError _ err' -> failWrongTypeError err'
@@ -346,7 +538,7 @@ propApplyComp = forAllShrinkShow arbitrary shrink show $ \f arg1 ->
 
 propNonExistentArg :: Property
 propNonExistentArg = forAllShrinkShow arbitrary shrink show $ \(db, index) ->
-  let comp = arg db index >>= \i -> ret (AnArg i)
+  let comp = arg db index >>= \i -> pure $ AnArg i
    in withCompilationFailure comp $ \case
         TypeError _ (NoSuchArgument db' index') -> conjoin [db === db', index === index']
         TypeError _ err' -> failWrongTypeError err'
@@ -359,7 +551,7 @@ propExistingArg :: Property
 propExistingArg = forAllShrinkShow gen shr show $ \(t, index) ->
   let comp = lam t $ do
         arg1 <- arg Z index
-        ret (AnArg arg1)
+        pure (AnArg arg1)
    in withCompilationSuccess comp $ \asg ->
         withToplevelCompNode asg $ \t' _ ->
           t' === t
@@ -399,33 +591,209 @@ propExistingArg = forAllShrinkShow gen shr show $ \(t, index) ->
                   Just (Concrete res') -> pure (Comp0 (ArgsAndResult (coerce args') res'), index)
            in shrinkOnIndex <|> shrinkOnArgs
 
-propReturnComp :: Property
-propReturnComp = forAllShrinkShow arbitrary shrink show $ \x ->
-  let t = case x of
-        Left bi1 -> typeOneArgFunc bi1
-        Right (Left bi2) -> typeTwoArgFunc bi2
-        Right (Right bi3) -> typeThreeArgFunc bi3
-      comp = do
-        i <- case x of
-          Left bi1 -> builtin1 bi1
-          Right (Left bi2) -> builtin2 bi2
-          Right (Right bi3) -> builtin3 bi3
-        ret (AnId i)
-   in withCompilationFailure comp $ \case
-        TypeError _ (ReturnCompType actualT) -> t === actualT
-        TypeError _ err' -> failWrongTypeError err'
-        err' -> failWrongError err'
+boundTyVarHappy :: Assertion
+boundTyVarHappy = run $ do
+  lam lamTy $ do
+    arg1 <- AnArg <$> arg Z ix0
+    void $ boundTyVar Z ix0
+    pure arg1
+  where
+    lamTy :: CompT AbstractTy
+    lamTy = Comp1 $ tyvar Z ix0 :--:> ReturnT (tyvar Z ix0)
 
-propLambdaValBody :: Property
-propLambdaValBody = forAllShrinkShow arbitrary shrink show $ \(Concrete t, c) ->
-  let resultT = typeConstant c
-      comp = lam (Comp0 (ArgsAndResult (Vector.singleton t) resultT)) $ lit c
-   in withCompilationFailure comp $ \case
-        TypeError _ (LambdaResultsInValType actualT) -> resultT === actualT
-        TypeError _ err' -> failWrongTypeError err'
-        err' -> failWrongError err'
+    run :: forall (a :: Type). ASGBuilder a -> IO ()
+    run act = case runASGBuilder M.empty act of
+      Left err' -> assertFailure . show $ err'
+      Right {} -> pure ()
+
+boundTyVarShouldFail :: Assertion
+boundTyVarShouldFail = run $ boundTyVar Z ix0
+  where
+    run :: forall (a :: Type). (Show a) => ASGBuilder a -> IO ()
+    run act = case runASGBuilder M.empty act of
+      Left (TypeError _ (OutOfScopeTyVar db argpos)) ->
+        if db == Z && argpos == ix0
+          then pure ()
+          else assertFailure $ "Expected OutOfScopeTyVar error for Z, ix0 but got: " <> show db <> ", " <> show argpos
+      Left err' -> assertFailure $ "Expected an OutofScopeTyVar error, but got: " <> show err'
+      Right x -> assertFailure $ "Expected boundTyVar to fail, but got: " <> show x
+
+-- TODO: better name
+newLamTest1 :: Assertion
+newLamTest1 = case runASGBuilder M.empty fn of
+  Left err' -> assertFailure (show err')
+  Right {} -> pure ()
+  where
+    fn :: ASGBuilder Id
+    fn = lam expected $ do
+      f <- arg Z ix0 >>= force . AnArg
+      a <- AnArg <$> arg Z ix1
+      AnId <$> app f (Vector.singleton a) mempty
+
+    expected :: CompT AbstractTy
+    expected =
+      Comp2 $
+        ThunkT (Comp0 $ tyvar (S Z) ix0 :--:> ReturnT (tyvar (S Z) ix1))
+          :--:> tyvar Z ix0
+          :--:> ReturnT (tyvar Z ix1)
+
+newLamTest2 :: Assertion
+newLamTest2 = case runASGBuilder tyAppTestDatatypes fn of
+  Left err' -> assertFailure (show err')
+  Right {} -> pure ()
+  where
+    fn :: ASGBuilder Id
+    fn = lam expected $ do
+      f <- arg Z ix0 >>= force . AnArg
+      a <- AnArg <$> arg Z ix1
+      AnId <$> app f (Vector.singleton a) mempty
+
+    expected :: CompT AbstractTy
+    expected =
+      Comp2 $
+        ThunkT (Comp0 $ Datatype "Maybe" (Vector.singleton $ tyvar (S Z) ix0) :--:> ReturnT (tyvar (S Z) ix1))
+          :--:> Datatype "Maybe" (Vector.singleton $ tyvar Z ix0)
+          :--:> ReturnT (tyvar Z ix1)
+
+-- Intro form tests
+
+nothingIntro :: TestTree
+nothingIntro =
+  runIntroFormTest "nothing" expectNothingThunk $
+    dataConstructor "Maybe" "Nothing" mempty >>= typeIdTest
+  where
+    expectNothingThunk :: ValT AbstractTy
+    expectNothingThunk = ThunkT . Comp1 . ReturnT $ Datatype "Maybe" (Vector.fromList [tyvar Z ix0])
+
+justConcreteIntro :: TestTree
+justConcreteIntro = runIntroFormTest "justConcreteIntro" expected $ do
+  argRef <- AnId <$> lit AUnit
+  dataConstructor "Maybe" "Just" (Vector.singleton argRef) >>= typeIdTest
+  where
+    expected :: ValT AbstractTy
+    expected = ThunkT . Comp0 . ReturnT $ Datatype "Maybe" (Vector.singleton $ BuiltinFlat UnitT)
+
+justRigidIntro :: TestTree
+justRigidIntro = runIntroFormTest "justRigidIntro" expected $ do
+  lamId <- lam lamTy $ do
+    arg1 <- AnArg <$> arg Z ix0
+    justRigid <- dataConstructor "Maybe" "Just" (Vector.singleton arg1)
+    pure (AnId justRigid)
+  lamThunked <- thunk lamId
+  typeIdTest lamThunked
+  where
+    lamTy :: CompT AbstractTy
+    lamTy =
+      Comp1 $
+        tyvar Z ix0
+          :--:> ReturnT
+            ( ThunkT
+                . Comp0
+                . ReturnT
+                $ Datatype "Maybe"
+                $ Vector.singleton (tyvar (S Z) ix0)
+            )
+
+    expected :: ValT AbstractTy
+    expected = ThunkT lamTy
+
+justNothingIntro :: TestTree
+justNothingIntro = runIntroFormTest "justNothingIntro" expectedThunk $ do
+  thunkL <- lam expectedComp $ do
+    nothingThunk <- dataConstructor "Maybe" "Nothing" mempty
+    var <- boundTyVar Z ix0
+    nothingForced <- force (AnId nothingThunk)
+    nothingApplied <- app nothingForced mempty (Vector.singleton . wedgeLeft . Just $ var)
+    justNothing <- dataConstructor "Maybe" "Just" (Vector.singleton (AnId nothingApplied))
+    justNothingForced <- force (AnId justNothing)
+    justNothingApplied <- app justNothingForced mempty (Vector.singleton Nowhere)
+    pure (AnId justNothingApplied)
+  typeIdTest thunkL
+  where
+    expectedComp :: CompT AbstractTy
+    expectedComp =
+      Comp1
+        . ReturnT
+        . Datatype "Maybe"
+        . Vector.singleton
+        . Datatype "Maybe"
+        $ Vector.singleton
+        $ tyvar Z ix0
+
+    expectedThunk :: ValT AbstractTy
+    expectedThunk = ThunkT expectedComp
+
+-- pattern matching
+
+{- Construct a pattern match on 'Maybe Unit' that returns an integer.
+
+   This is effectively the simplest possible pattern matching test: The type is non-recursive and the
+   parameters to the type constructor are all concrete.
+-}
+matchMaybe :: TestTree
+matchMaybe = runIntroFormTest "matchMaybe" (BuiltinFlat IntegerT) $ do
+  unit <- AnId <$> lit AUnit
+  scrutinee <- ctor "Maybe" "Just" (Vector.singleton unit) (Vector.singleton Nowhere)
+  nothingHandler <- lazyLam (Comp0 $ ReturnT (BuiltinFlat IntegerT)) (AnId <$> lit (AnInteger 0))
+  justHandler <- lazyLam (Comp0 $ BuiltinFlat UnitT :--:> ReturnT (BuiltinFlat IntegerT)) (AnId <$> lit (AnInteger 1))
+  result <- match (AnId scrutinee) (AnId <$> Vector.fromList [justHandler, nothingHandler])
+  typeIdTest result
+
+{- Construct a pattern match on 'List Unit' that returns an integer.
+
+   A simple test for pattern matches on values of recursive types.
+-}
+matchList :: TestTree
+matchList = runIntroFormTest "matchList" (BuiltinFlat IntegerT) $ do
+  unit <- AnId <$> lit AUnit
+  nilUnit <- ctor "List" "Nil" mempty (Vector.singleton $ There (BuiltinFlat UnitT))
+  scrutinee <- ctor "List" "Cons" (Vector.fromList [unit, AnId nilUnit]) (Vector.singleton Nowhere)
+  let nilHandlerTy = Comp0 $ ReturnT (BuiltinFlat IntegerT)
+      consHandlerTy =
+        Comp0 $
+          BuiltinFlat UnitT
+            :--:> Datatype "List_F" (Vector.fromList [BuiltinFlat UnitT, Datatype "List" (Vector.singleton $ BuiltinFlat UnitT)])
+            :--:> ReturnT (BuiltinFlat IntegerT)
+  nilHandler <- lazyLam nilHandlerTy (AnId <$> lit (AnInteger 0))
+  consHandler <- lazyLam consHandlerTy (AnId <$> lit (AnInteger 0))
+  result <- match (AnId scrutinee) (AnId <$> Vector.fromList [nilHandler, consHandler])
+  typeIdTest result
+
+{- This differs from the two above tests in that we're using pattern matching to construct the
+   'maybeToList :: forall a. Maybe a -> List a' function. This is very useful, because if successful, it provides good evidence that:
+     1. Pattern matching works on datatypes with rigid parameters.
+     2. Pattern matching works inside the body of a lambda.
+     3. Nothing breaks renaming anywhere.
+-}
+maybeToList :: TestTree
+maybeToList = runIntroFormTest "maybeToList" maybeToListTy $ do
+  thonk <- lazyLam maybeToListCompTy $ do
+    let nothingHandlerTy = Comp0 $ ReturnT (dtype "List" [tyvar (S Z) ix0])
+        justHandlerTy = Comp0 $ tyvar (S Z) ix0 :--:> ReturnT (dtype "List" [tyvar (S Z) ix0])
+    nothingHandler <- lazyLam nothingHandlerTy $ do
+      tvA <- boundTyVar (S Z) ix0
+      AnId <$> ctor "List" "Nil" mempty (Vector.singleton (Here tvA))
+    justHandler <- lazyLam justHandlerTy $ do
+      tvA <- boundTyVar (S Z) ix0
+      vA <- AnArg <$> arg Z ix0
+      nil <- AnId <$> ctor "List" "Nil" mempty (Vector.singleton (Here tvA))
+      AnId <$> ctor "List" "Cons" (Vector.fromList [vA, nil]) (Vector.singleton Nowhere)
+    scrutinee <- AnArg <$> arg Z ix0
+    AnId <$> match scrutinee (AnId <$> Vector.fromList [justHandler, nothingHandler])
+  typeIdTest thonk
+  where
+    maybeToListCompTy :: CompT AbstractTy
+    maybeToListCompTy = Comp1 (dtype "Maybe" [tyvar Z ix0] :--:> ReturnT (dtype "List" [tyvar Z ix0]))
+
+    maybeToListTy :: ValT AbstractTy
+    maybeToListTy = ThunkT maybeToListCompTy
 
 -- Helpers
+
+runIntroFormTest :: String -> ValT AbstractTy -> DebugASGBuilder (ValT AbstractTy) -> TestTree
+runIntroFormTest nm expectedTy act = testCase nm $ case debugASGBuilder tyAppTestDatatypes act of
+  Left err' -> assertFailure ("ASG Error: " <> show err')
+  Right actualTy -> assertEqual nm expectedTy actualTy
 
 failWrongTypeError :: CovenantTypeError -> Property
 failWrongTypeError err' = failWithCounterExample ("Unexpected type error: " <> show err')
@@ -433,7 +801,7 @@ failWrongTypeError err' = failWithCounterExample ("Unexpected type error: " <> s
 failWrongError :: CovenantError -> Property
 failWrongError err' = failWithCounterExample ("Unexpected error: " <> show err')
 
-withCompilationFailure :: ASGBuilder Id -> (CovenantError -> Property) -> Property
+withCompilationFailure :: ASGBuilder Ref -> (CovenantError -> Property) -> Property
 withCompilationFailure comp cb = case runASGBuilder M.empty comp of
   Left err' -> cb err'
   Right asg -> failWithCounterExample ("Unexpected success: " <> show asg)
@@ -459,6 +827,23 @@ failUnexpectedValNodeInfo :: ValNodeInfo -> Property
 failUnexpectedValNodeInfo info =
   failWithCounterExample ("Unexpected ValNodeInfo: " <> show info)
 
+withCompilationSuccessUnit :: ASGBuilder Id -> (ASG -> IO ()) -> IO ()
+withCompilationSuccessUnit comp cb = case runASGBuilder defaultDatatypes comp of
+  Left err' -> assertFailure $ "Did not compile: " <> show err'
+  Right asg -> cb asg
+
+withCompilationFailureUnit :: ASGBuilder Id -> (CovenantError -> IO ()) -> IO ()
+withCompilationFailureUnit comp cb = case runASGBuilder defaultDatatypes comp of
+  Left err' -> cb err'
+  Right asg -> assertFailure $ "Unexpected compilation success: " <> show asg
+
+matchesType :: CompT AbstractTy -> ASG -> IO ()
+matchesType expectedTy asg = case topLevelNode asg of
+  ACompNode actualTy _ -> assertEqual "" expectedTy actualTy
+  u@(AValNode _ _) -> assertFailure $ "Got a value node: " <> show u
+  AnError -> assertFailure "Got an error node"
+
+{- NOTE: Not 100% sure I won't need these
 withExpectedId :: Ref -> (Id -> Property) -> Property
 withExpectedId r cb = case r of
   AnId i -> cb i
@@ -468,3 +853,4 @@ withExpectedValNode :: Id -> ASG -> (ValT AbstractTy -> ValNodeInfo -> Property)
 withExpectedValNode i asg cb = case nodeAt i asg of
   AValNode t info -> cb t info
   node -> failWithCounterExample ("Unexpected node: " <> show node)
+--}

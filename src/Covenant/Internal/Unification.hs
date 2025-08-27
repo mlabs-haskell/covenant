@@ -1,10 +1,16 @@
 {-# LANGUAGE CPP #-}
+{-# LANGUAGE MultiWayIf #-}
 
 module Covenant.Internal.Unification
   ( TypeAppError (..),
     checkApp,
     runUnifyM,
     UnifyM,
+    -- These are exported for use with ASG helpers, largely (but not exclusively) the intro forms helper
+    unify,
+    substitute,
+    fixUp,
+    reconcile,
   )
 where
 
@@ -15,7 +21,7 @@ import Data.Foldable (foldl')
 #endif
 import Control.Monad.Except (MonadError, catchError, throwError)
 import Control.Monad.Reader (MonadReader, ReaderT (runReaderT), ask)
-import Covenant.Data (DatatypeInfo)
+import Covenant.Data (DatatypeInfo, mkDatatypeInfo)
 import Covenant.Index (Index, intCount, intIndex)
 import Covenant.Internal.Rename (RenameError, renameDatatypeInfo)
 import Covenant.Internal.Type
@@ -24,8 +30,11 @@ import Covenant.Internal.Type
     CompT (CompT),
     CompTBody (CompTBody),
     Renamed (Rigid, Unifiable, Wildcard),
-    TyName,
+    TyName (TyName),
     ValT (Abstraction, BuiltinFlat, Datatype, ThunkT),
+    byteStringBaseFunctor,
+    naturalBaseFunctor,
+    negativeBaseFunctor,
   )
 import Data.Kind (Type)
 import Data.Map (Map)
@@ -35,6 +44,7 @@ import Data.Maybe (fromJust, mapMaybe)
 import Data.Set (Set)
 import Data.Set qualified as Set
 import Data.Text (Text)
+import Data.Text qualified as Text
 import Data.Vector (Vector)
 import Data.Vector qualified as Vector
 import Data.Vector.NonEmpty (NonEmptyVector)
@@ -76,6 +86,9 @@ data TypeAppError
     --
     -- @since 1.1.0
     ImpossibleHappened Text
+  | -- Could not reconcile two assignments with the same index
+    -- @since 1.2.0
+    CouldNotReconcile (Index "tyvar") (ValT Renamed) (ValT Renamed)
   deriving stock
     ( -- | @since 1.0.0
       Eq,
@@ -101,10 +114,42 @@ runUnifyM tyDict (UnifyM act) = runReaderT act tyDict
 lookupDatatypeInfo ::
   TyName ->
   UnifyM (DatatypeInfo Renamed)
-lookupDatatypeInfo tn =
+lookupDatatypeInfo tn@(TyName rawTyName) =
   ask >>= \tyDict -> case preview (ix tn) tyDict of
-    Nothing -> throwError $ NoDatatypeInfo tn
-    Just dti -> either (throwError . DatatypeInfoRenameFailed tn) pure $ renameDatatypeInfo dti
+    Nothing -> checkForBaseFunctor tyDict
+    Just dti -> renamedToUnify . renameDatatypeInfo $ dti
+  where
+    checkForBaseFunctor :: Map TyName (DatatypeInfo AbstractTy) -> UnifyM (DatatypeInfo Renamed)
+    checkForBaseFunctor tyDict = case Text.stripSuffix "_F" rawTyName of
+      Nothing -> throwError . NoDatatypeInfo $ tn
+      Just rawTyNameStub ->
+        if
+          -- Note (Koz, 12/08/2025): None of these specific cases should _ever_
+          -- fail. Thus, `fromRight` is safe here.
+          | rawTyNameStub == "Natural" ->
+              renamedToUnify . renameDatatypeInfo . fromRight . mkDatatypeInfo $ naturalBaseFunctor
+          | rawTyNameStub == "Negative" ->
+              renamedToUnify . renameDatatypeInfo . fromRight . mkDatatypeInfo $ negativeBaseFunctor
+          | rawTyNameStub == "ByteString" ->
+              renamedToUnify . renameDatatypeInfo . fromRight . mkDatatypeInfo $ byteStringBaseFunctor
+          -- We have something that _looks_ like a base functor, but not a
+          -- special builtin case. We thus need to ask the environment for the
+          -- recursive type it stands for, if it exists.
+          | otherwise -> do
+              let standinTyName = TyName rawTyNameStub
+              case preview (ix standinTyName) tyDict of
+                -- Now we have _truly_ missed.
+                Nothing -> throwError . NoDatatypeInfo $ tn
+                Just dti -> case view #baseFunctor dti of
+                  Nothing -> throwError . NoDatatypeInfo $ tn
+                  -- Since this is generated, it can't fail to rename
+                  Just (bfDd, _) -> renamedToUnify . renameDatatypeInfo . fromRight . mkDatatypeInfo $ bfDd
+    renamedToUnify :: Either RenameError (DatatypeInfo Renamed) -> UnifyM (DatatypeInfo Renamed)
+    renamedToUnify = either (throwError . DatatypeInfoRenameFailed tn) pure
+    fromRight :: forall a b. (Show a) => Either a b -> b
+    fromRight = \case
+      Left err -> error . show $ err
+      Right x -> x
 
 lookupBBForm :: TyName -> UnifyM (ValT Renamed)
 lookupBBForm tn =
@@ -210,8 +255,6 @@ promoteUnificationError topLevelExpected topLevelActual =
 
 fixUp :: ValT Renamed -> UnifyM (ValT Renamed)
 fixUp = \case
-  -- We have a result that's effectively `forall a . a` but not an error
-  Abstraction (Unifiable index) -> throwError . LeakingUnifiable $ index
   -- We're doing the equivalent of failing the `ST` trick
   Abstraction (Wildcard scopeId trueLevel index) -> throwError . LeakingWildcard scopeId trueLevel $ index
   -- We may have a result with fewer unifiables than we started with
@@ -344,28 +387,30 @@ unify expected actual =
         go :: [(Index "tyvar", ValT Renamed)] -> ValT Renamed -> ValT Renamed
         go subs arg = foldl' (\val (i, concrete) -> substitute i concrete val) arg subs
     concretify _ _ = throwError $ ImpossibleHappened "bbForm is not a thunk"
-    reconcile ::
-      Map (Index "tyvar") (ValT Renamed) ->
-      Map (Index "tyvar") (ValT Renamed) ->
-      UnifyM (Map (Index "tyvar") (ValT Renamed))
-    -- Note (Koz, 14/04/2025): This utter soup means the following:
-    --
-    -- - If the old map and the new map don't have any overlapping assignments,
-    --   just union them.
-    -- - Otherwise, for any assignment to a unifiable that is present in both
-    --   maps, ensure they assign to the same thing; if they do, it's fine,
-    --   otherwise we have a problem.
-    reconcile =
-      Merge.mergeA
-        Merge.preserveMissing
-        Merge.preserveMissing
-        (Merge.zipWithAMatched combineBindings)
+
+reconcile ::
+  Map (Index "tyvar") (ValT Renamed) ->
+  Map (Index "tyvar") (ValT Renamed) ->
+  UnifyM (Map (Index "tyvar") (ValT Renamed))
+-- Note (Koz, 14/04/2025): This utter soup means the following:
+--
+-- - If the old map and the new map don't have any overlapping assignments,
+--   just union them.
+-- - Otherwise, for any assignment to a unifiable that is present in both
+--   maps, ensure they assign to the same thing; if they do, it's fine,
+--   otherwise we have a problem.
+reconcile =
+  Merge.mergeA
+    Merge.preserveMissing
+    Merge.preserveMissing
+    (Merge.zipWithAMatched combineBindings)
+  where
     combineBindings :: Index "tyvar" -> ValT Renamed -> ValT Renamed -> UnifyM (ValT Renamed)
-    combineBindings _ old new =
+    combineBindings i old new =
       if old == new
         then pure old
         else case old of
           Abstraction (Unifiable _) -> pure new
           _ -> case new of
             Abstraction (Unifiable _) -> pure old
-            _ -> unificationError
+            _ -> throwError $ CouldNotReconcile i old new

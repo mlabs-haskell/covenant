@@ -57,6 +57,12 @@ module Covenant.Test
 
     -- *** Elimination
     runRenameM,
+    undoRename,
+
+    -- ** ASG
+    DebugASGBuilder (..),
+    debugASGBuilder,
+    typeIdTest,
   )
 where
 
@@ -65,6 +71,9 @@ import Data.Foldable (foldl')
 #endif
 import Control.Applicative ((<|>))
 import Control.Monad (void)
+import Control.Monad.Error.Class (MonadError)
+import Control.Monad.HashCons (HashConsT, MonadHashCons, runHashConsT)
+import Control.Monad.Reader (MonadReader, ReaderT, runReaderT)
 import Control.Monad.State.Strict
   ( MonadState (get, put),
     State,
@@ -73,6 +82,8 @@ import Control.Monad.State.Strict
     modify,
   )
 import Control.Monad.Trans (MonadTrans (lift))
+import Control.Monad.Trans.Except (ExceptT, runExceptT)
+import Covenant.ASG (ASGEnv (ASGEnv), ASGNode, CovenantError (TypeError), CovenantTypeError, Id, ScopeInfo (ScopeInfo))
 import Covenant.Data
   ( DatatypeInfo,
     mkDatatypeInfo,
@@ -106,17 +117,19 @@ import Covenant.Internal.Ledger
   )
 import Covenant.Internal.PrettyPrint (ScopeBoundary)
 import Covenant.Internal.Rename
-  ( RenameError (InvalidAbstractionReference),
+  ( RenameError (InvalidAbstractionReference, InvalidScopeReference),
     RenameM,
     renameCompT,
     renameDataDecl,
     renameValT,
     runRenameM,
+    undoRename,
   )
 import Covenant.Internal.Strategy
   ( DataEncoding (PlutusData, SOP),
     PlutusDataStrategy (ConstrData),
   )
+import Covenant.Internal.Term (ASGNodeType (CompNodeType, ValNodeType), typeId)
 import Covenant.Internal.Type
   ( AbstractTy (BoundAt),
     BuiltinFlatT
@@ -143,6 +156,7 @@ import Covenant.Type
   )
 import Covenant.Util (prettyStr)
 import Data.Coerce (coerce)
+import Data.Functor.Identity (Identity (runIdentity))
 import Data.Kind (Type)
 import Data.Map.Strict (Map)
 import Data.Map.Strict qualified as M
@@ -325,7 +339,9 @@ prettyDeclSet (DataDeclSet decls) =
 -- @since 1.1.0
 chooseInt ::
   forall (m :: Type -> Type).
-  (MonadGen m) => (Int, Int) -> m Int
+  (MonadGen m) =>
+  (Int, Int) ->
+  m Int
 chooseInt bounds = GT.liftGen $ QC.chooseInt bounds
 
 -- | The same as 'QC.scale', but lifted to work in any 'MonadGen'.
@@ -333,7 +349,10 @@ chooseInt bounds = GT.liftGen $ QC.chooseInt bounds
 -- @since 1.1.0
 scale ::
   forall (m :: Type -> Type) (a :: Type).
-  (MonadGen m) => (Int -> Int) -> m a -> m a
+  (MonadGen m) =>
+  (Int -> Int) ->
+  m a ->
+  m a
 scale f g = GT.sized (\n -> GT.resize (f n) g)
 
 -- | If the argument is a 'Right', pass the assertion; otherwise, fail the
@@ -828,9 +847,64 @@ shrinkDataDecls decls = liftShrink shrinkDataDecl decls <|> (shrinkDataDecl <$> 
 genDataList :: forall (a :: Type). DataGenM a -> Gen [a]
 genDataList = runDataGenM . GT.listOf
 
+-- ASG Stuff
+
+-- | This is a @newtype@ over 'ASGBuilder' to clearly indicate that it should be used only for testing, as it is
+-- useful to have a variant of the 'ASGBuilder' monad which has a \'runner\'.
+--
+-- @since 1.2.0
+newtype DebugASGBuilder (a :: Type)
+  = DebugASGBuilder (ReaderT ASGEnv (ExceptT CovenantTypeError (HashConsT Id ASGNode Identity)) a)
+  deriving
+    ( -- | @since 1.0.0
+      Functor,
+      -- | @since 1.0.0
+      Applicative,
+      -- | @since 1.0.0
+      Monad,
+      -- | @since 1.1.0
+      MonadReader ASGEnv,
+      -- | @since 1.0.0
+      MonadError CovenantTypeError,
+      -- | @since 1.0.0
+      MonadHashCons Id ASGNode
+    )
+    via ReaderT ASGEnv (ExceptT CovenantTypeError (HashConsT Id ASGNode Identity))
+
+-- | \'Runner\' for 'DebugASGBuilder'.
+--
+-- @since 1.2.0
+debugASGBuilder ::
+  forall (a :: Type).
+  Map TyName (DatatypeInfo AbstractTy) ->
+  DebugASGBuilder a ->
+  Either CovenantError a
+debugASGBuilder tyDict (DebugASGBuilder comp) =
+  case runIdentity . runHashConsT . runExceptT . runReaderT comp $ ASGEnv (ScopeInfo Vector.empty) tyDict of
+    (result, bm) -> case result of
+      Left err' -> Left . TypeError bm $ err'
+      Right a -> pure a
+
+-- | Looks up the type of a node, wrapping computation node types into a thunk.
+--
+-- This is /only/ for use in testing!
+--
+-- @since 1.2.0
+typeIdTest ::
+  forall (m :: Type -> Type).
+  (MonadHashCons Id ASGNode m, MonadError CovenantTypeError m) =>
+  Id ->
+  m (ValT AbstractTy)
+typeIdTest i =
+  typeId i >>= \case
+    ValNodeType t -> pure t
+    -- FIXME: This is quick & dirty but I need it for something
+    CompNodeType t -> pure $ ThunkT t
+    other -> error $ "Expected a ValT but got: " <> show other
+
 -- For convenience. Don't remove this, necessary for efficient development on future work
 unsafeRename :: forall (a :: Type). RenameM a -> a
-unsafeRename act = case runRenameM act of
+unsafeRename act = case runRenameM mempty act of
   Left err -> error $ show err
   Right res -> res
 
@@ -855,4 +929,4 @@ unitT =
       (PlutusData ConstrData)
 
 testDatatypes :: [DataDeclaration AbstractTy]
-testDatatypes = [maybeT, eitherT, unitT, pair]
+testDatatypes = [maybeT, eitherT, unitT, pair, list]

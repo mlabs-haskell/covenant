@@ -22,6 +22,7 @@ module Covenant.Index
     count2,
     ix3,
     count3,
+    wordCount,
   )
 where
 
@@ -31,6 +32,7 @@ import Data.List.NonEmpty (NonEmpty)
 import Data.Semigroup (Semigroup (sconcat, stimes), Sum (Sum))
 import Data.Word (Word32)
 import GHC.TypeLits (Symbol)
+import Optics.Core (Lens', lens)
 import Optics.Prism (Prism', prism)
 import Test.QuickCheck (Arbitrary)
 
@@ -146,6 +148,11 @@ intCount =
   prism
     (fromIntegral . coerce @_ @Word32)
     (\i -> maybe (Left i) (Right . Count) . toIntegralSized $ i)
+
+-- | We use the Word32 directly during renaming, and a Lens is more appropriate
+-- than a Prism if we're working with Word32s
+wordCount :: forall (ofWhat :: Symbol). Lens' (Count ofWhat) Word32
+wordCount = lens (\(Count x) -> x) (\_ w -> Count w)
 
 -- | Helper for a count of zero items.
 --

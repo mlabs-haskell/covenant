@@ -20,11 +20,19 @@ import Covenant.Constant (AConstant)
 import Covenant.DeBruijn (DeBruijn)
 import Covenant.Index (Index)
 import Covenant.Internal.KindCheck (EncodingArgErr)
-import Covenant.Internal.Rename (RenameError)
-import Covenant.Internal.Type (AbstractTy, CompT, ValT)
+import Covenant.Internal.Rename (RenameError, UnRenameError)
+import Covenant.Internal.Type
+  ( AbstractTy,
+    BuiltinFlatT,
+    CompT,
+    TyName,
+    ValT,
+  )
 import Covenant.Internal.Unification (TypeAppError)
 import Covenant.Prim (OneArgFunc, SixArgFunc, ThreeArgFunc, TwoArgFunc)
+import Covenant.Type (ConstructorName, PlutusDataConstructor, Renamed)
 import Data.Kind (Type)
+import Data.Set qualified as Set
 import Data.Vector (Vector)
 import Data.Word (Word64)
 
@@ -94,8 +102,8 @@ data CovenantTypeError
     ReturnCompType (CompT AbstractTy)
   | -- | The body of a lambda results in a value-typed node, which isn't allowed.
     --
-    -- @since 1.0.0
-    LambdaResultsInValType (ValT AbstractTy)
+    -- @since 1.2.0
+    LambdaResultsInCompType (CompT AbstractTy)
   | -- | The body of a lambda results in a computation-typed node which isn't
     -- a return, which isn't allowed.
     --
@@ -118,10 +126,141 @@ data CovenantTypeError
     --
     -- @since 1.0.0
     WrongReturnType (ValT AbstractTy) (ValT AbstractTy)
-  | -- @since 1.1.0
-
-    -- | Wraps an encoding argument mismatch error from KindCheck
+  | -- | Wraps an encoding argument mismatch error from KindCheck
+    --
+    -- @since 1.1.0
     EncodingError (EncodingArgErr AbstractTy)
+  | -- | The first argument to a catamorphism wasn't an algebra, as
+    -- it had the wrong arity.
+    --
+    -- @since 1.2.0
+    CataAlgebraWrongArity Int
+  | -- | The first argument to a catamorphism wasn't an algebra.
+    --
+    -- @since 1.1.0
+    CataNotAnAlgebra ASGNodeType
+  | -- | The second argument to a catamorphism wasn't a value type.
+    --
+    -- @since 1.1.0
+    CataApplyToNonValT ASGNodeType
+  | -- The algebra given to this catamorphism is not rigid (that is, its
+    -- computation type binds variables).
+    --
+    -- @since 1.2.0
+    CataNonRigidAlgebra (CompT AbstractTy)
+  | -- | The second argument to a catamorphism is a builtin type, but not one
+    -- we can eliminate with a catamorphism.
+    --
+    -- @since 1.1.0
+    CataWrongBuiltinType BuiltinFlatT
+  | -- | The second argument to a catamorphism is a value type, but not one we
+    -- can eliminate with a catamorphism. Usually, this means it's a variable.
+    --
+    -- @since 1.1.0
+    CataWrongValT (ValT AbstractTy)
+  | -- | We requested a catamorphism for a type that doesn't exist.
+    --
+    -- @since 1.2.0
+    CataNoSuchType TyName
+  | -- | We requested a catamorphism for a type without a base functor.
+    --
+    -- @since 1.2.0
+    CataNoBaseFunctorForType TyName
+  | -- | The provided algebra is not suitable for the given type.
+    --
+    -- @since 1.1.0
+    CataUnsuitable (CompT AbstractTy) (ValT AbstractTy)
+  | -- | Someone attempted to construct a tyvar using a DB index or argument position
+    --   which refers to a scope (or argument) that does not exist.
+    --
+    -- @since 1.2.0
+    OutOfScopeTyVar DeBruijn (Index "tyvar")
+  | -- | We failed to rename an "instantiation type" supplied to 'Covenant.ASG.app'.
+    --
+    -- @since 1.2.0
+    FailedToRenameInstantiation RenameError
+  | -- | Un-renaming failed.
+    --
+    -- @since 1.2.0
+    UndoRenameFailure UnRenameError
+  | -- | We tried to look up the 'DatatypeInfo' corresponding to a 'TyName' and came up empty handed.
+    --
+    -- @since 1.2.0
+    TypeDoesNotExist TyName
+  | -- | We tried to rename a 'DatatypeInfo' and failed.
+    --
+    -- @since 1.2.0
+    DatatypeInfoRenameError RenameError
+  | -- | We tried to look up a constructor for a given type. The type exists, but the constructor does not.
+    --
+    -- @since 1.2.0
+    ConstructorDoesNotExistForType TyName ConstructorName
+  | -- | When using the helper function to construct an introduction form, the type and constructor exist but the
+    --   number of fields provided as an argument does not match the number of declared fields.
+    --   The 'Int' is the /incorrect/ number of /supplied/ fields.
+    --
+    -- @since 1.2.0
+    IntroFormWrongNumArgs TyName ConstructorName Int
+  | -- | The user passed an error node as an argument to a datatype into form. We return the arguments given
+    --   to 'Covenant.ASG.dataConstructor' in the error.
+    --
+    -- @since 1.2.0
+    IntroFormErrorNodeField TyName ConstructorName (Vector Ref)
+  | -- | The user tried to construct an introduction form using a Plutus @Data@ constructor not found in the
+    --   opaque datatype declaration.
+    --
+    -- @since 1.2.0
+    UndeclaredOpaquePlutusDataCtor (Set.Set PlutusDataConstructor) ConstructorName
+  | -- | The user tried to construct an introduction form with a valid Plutus @Data@ constructor, but
+    --   supplied a 'Covenant.ASG.Ref' to a field of the wrong type.
+    --
+    -- @since 1.2.0
+    InvalidOpaqueField (Set.Set PlutusDataConstructor) ConstructorName [ValT Renamed]
+  | -- The user tried to match on (i.e. use as a scrutinee) a node that wasn't a value.
+    --
+    -- @since 1.2.0
+    MatchNonValTy ASGNodeType
+  | -- | Internal error: we found a base functor Boehm-Berrarducci form that isn't a thunk after instantiation
+    --   during pattern matching.Somehow we got a BFBB that is something other than a thunk after instantiation during pattern matching.
+    --
+    --   This should not normally happen: let us know if you see this error!
+    --
+    -- @since 1.2.0
+    MatchNonThunkBBF (ValT Renamed)
+  | -- | We encountered a rename error during pattern matching. This will refer
+    -- to either the Boehm-Berrarducci form, or the base functor Boehm-Berrarducci form, depending on what type we tried to match.
+    --
+    -- @since 1.2.0
+    MatchRenameBBFail RenameError
+  | -- | This indicates that we encountered an error when renaming the arguments to the type constructor of the
+    --   /scrutinee type/ during pattern matching. That is, if we're matching on @Either a b@, this means that
+    --   either @a@ or @b@ failed to rename.
+    --
+    --  This should not normally happen: let us know if you see this error!
+    --
+    -- @since 1.2.0
+    MatchRenameTyConArgFail RenameError
+  | -- | A user tried to use a polymorphic handler in a pattern match, which is not currently allowed.
+    --
+    -- @since 1.2.0
+    MatchPolymorphicHandler (ValT Renamed)
+  | -- | We tried to use an error node as a pattern match handler.
+    --
+    -- @since 1.2.0
+    MatchErrorAsHandler Ref
+  | -- | The non-recursive branch of a pattern match needs a Boehm-Berrarducci form for the given type
+    -- name, but it doesn't exist.
+    --
+    -- @since 1.2.0
+    MatchNoBBForm TyName
+  | -- | Someone tried to match on something that isn't a datatype.
+    --
+    -- @since 1.2.0
+    MatchNonDatatypeScrutinee (ValT AbstractTy)
+  | -- | The scrutinee is a datatype, be don't have it in our datatype dictionary.
+    --
+    -- @since 1.2.0
+    MatchNoDatatypeInfo TyName
   deriving stock
     ( -- | @since 1.0.0
       Eq,
@@ -219,9 +358,8 @@ data CompNodeInfo
   | Builtin2Internal TwoArgFunc
   | Builtin3Internal ThreeArgFunc
   | Builtin6Internal SixArgFunc
-  | LamInternal Id
+  | LamInternal Ref
   | ForceInternal Ref
-  | ReturnInternal Ref
   deriving stock
     ( -- | @since 1.0.0
       Eq,
@@ -238,6 +376,12 @@ data ValNodeInfo
   = LitInternal AConstant
   | AppInternal Id (Vector Ref)
   | ThunkInternal Id
+  | -- | @since 1.1.0
+    CataInternal Ref Ref
+  | -- | @since 1.2.0
+    DataConstructorInternal TyName ConstructorName (Vector Ref)
+  | -- | @since 1.2.0
+    MatchInternal Ref (Vector Ref)
   deriving stock
     ( -- | @since 1.0.0
       Eq,

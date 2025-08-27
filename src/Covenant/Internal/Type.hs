@@ -21,6 +21,7 @@ module Covenant.Internal.Type
     naturalBaseFunctor,
     negativeBaseFunctor,
     byteStringBaseFunctor,
+    arity,
   )
 where
 
@@ -158,7 +159,9 @@ newtype CompTBody (a :: Type) = CompTBody (NonEmptyVector (ValT a))
       -- | @since 1.0.0
       Ord,
       -- | @since 1.0.0
-      Show
+      Show,
+      -- | @since 1.2.0
+      Functor
     )
 
 -- | @since 1.0.0
@@ -179,7 +182,9 @@ data CompT (a :: Type) = CompT (Count "tyvar") (CompTBody a)
       -- | @since 1.0.0
       Ord,
       -- | @since 1.0.0
-      Show
+      Show,
+      -- | @since 1.2.0
+      Functor
     )
 
 -- | @since 1.0.0
@@ -191,6 +196,13 @@ instance Eq1 CompT where
 -- | @since 1.0.0
 instance Pretty (CompT Renamed) where
   pretty = runPrettyM . prettyCompTWithContext
+
+-- | Determine the arity of a computation type: that is, how many arguments a
+-- function of this type must be given.
+--
+-- @since 1.0.0
+arity :: forall (a :: Type). CompT a -> Int
+arity (CompT _ (CompTBody xs)) = NonEmpty.length xs - 1
 
 -- | The name of a data type. This refers specifically to non-\'flat\' types
 -- either provided by the ledger, or defined by the user.
@@ -230,7 +242,9 @@ data ValT (a :: Type)
       -- | @since 1.0.0
       Ord,
       -- | @since 1.0.0
-      Show
+      Show,
+      -- | @since 1.2.0
+      Functor
     )
 
 -- | @since 1.0.0
