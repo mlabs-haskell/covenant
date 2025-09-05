@@ -1,39 +1,53 @@
 {-# OPTIONS_GHC -Wno-missing-export-lists #-}
+
 module Covenant.JSON where
 
-import Data.Map (Map)
-import Covenant.Type (CompT,
-    CompTBody,
-    AbstractTy,
-    DataEncoding,
-    PlutusDataStrategy,
+import Covenant.ASG
+  ( ASGNode,
+    ASGParser,
+    Arg,
+    CompNodeInfo,
+    Id,
+    Ref,
+    ValNodeInfo,
+  )
+import Covenant.Constant (AConstant)
+import Covenant.DeBruijn (DeBruijn)
+import Covenant.Index (Count, Index)
+import Covenant.Prim (OneArgFunc, SixArgFunc, ThreeArgFunc, TwoArgFunc)
+import Covenant.Type
+  ( AbstractTy,
     BuiltinFlatT,
+    CompT,
+    CompTBody,
     Constructor,
     ConstructorName,
     DataDeclaration,
+    DataEncoding,
     PlutusDataConstructor,
+    PlutusDataStrategy,
     TyName,
-    ValT)
-import Covenant.ASG (ASGParser,
-                     Id, Ref, ASGNode, Arg, ValNodeInfo, CompNodeInfo, ASGNode )
-
-import Data.Aeson (ToJSON(toEncoding,toJSON),
-                   FromJSON(parseJSON),Encoding,Value)
-import GHC.TypeLits (Symbol, KnownSymbol)
-import Covenant.Index (Count, Index)
-import Covenant.Prim (OneArgFunc, TwoArgFunc, ThreeArgFunc, SixArgFunc)
-import Covenant.Constant (AConstant)
-import Covenant.DeBruijn (DeBruijn)
+    ValT,
+  )
+import Data.Aeson
+  ( Encoding,
+    FromJSON (parseJSON),
+    ToJSON (toEncoding, toJSON),
+    Value,
+  )
+import Data.Map (Map)
+import GHC.TypeLits (KnownSymbol, Symbol)
 
 data Version = Version {_major :: Int, _minor :: Int}
   deriving stock (Show, Eq, Ord)
 
 data CompilationUnit
-  = CompilationUnit {
-      _datatypes :: Map TyName (DataDeclaration AbstractTy),
-      _asg       :: Map Id ASGNode,
-      _version   :: Version
-    } deriving stock (Show, Eq)
+  = CompilationUnit
+  { _datatypes :: Map TyName (DataDeclaration AbstractTy),
+    _asg :: Map Id ASGNode,
+    _version :: Version
+  }
+  deriving stock (Show, Eq)
 
 {- CompilationUnit
 
@@ -52,8 +66,7 @@ instance ToJSON CompilationUnit where
 instance FromJSON CompilationUnit where
   parseJSON = error "TODO: Implement fromEncoding for CompilationUnit"
 
-
--- TODO: Remove this after I'm certain I don't need to write any more of these -_- 
+-- TODO: Remove this after I'm certain I don't need to write any more of these -_-
 mkStub :: String -> String
 mkStub ty = commentsBlock <> encodingStub <> "\n\n" <> decodingStub
   where
@@ -61,11 +74,27 @@ mkStub ty = commentsBlock <> encodingStub <> "\n\n" <> decodingStub
     cleanName = filter (/= ' ') ty
     encFn = "encode" <> cleanName
     decFn = "decode" <> cleanName
-    encodingStub = encFn <> " :: " <> ty <> " -> " <> "Encoding"
-                   <> "\n" <> encFn <> " = error \"TODO: Implement " <> encFn <> "\""
-    decodingStub = decFn <> " :: Value -> ASGParser (" <> ty <> ")"
-                   <> "\n" <> decFn <> " = error \"TODO: Implement " <> decFn <> "\""
-
+    encodingStub =
+      encFn
+        <> " :: "
+        <> ty
+        <> " -> "
+        <> "Encoding"
+        <> "\n"
+        <> encFn
+        <> " = error \"TODO: Implement "
+        <> encFn
+        <> "\""
+    decodingStub =
+      decFn
+        <> " :: Value -> ASGParser ("
+        <> ty
+        <> ")"
+        <> "\n"
+        <> decFn
+        <> " = error \"TODO: Implement "
+        <> decFn
+        <> "\""
 
 {- Version
 
@@ -104,7 +133,6 @@ encodeConstructorName = error "TODO: Implement encodeConstructorName"
 decodeConstructorName :: Value -> ASGParser ConstructorName
 decodeConstructorName = error "TODO: Implement decodeConstructorName"
 
-
 {- Encodes as an object. E.g.:
 
    Constructor "Just" [IntegerT]
@@ -118,7 +146,6 @@ encodeConstructor = error "TODO: Implement encodeConstructor"
 
 decodeConstructor :: Value -> ASGParser (Constructor AbstractTy)
 decodeConstructor = error "TODO: Implement decodeConstructor"
-
 
 {- DataEncoding encodes as a typical sum type, and will look like:
 
@@ -145,7 +172,6 @@ encodePlutusDataStrategy = error "TODO: Implement encodePlutusDataStrategy"
 
 decodePlutusDataStrategy :: Value -> ASGParser PlutusDataStrategy
 decodePlutusDataStrategy = error "TODO: Implement decodePlutusDataStrategy"
-
 
 {- PlutusDataConstructor encodes as a typical enumeration type:
 
@@ -255,7 +281,6 @@ encodeAConstant = error "TODO: Implement encodeAConstant"
 decodeAConstant :: Value -> ASGParser AConstant
 decodeAConstant = error "TODO: Implement decodeAConstant"
 
-
 {- ValNodeInfo
 
    Serializes as a sum type without named fields:
@@ -306,12 +331,11 @@ encodeASGNode = error "TODO: Implement encodeASGNode"
 decodeASGNode :: Value -> ASGParser ASGNode
 decodeASGNode = error "TODO: Implement decodeASGNode"
 
-{- ***
-
-ValT, CompT & Friends/Components
-
-*** -}
-
+-- ***
+--
+-- ValT, CompT & Friends/Components
+--
+-- ***
 
 {- DeBruijn
 
@@ -357,9 +381,8 @@ decodeAbstractTy = error "TODO: Implement decodeAbstractTy"
 encodeCount :: forall (s :: Symbol). Count s -> Encoding
 encodeCount = error "TODO: Implement encodeCount"
 
-decodeCount :: forall (s :: Symbol). KnownSymbol s => Value -> ASGParser (Count s)
+decodeCount :: forall (s :: Symbol). (KnownSymbol s) => Value -> ASGParser (Count s)
 decodeCount = error "TODO: Implement decodeCount"
-
 
 {- Index
 
@@ -376,7 +399,7 @@ decodeCount = error "TODO: Implement decodeCount"
 encodeIndex :: forall (s :: Symbol). Index s -> Encoding
 encodeIndex = error "TODO: Implement encodeIndex"
 
-decodeIndex :: forall (s :: Symbol). KnownSymbol s => Value -> ASGParser (Index s)
+decodeIndex :: forall (s :: Symbol). (KnownSymbol s) => Value -> ASGParser (Index s)
 decodeIndex = error "TODO: Implement decodeIndex"
 
 {- CompT AbstractTy
@@ -408,7 +431,6 @@ encodeCompTBody = error "TODO: Implement encodeCompTBodyAbstractTy"
 
 decodeCompTBody :: Value -> ASGParser (CompTBody AbstractTy)
 decodeCompTBody = error "TODO: Implement decodeCompTBodyAbstractTy"
-
 
 {- BuiltinFlatT
 
