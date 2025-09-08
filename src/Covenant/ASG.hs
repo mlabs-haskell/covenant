@@ -90,8 +90,6 @@ module Covenant.ASG
     -- *** Function
     runASGBuilder,
 
-    -- *** For JSON (de)serialization
-    ASGParser (..),
     -- only for tests
     ASGEnv (..),
   )
@@ -258,7 +256,6 @@ import Covenant.Type
     ValT (Abstraction),
     tyvar,
   )
-import Data.Aeson.Types (Parser)
 import Data.Bimap (Bimap)
 import Data.Bimap qualified as Bimap
 import Data.Coerce (coerce)
@@ -522,27 +519,6 @@ newtype ASGBuilder (a :: Type)
     )
     via ReaderT ASGEnv (ExceptT CovenantTypeError (HashConsT Id ASGNode Identity))
 
--- | A concrete monadic stack, providing the minimum amount of functionality
--- needed to build an ASG using the combinators given in this module, plus
--- some functionality needed to handle parsing an ASG from JSON.
--- @since 1.0.0
-newtype ASGParser (a :: Type)
-  = ASGParser (ReaderT ASGEnv (ExceptT CovenantTypeError (HashConsT Id ASGNode Parser)) a)
-  deriving
-    ( -- | @since 1.0.0
-      Functor,
-      -- | @since 1.0.0
-      Applicative,
-      -- | @since 1.0.0
-      Monad,
-      -- | @since 1.1.0
-      MonadReader ASGEnv,
-      -- | @since 1.0.0
-      MonadError CovenantTypeError,
-      -- | @since 1.0.0
-      MonadHashCons Id ASGNode
-    )
-    via ReaderT ASGEnv (ExceptT CovenantTypeError (HashConsT Id ASGNode Parser))
 
 -- | A standard collection of types required for almost any realistic script.
 -- This includes non-\'flat\' builtin types (such as lists and pairs), as well
