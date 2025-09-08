@@ -1,4 +1,5 @@
 {-# OPTIONS_GHC -Wno-missing-export-lists #-}
+
 -- |
 -- Module: Covenant.ASG
 -- Copyright: (C) MLabs 2025
@@ -20,17 +21,24 @@
 -- @since 1.0.0
 module Covenant.JSON where
 
+import Control.Monad.Error.Class (MonadError)
+import Control.Monad.HashCons (HashConsT, MonadHashCons)
+import Control.Monad.Reader.Class (MonadReader)
+import Control.Monad.Trans.Except (ExceptT)
+import Control.Monad.Trans.Reader (ReaderT)
 import Covenant.ASG
-  ( ASGNode,
+  ( ASGEnv,
+    ASGNode,
     Arg,
     CompNodeInfo,
     Id,
     Ref,
-    ValNodeInfo, ASGEnv,
+    ValNodeInfo,
   )
 import Covenant.Constant (AConstant)
 import Covenant.DeBruijn (DeBruijn)
 import Covenant.Index (Count, Index)
+import Covenant.Internal.Term (CovenantTypeError)
 import Covenant.Prim (OneArgFunc, SixArgFunc, ThreeArgFunc, TwoArgFunc)
 import Covenant.Type
   ( AbstractTy,
@@ -52,16 +60,10 @@ import Data.Aeson
     ToJSON (toEncoding, toJSON),
     Value,
   )
+import Data.Aeson.Types (Parser)
+import Data.Kind (Type)
 import Data.Map (Map)
 import GHC.TypeLits (KnownSymbol, Symbol)
-import Data.Kind (Type)
-import Covenant.Internal.Term (CovenantTypeError)
-import Data.Aeson.Types (Parser)
-import Control.Monad.Trans.Reader (ReaderT)
-import Control.Monad.Trans.Except (ExceptT)
-import Control.Monad.HashCons (HashConsT, MonadHashCons)
-import Control.Monad.Reader.Class (MonadReader)
-import Control.Monad.Error.Class (MonadError)
 
 -- | A concrete monadic stack, providing the minimum amount of functionality
 -- needed to build an ASG using the combinators given in this module, plus
@@ -84,7 +86,6 @@ newtype ASGParser (a :: Type)
       MonadHashCons Id ASGNode
     )
     via ReaderT ASGEnv (ExceptT CovenantTypeError (HashConsT Id ASGNode Parser))
-
 
 data Version = Version {_major :: Int, _minor :: Int}
   deriving stock (Show, Eq, Ord)
@@ -153,6 +154,7 @@ mkStub ty = commentsBlock <> encodingStub <> "\n\n" <> decodingStub
      {major: 1, minor: 2}
 
 -}
+
 -- |  @since 1.3.0
 encodeVersion :: Version -> Encoding
 encodeVersion = error "TODO: Implement encodeVersion"
@@ -166,6 +168,7 @@ decodeVersion = error "TODO: Implement decodeVersion"
 {- Encodes as a simple JSON string, e.g.
    TyName "Foo" -> "Foo"
 -}
+
 -- | @since 1.3.0
 encodeTyName :: TyName -> Encoding
 encodeTyName = error "TODO: Implement encodeTyName"
@@ -180,10 +183,10 @@ decodeTyName = error "TODO: Implement decodeTyName"
 {- Encodes as a simple JSON string, e.g.
    ConstructorName "Foo" -> "Foo"
 -}
+
 -- | @since 1.3.0
 encodeConstructorName :: TyName -> Encoding
 encodeConstructorName = error "TODO: Implement encodeConstructorName"
-
 
 -- | The ctor name must conform with the ctor naming rules, i.e. it must
 --   1. Begin with a capital letter
@@ -200,6 +203,7 @@ decodeConstructorName = error "TODO: Implement decodeConstructorName"
    , constructorArgs: [...]}
 
 -}
+
 -- | @since 1.3.0
 encodeConstructor :: Constructor AbstractTy -> Encoding
 encodeConstructor = error "TODO: Implement encodeConstructor"
@@ -214,6 +218,7 @@ decodeConstructor = error "TODO: Implement decodeConstructor"
    | {tag: "PlutusData", fields: [...]}
    | {tag: "BuiltinStrategy", fields: [...]}
 -}
+
 -- | @since 1.3.0
 encodeDataEncoding :: DataEncoding -> Encoding
 encodeDataEncoding = error "TODO: Implement encodeDataEncoding"
@@ -230,6 +235,7 @@ decodeDataEncoding = error "TODO: Implement decodeDataEncoding"
    | {tag: "NewtypeData"}
 
 -}
+
 -- | @since 1.3.0
 encodePlutusDataStrategy :: PlutusDataStrategy -> Encoding
 encodePlutusDataStrategy = error "TODO: Implement encodePlutusDataStrategy"
@@ -247,9 +253,11 @@ decodePlutusDataStrategy = error "TODO: Implement decodePlutusDataStrategy"
   | {tag: PlutusMap}
 
 -}
+
 -- | @since 1.3.0
 encodePlutusDataConstructor :: PlutusDataConstructor -> Encoding
 encodePlutusDataConstructor = error "TODO: Implement encodePlutusDataConstructor"
+
 -- | @since 1.3.0
 decodePlutusDataConstructor :: Value -> ASGParser PlutusDataConstructor
 decodePlutusDataConstructor = error "TODO: Implement decodePlutusDataConstructor"
@@ -284,6 +292,7 @@ decodePlutusDataConstructor = error "TODO: Implement decodePlutusDataConstructor
        opaquePlutusConstructors: {tag: "Plutus_I"}
      }}
 -}
+
 -- | @since 1.3.0
 encodeDataDeclarationAbstractTy :: DataDeclaration AbstractTy -> Encoding
 encodeDataDeclarationAbstractTy = error "TODO: Implement encodeDataDeclarationAbstractTy"
@@ -300,6 +309,7 @@ decodeDataDeclarationAbstractTy = error "TODO: Implement decodeDataDeclarationAb
 
    @Id 101@ -> 101
 -}
+
 -- | @since 1.3.0
 encodeId :: Id -> Encoding
 encodeId = error "TODO: Implement encodeId"
@@ -313,6 +323,7 @@ decodeId = error "TODO: Implement decodeId"
    {tag: "AnArg", fields: [...]}
    | {tag: "AnId": fields: [101]}
 -}
+
 -- | @since 1.3.0
 encodeRef :: Ref -> Encoding
 encodeRef = error "TODO: Implement encodeRef"
@@ -329,6 +340,7 @@ decodeRef = error "TODO: Implement decodeRef"
    }
 
 -}
+
 -- | @since 1.3.0
 encodeArg :: Arg -> Encoding
 encodeArg = error "TODO: Implement encodeArg"
@@ -348,6 +360,7 @@ decodeArg = error "TODO: Implement decodeArg"
    | {tag: "AString", fields: ["Hello"]}
 
 -}
+
 -- | @since 1.3.0
 encodeAConstant :: AConstant -> Encoding
 encodeAConstant = error "TODO: Implement encodeAConstant"
@@ -368,6 +381,7 @@ decodeAConstant = error "TODO: Implement decodeAConstant"
    | {tag: "MatchInternal", fields: [a,b]}
 
 -}
+
 -- | @since 1.3.0
 encodeValNodeInfo :: ValNodeInfo -> Encoding
 encodeValNodeInfo = error "TODO: Implement encodeValNodeInfo"
@@ -387,6 +401,7 @@ decodeValNodeInfo = error "TODO: Implement decodeValNodeInfo"
    | {tag: "LamInternal", fields: [r]}
    | {tag: "ForceInternal", fields: [r]}
 -}
+
 -- | @since 1.3.0
 encodeCompNodeInfo :: CompNodeInfo -> Encoding
 encodeCompNodeInfo = error "TODO: Implement encodeCompNodeInfo"
@@ -404,6 +419,7 @@ decodeCompNodeInfo = error "TODO: Implement decodeCompNodeInfo"
    | {tag: "AnError"}
 
 -}
+
 -- | @since 1.3.0
 encodeASGNode :: ASGNode -> Encoding
 encodeASGNode = error "TODO: Implement encodeASGNode"
@@ -425,6 +441,7 @@ decodeASGNode = error "TODO: Implement decodeASGNode"
      1
 
 -}
+
 -- | @since 1.3.0
 encodeDeBruijn :: DeBruijn -> Encoding
 encodeDeBruijn = error "TODO: Implement encodeDeBruijn"
@@ -441,6 +458,7 @@ decodeDeBruijn = error "TODO: Implement decodeDeBruijn"
    ->
      [1,0]
 -}
+
 -- | @since 1.3.0
 encodeAbstractTy :: AbstractTy -> Encoding
 encodeAbstractTy = error "TODO: Implement encodeAbstractTy"
@@ -461,6 +479,7 @@ decodeAbstractTy = error "TODO: Implement decodeAbstractTy"
    ->
     1
 -}
+
 -- | @since 1.3.0
 encodeCount :: forall (s :: Symbol). Count s -> Encoding
 encodeCount = error "TODO: Implement encodeCount"
@@ -481,6 +500,7 @@ decodeCount = error "TODO: Implement decodeCount"
    ->
      1
 -}
+
 -- | @since 1.3.0
 encodeIndex :: forall (s :: Symbol). Index s -> Encoding
 encodeIndex = error "TODO: Implement encodeIndex"
@@ -498,6 +518,7 @@ decodeIndex = error "TODO: Implement decodeIndex"
      [0,...encodedBody...]
 
 -}
+
 -- | @since 1.3.0
 encodeCompT :: CompT AbstractTy -> Encoding
 encodeCompT = error "TODO: Implement encodeCompTAbstractTy"
@@ -515,6 +536,7 @@ decodeCompT = error "TODO: Implement decodeCompTAbstractTy"
      [encodedT1,encodedT2,encodedT3]
 
 -}
+
 -- | @since 1.3.0
 encodeCompTBody :: CompTBody AbstractTy -> Encoding
 encodeCompTBody = error "TODO: Implement encodeCompTBodyAbstractTy"
@@ -537,6 +559,7 @@ decodeCompTBody = error "TODO: Implement decodeCompTBodyAbstractTy"
    | {tag: "BLS12_381_MlResultT"}
 
 -}
+
 -- | @since 1.3.0
 encodeBuiltinFlatT :: BuiltinFlatT -> Encoding
 encodeBuiltinFlatT = error "TODO: Implement encodeBuiltinFlatT"
@@ -551,6 +574,7 @@ decodeBuiltinFlatT = error "TODO: Implement decodeBuiltinFlatT"
 
    The name of the tag literally matches the name of the constructor. (Too many to list)
 -}
+
 -- | @since 1.3.0
 encodeOneArgFunc :: OneArgFunc -> Encoding
 encodeOneArgFunc = error "TODO: Implement encodeOneArgFunc"
@@ -565,6 +589,7 @@ decodeOneArgFunc = error "TODO: Implement decodeOneArgFunc"
 
    The name of the tag literally matches the name of the constructor. (Too many to list)
 -}
+
 -- | @since 1.3.0
 encodeTwoArgFunc :: TwoArgFunc -> Encoding
 encodeTwoArgFunc = error "TODO: Implement encodeTwoArgFunc"
@@ -579,6 +604,7 @@ decodeTwoArgFunc = error "TODO: Implement decodeTwoArgFunc"
 
    The name of the tag literally matches the name of the constructor. (Too many to list)
 -}
+
 -- | @since 1.3.0
 encodeThreeArgFunc :: ThreeArgFunc -> Encoding
 encodeThreeArgFunc = error "TODO: Implement encodeThreeArgFunc"
@@ -593,6 +619,7 @@ decodeThreeArgFunc = error "TODO: Implement decodeThreeArgFunc"
 
    The name of the tag literally matches the name of the constructor. (Too many to list)
 -}
+
 -- | @since 1.3.0
 encodeSixArgFunc :: SixArgFunc -> Encoding
 encodeSixArgFunc = error "TODO: Implement encodeSixArgFunc"
@@ -611,6 +638,7 @@ decodeSixArgFunc = error "TODO: Implement decodeSixArgFunc"
    | {tag: "Datatype", fields: [...]}
 
 -}
+
 -- | @since 1.3.0
 encodeValTAbstractTy :: ValT AbstractTy -> Encoding
 encodeValTAbstractTy = error "TODO: Implement encodeValTAbstractTy"

@@ -89,7 +89,6 @@ module Covenant.ASG
 
     -- *** Function
     runASGBuilder,
-
     -- only for tests
     ASGEnv (..),
   )
@@ -518,7 +517,6 @@ newtype ASGBuilder (a :: Type)
       MonadHashCons Id ASGNode
     )
     via ReaderT ASGEnv (ExceptT CovenantTypeError (HashConsT Id ASGNode Identity))
-
 
 -- | A standard collection of types required for almost any realistic script.
 -- This includes non-\'flat\' builtin types (such as lists and pairs), as well
