@@ -11,14 +11,14 @@
 -- = Note on Sum Type Encoding:
 --
 -- Unless otherwise noted, a Haskell sum type like:
---    data Foo = Bar | Baz Int
+--    @data Foo = Bar | Baz Int@
 -- Is encoded to JSON using {tag: <CTOR NAME>, fields: [<Arg1>, <Arg2>, <ArgN>]}
 --
 -- This is the form used for all Haskell sum types which do NOT have `LabelOptic` instances. For those with
 -- field names given by those instances, the `fields` part of the encoded sum is not an array of
 -- arguments, but an object with names that correspond to the label optics. (The comments for each
 -- function make clear which types are encoded in which way.)
--- @since 1.0.0
+-- @since 1.3.0
 module Covenant.JSON where
 
 import Control.Monad.Error.Class (MonadError)
