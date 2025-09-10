@@ -228,10 +228,11 @@ import Covenant.Internal.Unification
     UnifyM,
     checkApp,
     fixUp,
+    lookupDatatypeInfo',
     reconcile,
     runUnifyM,
     substitute,
-    unify, lookupDatatypeInfo',
+    unify,
   )
 import Covenant.Prim
   ( OneArgFunc,
@@ -1119,8 +1120,8 @@ match scrutinee handlers = do
       --             and get *something* halfway useful when debugging
       datatypes <- asks (view #datatypeInfo)
       thisInfo <- case lookupDatatypeInfo' datatypes tn of
-                    Nothing -> throwError $ MatchNoDatatypeInfo tn
-                    Just it -> pure it
+        Nothing -> throwError $ MatchNoDatatypeInfo tn
+        Just it -> pure it
       let rawBBF = fromJust $ preview #bbForm thisInfo
       (instantiatedBBF :: CompT Renamed) <- instantiateBB rawBBF tyConArgs
       handlers' <- Vector.toList <$> traverse cleanupHandler handlers

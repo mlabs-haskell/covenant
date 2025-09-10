@@ -11,7 +11,7 @@ module Covenant.Internal.Unification
     substitute,
     fixUp,
     reconcile,
-    lookupDatatypeInfo'
+    lookupDatatypeInfo',
   )
 where
 
@@ -157,7 +157,7 @@ lookupDatatypeInfo' ::
   TyName ->
   Maybe (DatatypeInfo AbstractTy)
 lookupDatatypeInfo' tyDict tn@(TyName rawTyName) =
-   case preview (ix tn) tyDict of
+  case preview (ix tn) tyDict of
     Nothing -> checkForBaseFunctor tyDict
     Just dti -> Just dti
   where
@@ -185,7 +185,7 @@ lookupDatatypeInfo' tyDict tn@(TyName rawTyName) =
                 Just dti -> case view #baseFunctor dti of
                   Nothing -> Nothing
                   -- Since this is generated, it can't fail to rename
-                  Just (bfDd, _) -> pure .  fromRight . mkDatatypeInfo $ bfDd
+                  Just (bfDd, _) -> pure . fromRight . mkDatatypeInfo $ bfDd
     fromRight :: forall a b. (Show a) => Either a b -> b
     fromRight = \case
       Left err -> error . show $ err
