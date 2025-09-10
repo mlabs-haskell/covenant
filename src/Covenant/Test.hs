@@ -32,12 +32,14 @@ module Covenant.Test
 
     -- ** Test helpers
     checkApp,
+    conformanceDatatypes,
     failLeft,
     tyAppTestDatatypes,
     list,
     tree,
     weirderList,
     unsafeTyCon,
+    unsafeMkDatatypeInfos,
 
     -- ** Datatype checks
     cycleCheck,
@@ -152,7 +154,7 @@ import Covenant.Internal.Type
 import Covenant.Internal.Unification (checkApp)
 import Covenant.Type
   ( CompT (Comp0, CompN),
-    CompTBody (ArgsAndResult),
+    CompTBody (ArgsAndResult), tyvar,
   )
 import Covenant.Util (prettyStr)
 import Data.Coerce (coerce)
@@ -370,8 +372,13 @@ failLeft = either (assertFailure . show) pure
 --
 -- @since 1.1.0
 tyAppTestDatatypes :: M.Map TyName (DatatypeInfo AbstractTy)
-tyAppTestDatatypes =
-  foldl' (\acc decl -> M.insert (view #datatypeName decl) (unsafeMkDatatypeInfo decl) acc) M.empty testDatatypes
+tyAppTestDatatypes = unsafeMkDatatypeInfos testDatatypes
+
+-- | Construct a datatype information dictionary (which is what the ASGBuilder actually needs)
+--   from a collection of data declarations (which are what people actually write)
+-- @since 1.3.0
+unsafeMkDatatypeInfos :: [DataDeclaration AbstractTy] -> M.Map TyName (DatatypeInfo AbstractTy)
+unsafeMkDatatypeInfos =   foldl' (\acc decl -> M.insert (view #datatypeName decl) (unsafeMkDatatypeInfo decl) acc) M.empty
   where
     unsafeMkDatatypeInfo d = case mkDatatypeInfo d of
       Left err -> error (show err)
@@ -930,3 +937,39 @@ unitT =
 
 testDatatypes :: [DataDeclaration AbstractTy]
 testDatatypes = [maybeT, eitherT, unitT, pair, list]
+
+
+{- For conformance testing. All of the ledger types are data encoded, so we need some variants which
+   are not data encoded to ensure adequate test coverage.
+data Maybe a = Nothing | Just a
+
+data Result e a = Exception e | OK a
+
+data Pair a b = Pair a b
+
+data List a = Nil | Cons a (List a)
+-}
+conformanceDatatypes :: [DataDeclaration AbstractTy]
+conformanceDatatypes = [conformance_Maybe_SOP, conformance_Result, pair, list]
+
+conformance_Maybe_SOP :: DataDeclaration AbstractTy
+conformance_Maybe_SOP =
+  mkDecl $
+    Decl
+      "Maybe"
+      count1
+      [ Ctor "Nothing" [],
+        Ctor "Just" [tyvar Z ix0]
+      ]
+      SOP
+
+conformance_Result :: DataDeclaration AbstractTy
+conformance_Result =
+  mkDecl $
+    Decl
+     "Result"
+     count2
+     [ Ctor "Exception" [tyvar Z ix0],
+       Ctor "OK" [tyvar Z ix1]
+     ]
+     (PlutusData ConstrData)

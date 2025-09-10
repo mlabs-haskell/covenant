@@ -11,6 +11,7 @@ module Covenant.Internal.Unification
     substitute,
     fixUp,
     reconcile,
+    lookupDatatypeInfo'
   )
 where
 
@@ -146,6 +147,45 @@ lookupDatatypeInfo tn@(TyName rawTyName) =
                   Just (bfDd, _) -> renamedToUnify . renameDatatypeInfo . fromRight . mkDatatypeInfo $ bfDd
     renamedToUnify :: Either RenameError (DatatypeInfo Renamed) -> UnifyM (DatatypeInfo Renamed)
     renamedToUnify = either (throwError . DatatypeInfoRenameFailed tn) pure
+    fromRight :: forall a b. (Show a) => Either a b -> b
+    fromRight = \case
+      Left err -> error . show $ err
+      Right x -> x
+
+lookupDatatypeInfo' ::
+  Map TyName (DatatypeInfo AbstractTy) ->
+  TyName ->
+  Maybe (DatatypeInfo AbstractTy)
+lookupDatatypeInfo' tyDict tn@(TyName rawTyName) =
+   case preview (ix tn) tyDict of
+    Nothing -> checkForBaseFunctor tyDict
+    Just dti -> Just dti
+  where
+    checkForBaseFunctor :: Map TyName (DatatypeInfo AbstractTy) -> Maybe (DatatypeInfo AbstractTy)
+    checkForBaseFunctor tyDict = case Text.stripSuffix "_F" rawTyName of
+      Nothing -> Nothing
+      Just rawTyNameStub ->
+        if
+          -- Note (Koz, 12/08/2025): None of these specific cases should _ever_
+          -- fail. Thus, `fromRight` is safe here.
+          | rawTyNameStub == "Natural" ->
+              pure . fromRight . mkDatatypeInfo $ naturalBaseFunctor
+          | rawTyNameStub == "Negative" ->
+              pure . fromRight . mkDatatypeInfo $ negativeBaseFunctor
+          | rawTyNameStub == "ByteString" ->
+              pure . fromRight . mkDatatypeInfo $ byteStringBaseFunctor
+          -- We have something that _looks_ like a base functor, but not a
+          -- special builtin case. We thus need to ask the environment for the
+          -- recursive type it stands for, if it exists.
+          | otherwise -> do
+              let standinTyName = TyName rawTyNameStub
+              case preview (ix standinTyName) tyDict of
+                -- Now we have _truly_ missed.
+                Nothing -> Nothing
+                Just dti -> case view #baseFunctor dti of
+                  Nothing -> Nothing
+                  -- Since this is generated, it can't fail to rename
+                  Just (bfDd, _) -> pure .  fromRight . mkDatatypeInfo $ bfDd
     fromRight :: forall a b. (Show a) => Either a b -> b
     fromRight = \case
       Left err -> error . show $ err

@@ -231,7 +231,7 @@ import Covenant.Internal.Unification
     reconcile,
     runUnifyM,
     substitute,
-    unify,
+    unify, lookupDatatypeInfo',
   )
 import Covenant.Prim
   ( OneArgFunc,
@@ -1049,10 +1049,10 @@ match scrutinee handlers = do
   where
     isRecursive :: ValT AbstractTy -> m Bool
     isRecursive (Datatype tyName _) = do
-      datatypeInfoExists <- asks (isJust . preview (#datatypeInfo % ix tyName))
-      if datatypeInfoExists
-        then asks (isJust . join . preview (#datatypeInfo % ix tyName % #baseFunctor))
-        else throwError $ MatchNoDatatypeInfo tyName
+      datatypes <- asks (view #datatypeInfo)
+      case lookupDatatypeInfo' datatypes tyName of
+        Nothing -> throwError $ MatchNoDatatypeInfo tyName
+        Just info -> pure $ isJust (view #baseFunctor info)
     isRecursive _ = pure False
 
     goRecursive :: TyName -> Vector (ValT AbstractTy) -> m Id
@@ -1115,7 +1115,13 @@ match scrutinee handlers = do
 
     goNonRecursive :: TyName -> Vector (ValT AbstractTy) -> m Id
     goNonRecursive tn tyConArgs = do
-      rawBBF <- asks (fromJust . preview (#datatypeInfo % ix tn % #bbForm))
+      -- TODO/FIXME: I need a version of lookupDatatypeInfo that gives me a configurable error so I can use it here
+      --             and get *something* halfway useful when debugging
+      datatypes <- asks (view #datatypeInfo)
+      thisInfo <- case lookupDatatypeInfo' datatypes tn of
+                    Nothing -> throwError $ MatchNoDatatypeInfo tn
+                    Just it -> pure it
+      let rawBBF = fromJust $ preview #bbForm thisInfo
       (instantiatedBBF :: CompT Renamed) <- instantiateBB rawBBF tyConArgs
       handlers' <- Vector.toList <$> traverse cleanupHandler handlers
       tyDict <- asks (view #datatypeInfo)
