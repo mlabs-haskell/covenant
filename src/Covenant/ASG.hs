@@ -23,6 +23,7 @@ module Covenant.ASG
     ASG,
 
     -- ** Functions
+    topLevelId,
     topLevelNode,
     nodeAt,
 
@@ -309,6 +310,12 @@ newtype ASG = ASG (Id, Map Id ASGNode)
 -- different `ASG`s and mixing up their `Id`s. However, this is both vanishingly
 -- unlikely and probably not worth trying to protect against, given the nuisance
 -- of having to work in `Maybe` all the time.
+
+-- | Retrieves the top-level 'Id' of an ASG.
+--
+-- @since 1.3.0
+topLevelId :: ASG -> Id
+topLevelId (ASG (i, _)) = i
 
 -- | Retrieves the top-level node of an ASG.
 --
