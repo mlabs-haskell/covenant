@@ -192,7 +192,9 @@ newtype ASGZipper (a :: Type)
 -- @since 1.3.0
 runASGZipper ::
   forall (a :: Type).
-  ASG -> ASGZipper a -> a
+  ASG ->
+  ASGZipper a ->
+  a
 runASGZipper g (ASGZipper comp) =
   let i = topLevelId g
    in (\(_, _, x) -> x)

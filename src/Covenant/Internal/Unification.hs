@@ -120,7 +120,7 @@ lookupDatatypeInfo tn@(TyName rawTyName) =
     Just dti -> renamedToUnify . renameDatatypeInfo $ dti
   where
     checkForBaseFunctor :: Map TyName (DatatypeInfo AbstractTy) -> UnifyM (DatatypeInfo Renamed)
-    checkForBaseFunctor tyDict = case Text.stripSuffix "_F" rawTyName of
+    checkForBaseFunctor tyDict = case Text.stripPrefix "#" rawTyName of
       Nothing -> throwError . NoDatatypeInfo $ tn
       Just rawTyNameStub ->
         if

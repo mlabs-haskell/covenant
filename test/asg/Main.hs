@@ -143,15 +143,15 @@ main =
       justNothingIntro,
       testGroup
         "Catamorphisms"
-        [ testCase "Natural_F can tear down an Integer" unitCataNaturalF,
-          testCase "Negative_F can tear down an Integer" unitCataNegativeF,
-          testCase "ByteString_F can tear down a ByteString" unitCataByteStringF,
+        [ testCase "#Natural can tear down an Integer" unitCataNaturalF,
+          testCase "#Negative can tear down an Integer" unitCataNegativeF,
+          testCase "#ByteString can tear down a ByteString" unitCataByteStringF,
           testCase "Non-recursive type cata should fail" unitCataMaybeF,
           testCase "Cata with non-rigid algebra should fail" unitCataNonRigidF,
-          testCase "<List_F Integer Bool -> !Bool> with List Integer should be Bool" unitCataListInteger,
-          testCase "<List_F Integer r -> !r> with List Integer should be r" unitCataListIntegerRigid,
-          testCase "<List_F r Integer -> !Integer> with List r should be Integer" unitCataListRigid,
-          testCase "<List_F r (Maybe r) -> !Maybe r> with List r should be Maybe r" unitCataListMaybeRigid,
+          testCase "<#List Integer Bool -> !Bool> with List Integer should be Bool" unitCataListInteger,
+          testCase "<#List Integer r -> !r> with List Integer should be r" unitCataListIntegerRigid,
+          testCase "<#List r Integer -> !Integer> with List r should be Integer" unitCataListRigid,
+          testCase "<#List r (Maybe r) -> !Maybe r> with List r should be Maybe r" unitCataListMaybeRigid,
           testCase "introduction then cata elimination" unitCataIntroThenEliminate
         ],
       testGroup
@@ -197,12 +197,12 @@ unitThunkError = do
     Left (TypeError _ ThunkError) -> pure ()
     _ -> assertFailure $ "Unexpected result: " <> show result
 
--- Construct a function of type `<Natural_F Bool -> !Bool> -> Integer -> !Bool`, whose
+-- Construct a function of type `<#Natural Bool -> !Bool> -> Integer -> !Bool`, whose
 -- body performs a cata over its second argument using its first argument. This
 -- should compile, and type as expected.
 unitCataNaturalF :: IO ()
 unitCataNaturalF = do
-  let thunkTy = ThunkT $ Comp0 $ Datatype "Natural_F" [boolT] :--:> ReturnT boolT
+  let thunkTy = ThunkT $ Comp0 $ Datatype "#Natural" [boolT] :--:> ReturnT boolT
   let ty = Comp0 $ thunkTy :--:> integerT :--:> ReturnT boolT
   let comp = lam ty $ do
         alg <- arg Z ix0
@@ -211,12 +211,12 @@ unitCataNaturalF = do
         pure . AnId $ result
   withCompilationSuccessUnit comp $ matchesType ty
 
--- Construct a function of type `<Negative_F Bool -> !Bool> -> Integer -> !Bool`, whose
+-- Construct a function of type `<#Negative Bool -> !Bool> -> Integer -> !Bool`, whose
 -- body performs a cata over its second argument using its first argument. This
 -- should compile, and type as expected.
 unitCataNegativeF :: IO ()
 unitCataNegativeF = do
-  let thunkTy = ThunkT $ Comp0 $ Datatype "Negative_F" [boolT] :--:> ReturnT boolT
+  let thunkTy = ThunkT $ Comp0 $ Datatype "#Negative" [boolT] :--:> ReturnT boolT
   let ty = Comp0 $ thunkTy :--:> integerT :--:> ReturnT boolT
   let comp = lam ty $ do
         alg <- arg Z ix0
@@ -225,12 +225,12 @@ unitCataNegativeF = do
         pure . AnId $ result
   withCompilationSuccessUnit comp $ matchesType ty
 
--- Construct a function of type `<ByteString_F Integer -> !Integer> -> ByteString
+-- Construct a function of type `<#ByteString Integer -> !Integer> -> ByteString
 -- -> !Bool`, whose body performs a cata over its second argument using its
 -- first argument. This should compile, and type as expected.
 unitCataByteStringF :: IO ()
 unitCataByteStringF = do
-  let thunkTy = ThunkT $ Comp0 $ Datatype "ByteString_F" [integerT] :--:> ReturnT integerT
+  let thunkTy = ThunkT $ Comp0 $ Datatype "#ByteString" [integerT] :--:> ReturnT integerT
   let ty = Comp0 $ thunkTy :--:> byteStringT :--:> ReturnT integerT
   let comp = lam ty $ do
         alg <- arg Z ix0
@@ -239,13 +239,13 @@ unitCataByteStringF = do
         pure . AnId $ result
   withCompilationSuccessUnit comp $ matchesType ty
 
--- Construct a function of type `forall a . <Maybe_F a Integer -> !Integer> -> Maybe
+-- Construct a function of type `forall a . <#Maybe a Integer -> !Integer> -> Maybe
 -- a -> !Integer`, whose body performs a cata over its second argument
 -- using its first argument. This should fail to compile, indicating that
 -- `Maybe` doesn't have a base functor.
 unitCataMaybeF :: IO ()
 unitCataMaybeF = do
-  let thunkTy = ThunkT $ Comp0 $ Datatype "Maybe_F" [tyvar (S Z) ix0, integerT] :--:> ReturnT integerT
+  let thunkTy = ThunkT $ Comp0 $ Datatype "#Maybe" [tyvar (S Z) ix0, integerT] :--:> ReturnT integerT
   let ty = Comp1 $ thunkTy :--:> Datatype "Maybe" [tyvar Z ix0] :--:> ReturnT integerT
   let comp = lam ty $ do
         alg <- arg Z ix0
@@ -262,7 +262,7 @@ unitCataMaybeF = do
 -- non-rigid algebra.
 unitCataNonRigidF :: IO ()
 unitCataNonRigidF = do
-  let nonRigidCompT = Comp1 $ Datatype "List_F" [tyvar Z ix0, Datatype "Maybe" [tyvar Z ix0]] :--:> ReturnT (Datatype "Maybe" [tyvar Z ix0])
+  let nonRigidCompT = Comp1 $ Datatype "#List" [tyvar Z ix0, Datatype "Maybe" [tyvar Z ix0]] :--:> ReturnT (Datatype "Maybe" [tyvar Z ix0])
   let thunkTy = ThunkT nonRigidCompT
   let ty = Comp0 $ thunkTy :--:> Datatype "List" [integerT] :--:> ReturnT (Datatype "Maybe" [integerT])
   let comp = lam ty $ do
@@ -274,12 +274,12 @@ unitCataNonRigidF = do
     TypeError _ (CataNonRigidAlgebra t) -> assertEqual "" nonRigidCompT t
     err' -> assertFailure $ "Failed with unexpected type of error: " <> show err'
 
--- Construct a function of type `<List_F Integer Bool -> !Bool> -> List Integer
+-- Construct a function of type `<#List Integer Bool -> !Bool> -> List Integer
 -- -> !Bool`, whose body performs a cata over its second argument using its
 -- first argument. This should compile, and type as expected.
 unitCataListInteger :: IO ()
 unitCataListInteger = do
-  let thunkTy = ThunkT $ Comp0 $ Datatype "List_F" [integerT, boolT] :--:> ReturnT boolT
+  let thunkTy = ThunkT $ Comp0 $ Datatype "#List" [integerT, boolT] :--:> ReturnT boolT
   let ty = Comp0 $ thunkTy :--:> Datatype "List" [integerT] :--:> ReturnT boolT
   let comp = lam ty $ do
         alg <- arg Z ix0
@@ -288,12 +288,12 @@ unitCataListInteger = do
         pure . AnId $ result
   withCompilationSuccessUnit comp $ matchesType ty
 
--- Construct a function of type `forall a . <List_F Integer a -> !a> -> List
+-- Construct a function of type `forall a . <#List Integer a -> !a> -> List
 -- Integer -> !a`, whose body performs a cata over its second argument using its
 -- first argument. This should compile, and type as expected.
 unitCataListIntegerRigid :: IO ()
 unitCataListIntegerRigid = do
-  let thunkTy = ThunkT $ Comp0 $ Datatype "List_F" [integerT, tyvar (S Z) ix0] :--:> ReturnT (tyvar (S Z) ix0)
+  let thunkTy = ThunkT $ Comp0 $ Datatype "#List" [integerT, tyvar (S Z) ix0] :--:> ReturnT (tyvar (S Z) ix0)
   let ty = Comp1 $ thunkTy :--:> Datatype "List" [integerT] :--:> ReturnT (tyvar Z ix0)
   let comp = lam ty $ do
         alg <- arg Z ix0
@@ -302,12 +302,12 @@ unitCataListIntegerRigid = do
         pure . AnId $ result
   withCompilationSuccessUnit comp $ matchesType ty
 
--- Construct a function of type `forall a . <List_F a Integer -> !Integer> -> List
+-- Construct a function of type `forall a . <#List a Integer -> !Integer> -> List
 -- a -> !Integer`, whose body performs a cata over its second argument using its
 -- first argument. This should compile, and type as expected.
 unitCataListRigid :: IO ()
 unitCataListRigid = do
-  let thunkTy = ThunkT $ Comp0 $ Datatype "List_F" [tyvar (S Z) ix0, integerT] :--:> ReturnT integerT
+  let thunkTy = ThunkT $ Comp0 $ Datatype "#List" [tyvar (S Z) ix0, integerT] :--:> ReturnT integerT
   let ty = Comp1 $ thunkTy :--:> Datatype "List" [tyvar Z ix0] :--:> ReturnT integerT
   let comp = lam ty $ do
         alg <- arg Z ix0
@@ -316,7 +316,7 @@ unitCataListRigid = do
         pure . AnId $ result
   withCompilationSuccessUnit comp $ matchesType ty
 
--- Construct a function of type `forall a . <List_F a (Maybe a) -> !Maybe a> ->
+-- Construct a function of type `forall a . <#List a (Maybe a) -> !Maybe a> ->
 -- List a -> !Maybe a`, whose body performs a cata over its second argument
 -- using its first argument. This should compile, and type as expected.
 unitCataListMaybeRigid :: IO ()
@@ -324,7 +324,7 @@ unitCataListMaybeRigid = do
   let thunkTy =
         ThunkT $
           Comp0 $
-            Datatype "List_F" [tyvar (S Z) ix0, Datatype "Maybe" [tyvar (S Z) ix0]]
+            Datatype "#List" [tyvar (S Z) ix0, Datatype "Maybe" [tyvar (S Z) ix0]]
               :--:> ReturnT (Datatype "Maybe" [tyvar (S Z) ix0])
   let ty =
         Comp1 $
@@ -338,7 +338,7 @@ unitCataListMaybeRigid = do
         pure . AnId $ result
   withCompilationSuccessUnit comp $ matchesType ty
 
--- Construct a function of type `forall a b . <List_F a (Maybe b) -> !Maybe b> ->
+-- Construct a function of type `forall a b . <#List a (Maybe b) -> !Maybe b> ->
 -- a -> !Maybe b`. In its body, we construct a singleton list, then eliminate it
 -- using a cata with the first argument as the algebra. THis should compile and
 -- type as expected.
@@ -347,7 +347,7 @@ unitCataIntroThenEliminate = do
   let thunkTy =
         ThunkT $
           Comp0 $
-            Datatype "List_F" [tyvar (S Z) ix0, Datatype "Maybe" [tyvar (S Z) ix1]]
+            Datatype "#List" [tyvar (S Z) ix0, Datatype "Maybe" [tyvar (S Z) ix1]]
               :--:> ReturnT (Datatype "Maybe" [tyvar (S Z) ix1])
   let ty =
         Comp2 $
@@ -752,7 +752,7 @@ matchList = runIntroFormTest "matchList" (BuiltinFlat IntegerT) $ do
       consHandlerTy =
         Comp0 $
           BuiltinFlat UnitT
-            :--:> Datatype "List_F" (Vector.fromList [BuiltinFlat UnitT, Datatype "List" (Vector.singleton $ BuiltinFlat UnitT)])
+            :--:> Datatype "#List" (Vector.fromList [BuiltinFlat UnitT, Datatype "List" (Vector.singleton $ BuiltinFlat UnitT)])
             :--:> ReturnT (BuiltinFlat IntegerT)
   nilHandler <- lazyLam nilHandlerTy (AnId <$> lit (AnInteger 0))
   consHandler <- lazyLam consHandlerTy (AnId <$> lit (AnInteger 0))

@@ -8,6 +8,8 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 * Zipper for the ASG in `Covenant.Zipper`
 * `topLevelId` function in `Covenant.ASG`
+* Changed type name representation of base functors from a `_F` suffix to a `#` prefix. For example, the base functor for `List` is now named `#List` instead of `List_F`. 
+
 
 ## 1.2.0 -- 2025-08-27
 
