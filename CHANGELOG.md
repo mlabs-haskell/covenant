@@ -4,6 +4,10 @@ All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
+## Unreleased 
+
+* Changed type name representation of base functors from a `_F` suffix to a `#` prefix. For example, the base functor for `List` is now named `#List` instead of `List_F`. 
+
 ## 1.2.0 -- 2025-08-27
 
 * Helper function for safely retrieving an in-scope type variable when constructing the ASG  

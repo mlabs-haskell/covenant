@@ -997,10 +997,10 @@ cata rAlg rVal =
                 appliedArgT <- case valT of
                   BuiltinFlat bT -> case bT of
                     ByteStringT -> do
-                      unless (bfName == "ByteString_F") (throwError . CataUnsuitable algT $ valT)
-                      pure $ Datatype "ByteString_F" . Vector.singleton $ lastTyArg
+                      unless (bfName == "#ByteString") (throwError . CataUnsuitable algT $ valT)
+                      pure $ Datatype "#ByteString" . Vector.singleton $ lastTyArg
                     IntegerT -> do
-                      let isSuitableBaseFunctor = bfName == "Natural_F" || bfName == "Negative_F"
+                      let isSuitableBaseFunctor = bfName == "#Natural" || bfName == "#Negative"
                       unless isSuitableBaseFunctor (throwError . CataUnsuitable algT $ valT)
                       pure $ Datatype bfName . Vector.singleton $ lastTyArg
                     _ -> throwError . CataWrongBuiltinType $ bT
@@ -1084,7 +1084,7 @@ match scrutinee handlers = do
             Right res -> pure res
           -- The type constructor for the base-functor variant of the scrutinee type.
           let scrut = Datatype tn tyConArgs
-          let scrutF = Datatype (TyName $ rawTn <> "_F") (Vector.snoc tyConArgs scrut)
+          let scrutF = Datatype (TyName $ "#" <> rawTn) (Vector.snoc tyConArgs scrut)
           -- These are arguments to the original type constructor plus the snoc'd original type.
           -- E.g. if we have:
           --      Scrutinee: List Int
@@ -1149,7 +1149,7 @@ match scrutinee handlers = do
 -- the value to be torn down by the catamorphism, in order to use the
 -- unification machinery to get the type of the final result.
 --
--- To be specific, suppose we have `<List_F r (Maybe r) -> !Maybe r>` as our algebra
+-- To be specific, suppose we have `<#List r (Maybe r) -> !Maybe r>` as our algebra
 -- argument (where `r` is some rigid), and `List r` as the value to be torn
 -- down. If we assume the rigid is bound one scope away, `r`'s DeBruijn index
 -- will be `S Z` for
@@ -1167,15 +1167,15 @@ match scrutinee handlers = do
 -- Following the steps above for our example, we would proceed as follows:
 --
 -- 1. Set `last` as `Maybe r`.
--- 2. Cook up `List_F r (Maybe r)`. Note that this matches what the algebra
+-- 2. Cook up `#List r (Maybe r)`. Note that this matches what the algebra
 --    expects.
--- 3. Use the unifier with `List_F r (Maybe r) -> !Maybe r`, applying the
---    argument `List_F r (Maybe r)` from Step 2.
+-- 3. Use the unifier with `#List r (Maybe r) -> !Maybe r`, applying the
+--    argument `#List r (Maybe r)` from Step 2.
 --
 -- However, if `last` is a rigid, we have an 'off by one error'. To see why,
 -- consider the form of the algebra argument:
 --
--- `ThunkT . Comp0 $ Datatype "List_F" [tyvar (S (S Z)) ix0, ....`
+-- `ThunkT . Comp0 $ Datatype "#List" [tyvar (S (S Z)) ix0, ....`
 --
 -- However, `tyvar (S (S Z)) ix0` is not valid in the scope of the value to be
 -- torn down: that same rigid would have DeBruijn index `S Z` there instead.

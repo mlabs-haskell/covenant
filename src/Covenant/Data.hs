@@ -184,7 +184,12 @@ allComponentTypes = toListOf (#datatypeConstructors % folded % #constructorArgs 
 -- | Constructs a base functor from a suitable data declaration, returning
 -- 'Nothing' if the input is not a recursive type.
 --
--- @since 1.1.0
+-- Note that naming convention for base functors and their constructors gives "illegal" type names,
+-- i.e. names that users could not choose themselves. For example, in:
+-- @data List a = Nil | Cons a (List a)@
+-- The type name for the generated base functor is '#List' and the constructors of the base functor are
+-- '#Cons' and '#Nil'.
+-- @since 1.3.0
 mkBaseFunctor :: DataDeclaration AbstractTy -> Reader ScopeBoundary (Maybe (DataDeclaration AbstractTy))
 mkBaseFunctor OpaqueData {} = pure Nothing
 mkBaseFunctor (DataDeclaration tn numVars ctors strat) = do
@@ -197,7 +202,7 @@ mkBaseFunctor (DataDeclaration tn numVars ctors strat) = do
   where
     baseFName :: TyName
     baseFName = case tn of
-      TyName tyNameInner -> TyName (tyNameInner <> "_F")
+      TyName tyNameInner -> TyName ("#" <> tyNameInner)
     baseFNumVars :: Count "tyvar"
     baseFNumVars = fromJust . preview intCount $ review intCount numVars + 1
     -- The argument position of the new type variable parameter (typically `r`).
@@ -228,7 +233,7 @@ mkBaseFunctor (DataDeclaration tn numVars ctors strat) = do
     mkBaseCtor (Constructor ctorNm ctorArgs) = Constructor (baseFCtorName ctorNm) <$> traverse replaceAllRecursive ctorArgs
       where
         baseFCtorName :: ConstructorName -> ConstructorName
-        baseFCtorName (ConstructorName nm) = ConstructorName (nm <> "_F")
+        baseFCtorName (ConstructorName nm) = ConstructorName ("#" <> nm)
     allCtorArgs :: [ValT AbstractTy]
     allCtorArgs = concatMap (V.toList . view #constructorArgs) ctors
     -- This tells us whether the ValT *is* a recursive child of the parent type
