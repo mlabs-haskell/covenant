@@ -1370,12 +1370,13 @@ lazyLam expected bodyComp = lam expected bodyComp >>= thunk
 dtype :: TyName -> [ValT AbstractTy] -> ValT AbstractTy
 dtype tn = Datatype tn . Vector.fromList
 
--- | Helper for constructing a base functor name without
+-- | Helper for constructing a base functor name without having know the internal naming convention for
+--   base functors. 
 --
 -- @since 1.3.0
 baseFunctorOf ::
   forall (m :: Type -> Type).
-  (MonadHashCons Id ASGNode m, MonadError CovenantTypeError m, MonadReader ASGEnv m) =>
+  (MonadError CovenantTypeError m, MonadReader ASGEnv m) =>
   TyName ->
   m TyName
 baseFunctorOf (TyName tn) = do
@@ -1389,8 +1390,16 @@ baseFunctorOf (TyName tn) = do
 -- Integer is the only type that has TWO base functors and so
 -- its base functor cannot be determined from its type alone.
 
+-- | The name of the Natural base functor for Integer.
+-- Integer is the only type that has TWO base functors and so
+-- its base functor cannot be determined from its type name alone.
+-- @since 1.3.0
 naturalBF :: TyName
 naturalBF = TyName "#Natural"
 
+-- | The name of the Negative base functor for Integer
+-- Integer is the only type that has TWO base functors and so
+-- its base functor cannot be determined from its type name alone.
+-- @since 1.3.0
 negativeBF :: TyName
 negativeBF = TyName "#Negative"

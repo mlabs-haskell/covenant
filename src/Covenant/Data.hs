@@ -37,7 +37,7 @@ module Covenant.Data
     everythingOf,
     mapValT,
 
-    -- ** Constands
+    -- ** Constants
     primBaseFunctorInfos,
   )
 where
@@ -169,9 +169,8 @@ instance
   {-# INLINEABLE labelOptic #-}
   labelOptic = #baseFunctor % folded % _2
 
--- | The type name of *parent type* of a generated base functor, if it exists. Serves as both
---   an indicator that we're working with a generated base functor decl and a pointer for
---   getting hold of the original type without having to do error-prone string manipulation.
+-- | Is this the DatatypeInfo for a base functor?
+-- @since 1.3.0
 instance
   (k ~ A_Lens, a ~ Bool, b ~ Bool) =>
   LabelOptic "isBaseFunctor" k (DatatypeInfo var) (DatatypeInfo var) a b
