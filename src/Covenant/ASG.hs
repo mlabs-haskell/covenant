@@ -1371,7 +1371,7 @@ dtype :: TyName -> [ValT AbstractTy] -> ValT AbstractTy
 dtype tn = Datatype tn . Vector.fromList
 
 -- | Helper for constructing a base functor name without having know the internal naming convention for
---   base functors. 
+--   base functors.
 --
 -- @since 1.3.0
 baseFunctorOf ::
