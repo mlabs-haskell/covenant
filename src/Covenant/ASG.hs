@@ -200,7 +200,8 @@ import Covenant.Internal.Term
         UndeclaredOpaquePlutusDataCtor,
         UndoRenameFailure,
         UnificationError,
-        WrongReturnType, WrongNumInstantiationsInApp
+        WrongNumInstantiationsInApp,
+        WrongReturnType
       ),
     Id,
     Ref (AnArg, AnId),
@@ -743,7 +744,7 @@ app fId argRefs instTys = do
       Left err' -> throwError . RenameFunctionFailed fT $ err'
       Right renamedFT@(CompT count _) -> do
         let numInstantiations = Vector.length instTys
-            numVars           = review intCount count
+            numVars = review intCount count
         if numInstantiations /= numVars
           then throwError $ WrongNumInstantiationsInApp renamedFT numVars numInstantiations
           else do
@@ -1373,25 +1374,23 @@ ctor' tn cn args = do
   dataForced <- force (AnId dataThunk)
   app' dataForced mempty
 
-
-
 -- | A variant of `app` which does not take a vector of type instantiation arguments and
 --   attempts to infer all type variables.
--- @since 1.3.0 
+-- @since 1.3.0
 app' ::
   forall (m :: Type -> Type).
   (MonadHashCons Id ASGNode m, MonadError CovenantTypeError m, MonadReader ASGEnv m) =>
   Id ->
   Vector Ref ->
   m Id
-app' fId args = typeId fId >>= \case
-  CompNodeType (CompT count _) -> do
-    let numVars = review intCount count
-        instArgs = Vector.replicate numVars Nowhere
-    app fId args instArgs
-  ValNodeType t -> throwError . ApplyToValType $ t
-  ErrorNodeType -> throwError ApplyToError
-
+app' fId args =
+  typeId fId >>= \case
+    CompNodeType (CompT count _) -> do
+      let numVars = review intCount count
+          instArgs = Vector.replicate numVars Nowhere
+      app fId args instArgs
+    ValNodeType t -> throwError . ApplyToValType $ t
+    ErrorNodeType -> throwError ApplyToError
 
 -- | As 'lam', but produces a thunk value instead of a computation.
 --
@@ -1443,4 +1442,3 @@ naturalBF = TyName "#Natural"
 -- @since 1.3.0
 negativeBF :: TyName
 negativeBF = TyName "#Negative"
-

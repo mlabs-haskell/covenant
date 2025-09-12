@@ -38,6 +38,7 @@ import Covenant.ASG
     Ref (AnArg, AnId),
     ValNodeInfo (Lit),
     app,
+    app',
     arg,
     boundTyVar,
     builtin1,
@@ -45,6 +46,7 @@ import Covenant.ASG
     builtin3,
     cata,
     ctor,
+    ctor',
     dataConstructor,
     defaultDatatypes,
     dtype,
@@ -56,7 +58,7 @@ import Covenant.ASG
     match,
     runASGBuilder,
     thunk,
-    topLevelNode, app', ctor',
+    topLevelNode,
   )
 import Covenant.Constant
   ( AConstant (AUnit, AnInteger),
@@ -530,7 +532,7 @@ propApplyComp = forAllShrinkShow arbitrary shrink show $ \f arg1 ->
             Left bi1 -> builtin1 bi1
             Right (Left bi2) -> builtin2 bi2
             Right (Right bi3) -> builtin3 bi3
-          app' i (Vector.singleton . AnId $ arg') 
+          app' i (Vector.singleton . AnId $ arg')
    in withCompilationFailure comp $ \case
         TypeError _ (ApplyCompType actualT) -> t === actualT
         TypeError _ err' -> failWrongTypeError err'
@@ -773,7 +775,7 @@ maybeToList = runIntroFormTest "maybeToList" maybeToListTy $ do
       tvA <- boundTyVar (S Z) ix0
       vA <- AnArg <$> arg Z ix0
       nil <- AnId <$> ctor "List" "Nil" mempty (Vector.singleton (Here tvA))
-      AnId <$> ctor "List" "Cons" (Vector.fromList [vA, nil]) Vector.empty 
+      AnId <$> ctor "List" "Cons" (Vector.fromList [vA, nil]) Vector.empty
     scrutinee <- AnArg <$> arg Z ix0
     AnId <$> match scrutinee (AnId <$> Vector.fromList [justHandler, nothingHandler])
   typeIdTest thonk
