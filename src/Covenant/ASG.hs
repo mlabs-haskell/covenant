@@ -84,6 +84,9 @@ module Covenant.ASG
     ctor,
     lazyLam,
     dtype,
+    baseFunctorOf,
+    naturalBF,
+    negativeBF,
 
     -- *** Environment
     defaultDatatypes,
@@ -117,7 +120,7 @@ import Control.Monad.Reader
     runReaderT,
   )
 import Covenant.Constant (AConstant, typeConstant)
-import Covenant.Data (DatatypeInfo, mkDatatypeInfo)
+import Covenant.Data (DatatypeInfo, mkDatatypeInfo, primBaseFunctorInfos)
 import Covenant.DeBruijn (DeBruijn (S, Z), asInt)
 import Covenant.Index (Count, Index, count0, intCount, intIndex, wordCount)
 import Covenant.Internal.KindCheck (EncodingArgErr (EncodingArgMismatch), checkEncodingArgs)
@@ -194,7 +197,7 @@ import Covenant.Internal.Term
         UndeclaredOpaquePlutusDataCtor,
         UndoRenameFailure,
         UnificationError,
-        WrongReturnType
+        WrongReturnType, BaseFunctorDoesNotExistFor
       ),
     Id,
     Ref (AnArg, AnId),
@@ -531,12 +534,12 @@ newtype ASGBuilder (a :: Type)
 --
 -- @since 1.1.0
 defaultDatatypes :: Map TyName (DatatypeInfo AbstractTy)
-defaultDatatypes = foldMap go ledgerTypes
+defaultDatatypes = foldMap go ledgerTypes <> primBaseFunctorInfos
   where
     go :: DataDeclaration AbstractTy -> Map TyName (DatatypeInfo AbstractTy)
     go decl = case mkDatatypeInfo decl of
       Left err' -> error $ "Unexpected failure in default datatypes: " <> show err'
-      Right info -> Map.singleton (view #datatypeName decl) info
+      Right info -> info 
 
 -- | Executes an 'ASGBuilder' to make a \'finished\' ASG.
 --
@@ -1365,3 +1368,28 @@ lazyLam expected bodyComp = lam expected bodyComp >>= thunk
 -- @since 1.2.0
 dtype :: TyName -> [ValT AbstractTy] -> ValT AbstractTy
 dtype tn = Datatype tn . Vector.fromList
+
+-- | Helper for constructing a base functor name without
+--
+-- @since 1.3.0
+baseFunctorOf ::
+    forall (m :: Type -> Type).
+  (MonadHashCons Id ASGNode m, MonadError CovenantTypeError m, MonadReader ASGEnv m) =>
+  TyName ->
+  m TyName
+baseFunctorOf (TyName tn) = do
+  let bfTn = TyName ("#" <> tn)
+  tyDict <- asks (view #datatypeInfo)
+  case preview (ix bfTn) tyDict of
+    Nothing -> throwError $ BaseFunctorDoesNotExistFor (TyName tn)
+    Just{} -> pure bfTn
+
+-- Hardcoded constants for Integer base functors.
+-- Integer is the only type that has TWO base functors and so
+-- its base functor cannot be determined from its type alone.
+
+naturalBF :: TyName
+naturalBF = TyName "#Natural"
+
+negativeBF :: TyName
+negativeBF = TyName "#Negative"
