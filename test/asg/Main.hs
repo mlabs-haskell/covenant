@@ -56,7 +56,7 @@ import Covenant.ASG
     match,
     runASGBuilder,
     thunk,
-    topLevelNode,
+    topLevelNode, app', ctor',
   )
 import Covenant.Constant
   ( AConstant (AUnit, AnInteger),
@@ -94,7 +94,7 @@ import Data.Kind (Type)
 import Data.Map qualified as M
 import Data.Maybe (fromJust)
 import Data.Vector qualified as Vector
-import Data.Wedge (Wedge (Here, Nowhere, There), wedgeLeft)
+import Data.Wedge (Wedge (Here, There), wedgeLeft)
 import Optics.Core (preview, review)
 import Test.QuickCheck
   ( Gen,
@@ -363,7 +363,7 @@ unitCataIntroThenEliminate = do
         nilApplied <- app nilForced [] [Here aT]
         singleThunk <- dataConstructor "List" "Cons" [AnArg x, AnId nilApplied]
         singleForced <- force (AnId singleThunk)
-        singleApplied <- app singleForced [] [Nowhere]
+        singleApplied <- app' singleForced []
         result <- cata (AnArg alg) (AnId singleApplied)
         pure . AnId $ result
   withCompilationSuccessUnit comp $ matchesType ty
@@ -530,7 +530,7 @@ propApplyComp = forAllShrinkShow arbitrary shrink show $ \f arg1 ->
             Left bi1 -> builtin1 bi1
             Right (Left bi2) -> builtin2 bi2
             Right (Right bi3) -> builtin3 bi3
-          app i (Vector.singleton . AnId $ arg') mempty
+          app' i (Vector.singleton . AnId $ arg') 
    in withCompilationFailure comp $ \case
         TypeError _ (ApplyCompType actualT) -> t === actualT
         TypeError _ err' -> failWrongTypeError err'
@@ -700,14 +700,10 @@ justRigidIntro = runIntroFormTest "justRigidIntro" expected $ do
 justNothingIntro :: TestTree
 justNothingIntro = runIntroFormTest "justNothingIntro" expectedThunk $ do
   thunkL <- lam expectedComp $ do
-    nothingThunk <- dataConstructor "Maybe" "Nothing" mempty
     var <- boundTyVar Z ix0
-    nothingForced <- force (AnId nothingThunk)
-    nothingApplied <- app nothingForced mempty (Vector.singleton . wedgeLeft . Just $ var)
-    justNothing <- dataConstructor "Maybe" "Just" (Vector.singleton (AnId nothingApplied))
-    justNothingForced <- force (AnId justNothing)
-    justNothingApplied <- app justNothingForced mempty (Vector.singleton Nowhere)
-    pure (AnId justNothingApplied)
+    nothing <- ctor "Maybe" "Nothing" mempty (Vector.singleton . wedgeLeft . Just $ var)
+    justNothing <- ctor' "Maybe" "Just" (Vector.singleton (AnId nothing))
+    pure (AnId justNothing)
   typeIdTest thunkL
   where
     expectedComp :: CompT AbstractTy
@@ -733,7 +729,7 @@ justNothingIntro = runIntroFormTest "justNothingIntro" expectedThunk $ do
 matchMaybe :: TestTree
 matchMaybe = runIntroFormTest "matchMaybe" (BuiltinFlat IntegerT) $ do
   unit <- AnId <$> lit AUnit
-  scrutinee <- ctor "Maybe" "Just" (Vector.singleton unit) (Vector.singleton Nowhere)
+  scrutinee <- ctor' "Maybe" "Just" (Vector.singleton unit)
   nothingHandler <- lazyLam (Comp0 $ ReturnT (BuiltinFlat IntegerT)) (AnId <$> lit (AnInteger 0))
   justHandler <- lazyLam (Comp0 $ BuiltinFlat UnitT :--:> ReturnT (BuiltinFlat IntegerT)) (AnId <$> lit (AnInteger 1))
   result <- match (AnId scrutinee) (AnId <$> Vector.fromList [justHandler, nothingHandler])
@@ -747,7 +743,7 @@ matchList :: TestTree
 matchList = runIntroFormTest "matchList" (BuiltinFlat IntegerT) $ do
   unit <- AnId <$> lit AUnit
   nilUnit <- ctor "List" "Nil" mempty (Vector.singleton $ There (BuiltinFlat UnitT))
-  scrutinee <- ctor "List" "Cons" (Vector.fromList [unit, AnId nilUnit]) (Vector.singleton Nowhere)
+  scrutinee <- ctor' "List" "Cons" (Vector.fromList [unit, AnId nilUnit])
   let nilHandlerTy = Comp0 $ ReturnT (BuiltinFlat IntegerT)
       consHandlerTy =
         Comp0 $
@@ -777,7 +773,7 @@ maybeToList = runIntroFormTest "maybeToList" maybeToListTy $ do
       tvA <- boundTyVar (S Z) ix0
       vA <- AnArg <$> arg Z ix0
       nil <- AnId <$> ctor "List" "Nil" mempty (Vector.singleton (Here tvA))
-      AnId <$> ctor "List" "Cons" (Vector.fromList [vA, nil]) (Vector.singleton Nowhere)
+      AnId <$> ctor "List" "Cons" (Vector.fromList [vA, nil]) Vector.empty 
     scrutinee <- AnArg <$> arg Z ix0
     AnId <$> match scrutinee (AnId <$> Vector.fromList [justHandler, nothingHandler])
   typeIdTest thonk
