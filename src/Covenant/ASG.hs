@@ -153,6 +153,7 @@ import Covenant.Internal.Term
       ( ApplyCompType,
         ApplyToError,
         ApplyToValType,
+        BaseFunctorDoesNotExistFor,
         BrokenIdReference,
         CataAlgebraWrongArity,
         CataApplyToNonValT,
@@ -197,7 +198,7 @@ import Covenant.Internal.Term
         UndeclaredOpaquePlutusDataCtor,
         UndoRenameFailure,
         UnificationError,
-        WrongReturnType, BaseFunctorDoesNotExistFor
+        WrongReturnType
       ),
     Id,
     Ref (AnArg, AnId),
@@ -539,7 +540,7 @@ defaultDatatypes = foldMap go ledgerTypes <> primBaseFunctorInfos
     go :: DataDeclaration AbstractTy -> Map TyName (DatatypeInfo AbstractTy)
     go decl = case mkDatatypeInfo decl of
       Left err' -> error $ "Unexpected failure in default datatypes: " <> show err'
-      Right info -> info 
+      Right info -> info
 
 -- | Executes an 'ASGBuilder' to make a \'finished\' ASG.
 --
@@ -1373,7 +1374,7 @@ dtype tn = Datatype tn . Vector.fromList
 --
 -- @since 1.3.0
 baseFunctorOf ::
-    forall (m :: Type -> Type).
+  forall (m :: Type -> Type).
   (MonadHashCons Id ASGNode m, MonadError CovenantTypeError m, MonadReader ASGEnv m) =>
   TyName ->
   m TyName
@@ -1382,7 +1383,7 @@ baseFunctorOf (TyName tn) = do
   tyDict <- asks (view #datatypeInfo)
   case preview (ix bfTn) tyDict of
     Nothing -> throwError $ BaseFunctorDoesNotExistFor (TyName tn)
-    Just{} -> pure bfTn
+    Just {} -> pure bfTn
 
 -- Hardcoded constants for Integer base functors.
 -- Integer is the only type that has TWO base functors and so

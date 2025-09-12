@@ -87,7 +87,8 @@ import Covenant.ASG (ASGEnv (ASGEnv), ASGNode, CovenantError (TypeError), Covena
 import Covenant.Data
   ( DatatypeInfo,
     mkDatatypeInfo,
-    noPhantomTyVars, primBaseFunctorInfos,
+    noPhantomTyVars,
+    primBaseFunctorInfos,
   )
 import Covenant.DeBruijn (DeBruijn (Z), asInt)
 import Covenant.Index

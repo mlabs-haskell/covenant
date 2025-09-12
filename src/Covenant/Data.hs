@@ -48,6 +48,7 @@ import Control.Monad.Trans.Except (ExceptT, runExceptT)
 import Covenant.DeBruijn (DeBruijn (S, Z), asInt)
 import Covenant.Index (Count, Index, count0, intCount, intIndex)
 import Covenant.Internal.PrettyPrint (ScopeBoundary (ScopeBoundary))
+import Covenant.Internal.Strategy (DataEncoding (SOP))
 import Covenant.Internal.Type
   ( AbstractTy (BoundAt),
     CompT (CompT),
@@ -56,11 +57,14 @@ import Covenant.Internal.Type
     ConstructorName (ConstructorName),
     DataDeclaration (DataDeclaration, OpaqueData),
     TyName (TyName),
-    ValT (Abstraction, BuiltinFlat, Datatype, ThunkT), byteStringBaseFunctor, negativeBaseFunctor, naturalBaseFunctor,
+    ValT (Abstraction, BuiltinFlat, Datatype, ThunkT),
+    byteStringBaseFunctor,
+    naturalBaseFunctor,
+    negativeBaseFunctor,
   )
-import Covenant.Internal.Strategy (DataEncoding(SOP))
 import Data.Bitraversable (bisequence)
 import Data.Kind (Type)
+import Data.Map.Strict (Map)
 import Data.Map.Strict qualified as M
 import Data.Maybe (fromJust)
 import Data.Set (Set)
@@ -69,7 +73,6 @@ import Data.Vector qualified as V
 import Data.Vector.NonEmpty qualified as NEV
 import Optics.Core (A_Lens, LabelOptic (labelOptic), folded, lens, preview, review, toListOf, view, (%), _2)
 import Optics.Indexed.Core (A_Fold)
-import Data.Map.Strict (Map)
 
 -- | All possible errors that could arise when constructing a Boehm-Berrarducci
 -- form.
@@ -169,7 +172,8 @@ instance
 -- | The type name of *parent type* of a generated base functor, if it exists. Serves as both
 --   an indicator that we're working with a generated base functor decl and a pointer for
 --   getting hold of the original type without having to do error-prone string manipulation.
-instance   (k ~ A_Lens, a ~ Bool, b ~ Bool) =>
+instance
+  (k ~ A_Lens, a ~ Bool, b ~ Bool) =>
   LabelOptic "isBaseFunctor" k (DatatypeInfo var) (DatatypeInfo var) a b
   where
   {-# INLINEABLE labelOptic #-}
@@ -182,7 +186,7 @@ instance   (k ~ A_Lens, a ~ Bool, b ~ Bool) =>
 --   fail.
 --
 --   Returns a map because it will bundle the base functor declaration for a given type
---   if a base functor can be generated. 
+--   if a base functor can be generated.
 -- @since 1.3.0
 mkDatatypeInfo :: DataDeclaration AbstractTy -> Either BBFError (Map TyName (DatatypeInfo AbstractTy))
 mkDatatypeInfo decl = do
@@ -190,13 +194,15 @@ mkDatatypeInfo decl = do
   baseF <- baseFStuff
   case baseF of
     Nothing ->
-      pure . M.singleton declTyName $  DatatypeInfo decl  Nothing bbf False
-    bf@(Just (baseFDecl,baseFBB)) -> do
+      pure . M.singleton declTyName $ DatatypeInfo decl Nothing bbf False
+    bf@(Just (baseFDecl, baseFBB)) -> do
       let baseFTyName = view #datatypeName baseFDecl
-          baseFDatatypeInfo = M.singleton baseFTyName
-                              $ DatatypeInfo baseFDecl Nothing (Just baseFBB) True 
-          parentDatatypeInfo = M.singleton declTyName
-                              $ DatatypeInfo decl bf bbf False
+          baseFDatatypeInfo =
+            M.singleton baseFTyName $
+              DatatypeInfo baseFDecl Nothing (Just baseFBB) True
+          parentDatatypeInfo =
+            M.singleton declTyName $
+              DatatypeInfo decl bf bbf False
       pure $ baseFDatatypeInfo <> parentDatatypeInfo
   where
     declTyName = view #datatypeName decl
@@ -453,7 +459,6 @@ mkBBF' (DataDeclaration tn numVars ctors _)
        they now occur within a Thunk), but after that bump everything is stable as indicated above.
 -}
 
-
 {- Primitive Base Functor Datatype Info
 
    This has to be here to avoid cyclic dependencies and we have to write them by hand.
@@ -463,12 +468,18 @@ mkBBF' (DataDeclaration tn numVars ctors _)
 -}
 
 primBaseFunctorInfos :: Map TyName (DatatypeInfo AbstractTy)
-primBaseFunctorInfos = foldr ((\x acc ->
-                                let tnm = view (#originalDecl % #datatypeName) x
-                                in M.insert tnm x acc
-                                ) . unsafeMkPrimInfo) M.empty [naturalBaseFunctor, negativeBaseFunctor, byteStringBaseFunctor]
+primBaseFunctorInfos =
+  foldr
+    ( ( \x acc ->
+          let tnm = view (#originalDecl % #datatypeName) x
+           in M.insert tnm x acc
+      )
+        . unsafeMkPrimInfo
+    )
+    M.empty
+    [naturalBaseFunctor, negativeBaseFunctor, byteStringBaseFunctor]
   where
     unsafeMkPrimInfo :: DataDeclaration AbstractTy -> DatatypeInfo AbstractTy
     unsafeMkPrimInfo decl = case mkBBF decl of
       Left err -> error $ "Error constructing BBF for primitive base functor: " <> show err
-      Right bbf ->  DatatypeInfo decl Nothing bbf True
+      Right bbf -> DatatypeInfo decl Nothing bbf True
