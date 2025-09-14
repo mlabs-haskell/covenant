@@ -36,6 +36,9 @@ module Covenant.Data
     hasRecursive,
     everythingOf,
     mapValT,
+
+    -- ** Constants
+    primBaseFunctorInfos,
   )
 where
 
@@ -45,6 +48,7 @@ import Control.Monad.Trans.Except (ExceptT, runExceptT)
 import Covenant.DeBruijn (DeBruijn (S, Z), asInt)
 import Covenant.Index (Count, Index, count0, intCount, intIndex)
 import Covenant.Internal.PrettyPrint (ScopeBoundary (ScopeBoundary))
+import Covenant.Internal.Strategy (DataEncoding (SOP))
 import Covenant.Internal.Type
   ( AbstractTy (BoundAt),
     CompT (CompT),
@@ -54,9 +58,14 @@ import Covenant.Internal.Type
     DataDeclaration (DataDeclaration, OpaqueData),
     TyName (TyName),
     ValT (Abstraction, BuiltinFlat, Datatype, ThunkT),
+    byteStringBaseFunctor,
+    naturalBaseFunctor,
+    negativeBaseFunctor,
   )
 import Data.Bitraversable (bisequence)
 import Data.Kind (Type)
+import Data.Map.Strict (Map)
+import Data.Map.Strict qualified as M
 import Data.Maybe (fromJust)
 import Data.Set (Set)
 import Data.Set qualified as Set
@@ -95,7 +104,8 @@ data DatatypeInfo (var :: Type)
   { _originalDecl :: DataDeclaration var,
     _baseFunctorStuff :: Maybe (DataDeclaration var, ValT var),
     -- NOTE: The ONLY type that won't have a BB form is `Void` (or something isomorphic to it)
-    _bbForm :: Maybe (ValT var)
+    _bbForm :: Maybe (ValT var),
+    _isBaseFunctor :: Bool
   }
   deriving stock
     ( -- | @since 1.1.0
@@ -114,8 +124,8 @@ instance
   {-# INLINEABLE labelOptic #-}
   labelOptic =
     lens
-      (\(DatatypeInfo ogDecl _ _) -> ogDecl)
-      (\(DatatypeInfo _ b c) ogDecl -> DatatypeInfo ogDecl b c)
+      (\(DatatypeInfo ogDecl _ _ _) -> ogDecl)
+      (\(DatatypeInfo _ b c d) ogDecl -> DatatypeInfo ogDecl b c d)
 
 -- | The base functor for this data type, if it exists. Types which are not
 -- self-recursive lack base functors.
@@ -128,8 +138,8 @@ instance
   {-# INLINEABLE labelOptic #-}
   labelOptic =
     lens
-      (\(DatatypeInfo _ baseF _) -> baseF)
-      (\(DatatypeInfo a _ c) baseF -> DatatypeInfo a baseF c)
+      (\(DatatypeInfo _ baseF _ _) -> baseF)
+      (\(DatatypeInfo a _ c d) baseF -> DatatypeInfo a baseF c d)
 
 -- | The Boehm-Berrarducci form of this type, if it exists. Types with no
 -- constructors (that is, types without inhabitants) lack Boehm-Berrarducci
@@ -143,8 +153,8 @@ instance
   {-# INLINEABLE labelOptic #-}
   labelOptic =
     lens
-      (\(DatatypeInfo _ _ bb) -> bb)
-      (\(DatatypeInfo a b _) bb -> DatatypeInfo a b bb)
+      (\(DatatypeInfo _ _ bb _) -> bb)
+      (\(DatatypeInfo a b _ d) bb -> DatatypeInfo a b bb d)
 
 -- | The base functor Boehm-Berrarducci form of this type, if it exists. A type
 -- must have both a base functor and a Boehm-Berrarducci form to have a base
@@ -159,13 +169,42 @@ instance
   {-# INLINEABLE labelOptic #-}
   labelOptic = #baseFunctor % folded % _2
 
--- | Given a declaration of a datatype, either produce its datatype info, or
--- fail.
---
--- @since 1.1.0
-mkDatatypeInfo :: DataDeclaration AbstractTy -> Either BBFError (DatatypeInfo AbstractTy)
-mkDatatypeInfo decl = DatatypeInfo decl <$> baseFStuff <*> mkBBF decl
+-- | Is this the DatatypeInfo for a base functor?
+-- @since 1.3.0
+instance
+  (k ~ A_Lens, a ~ Bool, b ~ Bool) =>
+  LabelOptic "isBaseFunctor" k (DatatypeInfo var) (DatatypeInfo var) a b
   where
+  {-# INLINEABLE labelOptic #-}
+  labelOptic =
+    lens
+      (\(DatatypeInfo _ _ _ isbf) -> isbf)
+      (\(DatatypeInfo a b c _) isbf -> DatatypeInfo a b c isbf)
+
+-- | Given a declaration of a datatype, either produce its datatype info, or
+--   fail.
+--
+--   Returns a map because it will bundle the base functor declaration for a given type
+--   if a base functor can be generated.
+-- @since 1.3.0
+mkDatatypeInfo :: DataDeclaration AbstractTy -> Either BBFError (Map TyName (DatatypeInfo AbstractTy))
+mkDatatypeInfo decl = do
+  bbf <- mkBBF decl
+  baseF <- baseFStuff
+  case baseF of
+    Nothing ->
+      pure . M.singleton declTyName $ DatatypeInfo decl Nothing bbf False
+    bf@(Just (baseFDecl, baseFBB)) -> do
+      let baseFTyName = view #datatypeName baseFDecl
+          baseFDatatypeInfo =
+            M.singleton baseFTyName $
+              DatatypeInfo baseFDecl Nothing (Just baseFBB) True
+          parentDatatypeInfo =
+            M.singleton declTyName $
+              DatatypeInfo decl bf bbf False
+      pure $ baseFDatatypeInfo <> parentDatatypeInfo
+  where
+    declTyName = view #datatypeName decl
     baseFStuff :: Either BBFError (Maybe (DataDeclaration AbstractTy, ValT AbstractTy))
     baseFStuff =
       let baseFDecl = runReader (mkBaseFunctor decl) 0
@@ -192,13 +231,13 @@ allComponentTypes = toListOf (#datatypeConstructors % folded % #constructorArgs 
 -- @since 1.3.0
 mkBaseFunctor :: DataDeclaration AbstractTy -> Reader ScopeBoundary (Maybe (DataDeclaration AbstractTy))
 mkBaseFunctor OpaqueData {} = pure Nothing
-mkBaseFunctor (DataDeclaration tn numVars ctors strat) = do
+mkBaseFunctor (DataDeclaration tn numVars ctors _) = do
   anyRecComponents <- or <$> traverse (hasRecursive tn) allCtorArgs
   if null ctors || not anyRecComponents
     then pure Nothing
     else do
       baseCtors <- traverse mkBaseCtor ctors
-      pure . Just $ DataDeclaration baseFName baseFNumVars baseCtors strat
+      pure . Just $ DataDeclaration baseFName baseFNumVars baseCtors SOP
   where
     baseFName :: TyName
     baseFName = case tn of
@@ -419,5 +458,27 @@ mkBBF' (DataDeclaration tn numVars ctors _)
        they now occur within a Thunk), but after that bump everything is stable as indicated above.
 -}
 
-{- Here for lack of a better place to put it (has to be available to Unification and ASG)
+{- Primitive Base Functor Datatype Info
+
+   This has to be here to avoid cyclic dependencies and we have to write them by hand.
+
+   NOTE: THESE MUST BE INSERTED INTO THE DEFAULT ASGBUILDER CONTEXT WHEN IT IS CONSTRUCTED/INITIALIZED
+         (it's not yet clear where the best place to do that will be)
 -}
+
+primBaseFunctorInfos :: Map TyName (DatatypeInfo AbstractTy)
+primBaseFunctorInfos =
+  foldr
+    ( ( \x acc ->
+          let tnm = view (#originalDecl % #datatypeName) x
+           in M.insert tnm x acc
+      )
+        . unsafeMkPrimInfo
+    )
+    M.empty
+    [naturalBaseFunctor, negativeBaseFunctor, byteStringBaseFunctor]
+  where
+    unsafeMkPrimInfo :: DataDeclaration AbstractTy -> DatatypeInfo AbstractTy
+    unsafeMkPrimInfo decl = case mkBBF decl of
+      Left err -> error $ "Error constructing BBF for primitive base functor: " <> show err
+      Right bbf -> DatatypeInfo decl Nothing bbf True

@@ -261,6 +261,11 @@ data CovenantTypeError
     --
     -- @since 1.2.0
     MatchNoDatatypeInfo TyName
+  | -- | We tried to get the base functor for a type in the ASG context, but the base functor does not exist.
+    --   This can occur either because the type is not recursive and has no base functor, or because the type
+    --   itself does not exist. It does not seem important to distinguish between the two failure cases.
+    -- @since 1.3.0
+    BaseFunctorDoesNotExistFor TyName
   deriving stock
     ( -- | @since 1.0.0
       Eq,

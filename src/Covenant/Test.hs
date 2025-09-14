@@ -88,6 +88,7 @@ import Covenant.Data
   ( DatatypeInfo,
     mkDatatypeInfo,
     noPhantomTyVars,
+    primBaseFunctorInfos,
   )
 import Covenant.DeBruijn (DeBruijn (Z), asInt)
 import Covenant.Index
@@ -371,7 +372,7 @@ failLeft = either (assertFailure . show) pure
 -- @since 1.1.0
 tyAppTestDatatypes :: M.Map TyName (DatatypeInfo AbstractTy)
 tyAppTestDatatypes =
-  foldl' (\acc decl -> M.insert (view #datatypeName decl) (unsafeMkDatatypeInfo decl) acc) M.empty testDatatypes
+  foldl' (\acc decl -> unsafeMkDatatypeInfo decl <> acc) primBaseFunctorInfos testDatatypes
   where
     unsafeMkDatatypeInfo d = case mkDatatypeInfo d of
       Left err -> error (show err)
