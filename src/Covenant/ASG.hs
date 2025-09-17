@@ -1362,6 +1362,7 @@ ctor tn cn args instTys = do
   app dataForced mempty instTys
 
 -- | 'ctor' without the instantiation arguments, which are left up to inference.
+-- @since 1.3.0
 ctor' ::
   forall (m :: Type -> Type).
   (MonadHashCons Id ASGNode m, MonadError CovenantTypeError m, MonadReader ASGEnv m) =>

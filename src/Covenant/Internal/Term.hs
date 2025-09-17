@@ -270,6 +270,7 @@ data CovenantTypeError
     -- type variables bound in Count the CompT of the function to which arguments are being applied.
     -- The first Int is the  number of bound tyvars in the function type, the second is the number of
     -- instantiations supplied.
+    -- @since 1.3.0
     WrongNumInstantiationsInApp (CompT Renamed) Int Int
   deriving stock
     ( -- | @since 1.0.0
