@@ -82,11 +82,13 @@ module Covenant.ASG
 
     -- ** Helpers
     ctor,
+    ctor',
     lazyLam,
     dtype,
     baseFunctorOf,
     naturalBF,
     negativeBF,
+    app',
 
     -- *** Environment
     defaultDatatypes,
@@ -198,6 +200,7 @@ import Covenant.Internal.Term
         UndeclaredOpaquePlutusDataCtor,
         UndoRenameFailure,
         UnificationError,
+        WrongNumInstantiationsInApp,
         WrongReturnType
       ),
     Id,
@@ -275,7 +278,7 @@ import Data.Vector (Vector)
 import Data.Vector qualified as Vector
 import Data.Vector.NonEmpty qualified as NonEmpty
 import Data.Void (Void, vacuous)
-import Data.Wedge (Wedge, wedge)
+import Data.Wedge (Wedge (Nowhere), wedge)
 import Data.Word (Word32)
 import Optics.Core
   ( A_Lens,
@@ -739,14 +742,19 @@ app fId argRefs instTys = do
   case lookedUp of
     CompNodeType fT -> case runRenameM scopeInfo . renameCompT $ fT of
       Left err' -> throwError . RenameFunctionFailed fT $ err'
-      Right renamedFT -> do
-        instantiatedFT <- instantiate subs renamedFT
-        renamedArgs <- traverse renameArg argRefs
-        tyDict <- asks (view #datatypeInfo)
-        result <- either (throwError . UnificationError) pure $ checkApp tyDict instantiatedFT (Vector.toList renamedArgs)
-        restored <- undoRenameM result
-        checkEncodingWithInfo tyDict restored
-        refTo . AValNode restored . AppInternal fId $ argRefs
+      Right renamedFT@(CompT count _) -> do
+        let numInstantiations = Vector.length instTys
+            numVars = review intCount count
+        if numInstantiations /= numVars
+          then throwError $ WrongNumInstantiationsInApp renamedFT numVars numInstantiations
+          else do
+            instantiatedFT <- instantiate subs renamedFT
+            renamedArgs <- traverse renameArg argRefs
+            tyDict <- asks (view #datatypeInfo)
+            result <- either (throwError . UnificationError) pure $ checkApp tyDict instantiatedFT (Vector.toList renamedArgs)
+            restored <- undoRenameM result
+            checkEncodingWithInfo tyDict restored
+            refTo . AValNode restored . AppInternal fId $ argRefs
     ValNodeType t -> throwError . ApplyToValType $ t
     ErrorNodeType -> throwError ApplyToError
   where
@@ -924,7 +932,7 @@ dataConstructor tyName ctorName fields = do
       m (Constructor a)
     findConstructor xs = case find (\x -> view #constructorName x == ctorName) xs of
       Nothing -> throwError $ ConstructorDoesNotExistForType tyName ctorName
-      Just ctor' -> pure ctor'
+      Just ctor'' -> pure ctor''
 
     -- Looks up the DatatypeInfo for the type argument supplied
     -- and also renames (and rethrows the rename error if renaming fails)
@@ -1352,6 +1360,38 @@ ctor tn cn args instTys = do
   dataThunk <- dataConstructor tn cn args
   dataForced <- force (AnId dataThunk)
   app dataForced mempty instTys
+
+-- | 'ctor' without the instantiation arguments, which are left up to inference.
+-- @since 1.3.0
+ctor' ::
+  forall (m :: Type -> Type).
+  (MonadHashCons Id ASGNode m, MonadError CovenantTypeError m, MonadReader ASGEnv m) =>
+  TyName ->
+  ConstructorName ->
+  Vector.Vector Ref ->
+  m Id
+ctor' tn cn args = do
+  dataThunk <- dataConstructor tn cn args
+  dataForced <- force (AnId dataThunk)
+  app' dataForced mempty
+
+-- | A variant of `app` which does not take a vector of type instantiation arguments and
+--   attempts to infer all type variables.
+-- @since 1.3.0
+app' ::
+  forall (m :: Type -> Type).
+  (MonadHashCons Id ASGNode m, MonadError CovenantTypeError m, MonadReader ASGEnv m) =>
+  Id ->
+  Vector Ref ->
+  m Id
+app' fId args =
+  typeId fId >>= \case
+    CompNodeType (CompT count _) -> do
+      let numVars = review intCount count
+          instArgs = Vector.replicate numVars Nowhere
+      app fId args instArgs
+    ValNodeType t -> throwError . ApplyToValType $ t
+    ErrorNodeType -> throwError ApplyToError
 
 -- | As 'lam', but produces a thunk value instead of a computation.
 --

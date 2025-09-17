@@ -266,6 +266,12 @@ data CovenantTypeError
     --   itself does not exist. It does not seem important to distinguish between the two failure cases.
     -- @since 1.3.0
     BaseFunctorDoesNotExistFor TyName
+  | -- 'app' was called with a number of instantiation arguments that does not match the number of
+    -- type variables bound in Count the CompT of the function to which arguments are being applied.
+    -- The first Int is the  number of bound tyvars in the function type, the second is the number of
+    -- instantiations supplied.
+    -- @since 1.3.0
+    WrongNumInstantiationsInApp (CompT Renamed) Int Int
   deriving stock
     ( -- | @since 1.0.0
       Eq,
