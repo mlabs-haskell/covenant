@@ -310,11 +310,11 @@ renameDataDecl (DataDeclaration tn cnt ctors strat) = RenameM $ do
 -- REVIEW: I am not sure if we really want the scope arg to runRenameM to be `mempty`.
 --         If something breaks w/ BB forms or datatypes, look here.
 renameDatatypeInfo :: DatatypeInfo AbstractTy -> Either RenameError (DatatypeInfo Renamed)
-renameDatatypeInfo (DatatypeInfo ogDecl baseFStuff bb) = runRenameM mempty $ do
+renameDatatypeInfo (DatatypeInfo ogDecl baseFStuff bb isBF) = runRenameM mempty $ do
   ogDecl' <- renameDataDecl ogDecl
   baseFStuff' <- traverse (bitraverse renameDataDecl renameValT) baseFStuff
   bb' <- traverse renameValT bb
-  pure $ DatatypeInfo ogDecl' baseFStuff' bb'
+  pure $ DatatypeInfo ogDecl' baseFStuff' bb' isBF
 
 -- A way of 'undoing' the renaming process. This is meant to be used only after
 -- applications, and assumes that what is being un-renamed is the result of a

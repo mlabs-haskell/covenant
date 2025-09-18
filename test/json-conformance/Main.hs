@@ -7,7 +7,7 @@ import Covenant.Constant
 import Covenant.Data (mkDatatypeInfo)
 import Covenant.DeBruijn
 import Covenant.Index
-import Covenant.Prim (TwoArgFunc (AddInteger))
+import Covenant.Prim (TwoArgFunc (AddInteger, SubtractInteger, EqualsInteger))
 import Covenant.Test
 import Covenant.Type
 import Data.Vector qualified as Vector
@@ -50,12 +50,22 @@ f = \inpMPair inpList ->
 (#+) :: Ref -> Ref -> ASGBuilder Ref
 x #+ y = do
   plus <- builtin2 AddInteger
-  AnId <$> app plus [x, y] [Nowhere, Nowhere]
+  AnId <$> app' plus [x, y]
+
+(#-) :: Ref -> Ref -> ASGBuilder Ref
+x #- y = do
+  minus <- builtin2 SubtractInteger
+  AnId <$> app' minus [x, y]
+
+(#==) :: Ref -> Ref -> ASGBuilder Ref
+x #== y = do
+  equals <- builtin2 EqualsInteger
+  AnId <$> app' equals [x, y]
 
 conformance_body1 :: Either CovenantError ASG
 conformance_body1 =
   runASGBuilder
-    (unsafeMkDatatypeInfos conformanceDatatypes)
+    (unsafeMkDatatypeInfos conformanceDatatypes1)
     conformance_body1_builder
 
 conformance_body1_builder :: ASGBuilder Id
@@ -142,3 +152,102 @@ conformance_body1_builder = lam topLevelTy body
 
     topLevelTy :: CompT AbstractTy
     topLevelTy = Comp0 $ maybeIntPairT :--:> listIntT :--:> ReturnT resultT
+
+{- Case 2:
+
+opaque data Foo = Foo
+
+data Void
+
+data Maybe a = Nothing | Just a
+
+data Pair a b = Pair a b
+
+f :: Maybe (Pair Integer Foo) -> Maybe Boolean
+f mabPairIntFoo =
+  let g :: forall a. Integer -> a  -> Integer
+      g n _x = n + n
+  in match mabPairIntFoo
+       (error "Input is nothing")
+       (\pairIntFoo ->
+          match pairIntFoo (\n foo ->
+            let doubled = g n foo
+                zero    = doubled - doubled
+            in Just (zero == 0)
+          )
+       )
+-}
+
+conformance_body2 :: Either CovenantError ASG
+conformance_body2 =   runASGBuilder
+    (unsafeMkDatatypeInfos conformanceDatatypes2)
+    conformance_body2_builder
+
+
+conformance_body2_builder :: ASGBuilder Id
+conformance_body2_builder = lam topLevelTy body
+  where
+    body :: ASGBuilder Ref
+    body = do
+      maybeIntFooPair <- AnArg <$> arg Z ix0
+      g' <- g
+      nothingHandler' <- nothingHandler
+      justHandler' <- justHandler g'
+      AnId <$> match maybeIntFooPair [AnId nothingHandler', AnId justHandler']
+
+    nothingHandler :: ASGBuilder Id
+    nothingHandler = lazyLam nothingHandlerT (AnId <$> err)
+      where
+        nothingHandlerT :: CompT AbstractTy
+        nothingHandlerT = Comp1 $ ReturnT (tyvar Z ix0)
+
+    justHandler ::  Id -> ASGBuilder Id
+    justHandler gx = lazyLam justHandlerTy $ do
+      intFooPair <- AnArg <$> arg Z ix0
+      pairHandler' <- pairHandler gx
+      AnId <$> match intFooPair [AnId pairHandler']
+     where
+       justHandlerTy :: CompT AbstractTy
+       justHandlerTy = Comp0 $ pairIntFooT :--:> ReturnT maybeBoolT
+
+    pairHandler :: Id -> ASGBuilder Id
+    pairHandler gx = lazyLam pairHandlerTy $ do
+      intArg <- AnArg <$> arg Z ix0
+      fooArg <- AnArg <$> arg Z ix1
+      doubled <- AnId <$> app' gx [intArg,fooArg]
+      zero    <- doubled #- doubled
+      zeroIs0 <- zero #== zero
+      AnId <$> ctor' "Maybe" "Just" [zeroIs0]
+     where
+       pairHandlerTy :: CompT AbstractTy
+       pairHandlerTy = Comp0 $ integerT :--:> fooT :--:> ReturnT maybeBoolT
+
+    g :: ASGBuilder Id
+    g = lam gTy $ do
+      intArg <- AnArg <$> arg Z ix0
+      intArg #+ intArg
+     where
+       gTy :: CompT AbstractTy
+       gTy = Comp1 $ integerT :--:> tyvar Z ix0 :--:> ReturnT integerT
+
+    
+    topLevelTy :: CompT AbstractTy
+    topLevelTy = Comp0 $ maybePairIntFooT :--:> ReturnT maybeBoolT
+
+    integerT :: forall a. ValT a
+    integerT = BuiltinFlat IntegerT
+
+    boolT :: forall a. ValT a
+    boolT = BuiltinFlat BoolT
+
+    fooT :: ValT AbstractTy
+    fooT = dtype "Foo" []
+
+    pairIntFooT :: ValT AbstractTy
+    pairIntFooT = dtype "Pair" [integerT, fooT]
+
+    maybePairIntFooT :: ValT AbstractTy
+    maybePairIntFooT = dtype "Maybe" [pairIntFooT]
+
+    maybeBoolT :: ValT AbstractTy
+    maybeBoolT = dtype "Maybe" [boolT]

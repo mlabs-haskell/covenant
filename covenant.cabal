@@ -112,6 +112,7 @@ library
     Covenant.Test
     Covenant.Type
     Covenant.Util
+    Covenant.Zipper
 
   other-modules:
     Covenant.Internal.KindCheck

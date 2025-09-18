@@ -32,7 +32,8 @@ module Covenant.Test
 
     -- ** Test helpers
     checkApp,
-    conformanceDatatypes,
+    conformanceDatatypes1,
+    conformanceDatatypes2,
     failLeft,
     tyAppTestDatatypes,
     list,
@@ -90,6 +91,7 @@ import Covenant.Data
   ( DatatypeInfo,
     mkDatatypeInfo,
     noPhantomTyVars,
+    primBaseFunctorInfos,
   )
 import Covenant.DeBruijn (DeBruijn (Z), asInt)
 import Covenant.Index
@@ -129,7 +131,7 @@ import Covenant.Internal.Rename
   )
 import Covenant.Internal.Strategy
   ( DataEncoding (PlutusData, SOP),
-    PlutusDataStrategy (ConstrData),
+    PlutusDataStrategy (ConstrData), PlutusDataConstructor (PlutusI),
   )
 import Covenant.Internal.Term (ASGNodeType (CompNodeType, ValNodeType), typeId)
 import Covenant.Internal.Type
@@ -201,6 +203,7 @@ import Test.QuickCheck.GenT qualified as GT
 import Test.QuickCheck.Instances.Containers ()
 import Test.QuickCheck.Instances.Vector ()
 import Test.Tasty.HUnit (assertFailure)
+import qualified Data.Set as S
 
 -- | Wrapper for 'ValT' to provide an 'Arbitrary' instance to generate only
 -- value types without any type variables.
@@ -379,12 +382,12 @@ tyAppTestDatatypes = unsafeMkDatatypeInfos testDatatypes
 --   from a collection of data declarations (which are what people actually write)
 -- @since 1.3.0
 unsafeMkDatatypeInfos :: [DataDeclaration AbstractTy] -> M.Map TyName (DatatypeInfo AbstractTy)
-unsafeMkDatatypeInfos = foldl' (\acc decl -> M.insert (view #datatypeName decl) (unsafeMkDatatypeInfo decl) acc) M.empty
+unsafeMkDatatypeInfos = foldl' (\acc decl -> unsafeMkDatatypeInfo decl <> acc) M.empty
   where
     unsafeMkDatatypeInfo d = case mkDatatypeInfo d of
       Left err -> error (show err)
       Right res -> res
-
+      
 -- | Helper for tests to quickly construct 'Datatype's. This is unsafe, as it
 -- allows construction of nonsensical renamings.
 --
@@ -949,8 +952,18 @@ data Pair a b = Pair a b
 
 data List a = Nil | Cons a (List a)
 -}
-conformanceDatatypes :: [DataDeclaration AbstractTy]
-conformanceDatatypes = [conformance_Maybe_SOP, conformance_Result, pair, list]
+conformanceDatatypes1 :: [DataDeclaration AbstractTy]
+conformanceDatatypes1 = [conformance_Maybe_SOP, conformance_Result, pair, list]
+
+conformanceDatatypes2 :: [DataDeclaration AbstractTy]
+conformanceDatatypes2 = [conformance_Void, conformance_OpaqueFoo, conformance_Maybe_SOP, pair]
+
+conformance_Void :: DataDeclaration AbstractTy
+conformance_Void = mkDecl $ Decl "Void" count0 [] SOP
+
+conformance_OpaqueFoo :: DataDeclaration AbstractTy
+conformance_OpaqueFoo = OpaqueData "Foo" (S.fromList [PlutusI])
+
 
 conformance_Maybe_SOP :: DataDeclaration AbstractTy
 conformance_Maybe_SOP =

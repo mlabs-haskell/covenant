@@ -23,6 +23,7 @@ module Covenant.ASG
     ASG,
 
     -- ** Functions
+    topLevelId,
     topLevelNode,
     nodeAt,
 
@@ -81,8 +82,13 @@ module Covenant.ASG
 
     -- ** Helpers
     ctor,
+    ctor',
     lazyLam,
     dtype,
+    baseFunctorOf,
+    naturalBF,
+    negativeBF,
+    app',
 
     -- *** Environment
     defaultDatatypes,
@@ -116,7 +122,7 @@ import Control.Monad.Reader
     runReaderT,
   )
 import Covenant.Constant (AConstant, typeConstant)
-import Covenant.Data (DatatypeInfo, mkDatatypeInfo)
+import Covenant.Data (DatatypeInfo, mkDatatypeInfo, primBaseFunctorInfos)
 import Covenant.DeBruijn (DeBruijn (S, Z), asInt)
 import Covenant.Index (Count, Index, count0, intCount, intIndex, wordCount)
 import Covenant.Internal.KindCheck (EncodingArgErr (EncodingArgMismatch), checkEncodingArgs)
@@ -149,6 +155,7 @@ import Covenant.Internal.Term
       ( ApplyCompType,
         ApplyToError,
         ApplyToValType,
+        BaseFunctorDoesNotExistFor,
         BrokenIdReference,
         CataAlgebraWrongArity,
         CataApplyToNonValT,
@@ -193,6 +200,7 @@ import Covenant.Internal.Term
         UndeclaredOpaquePlutusDataCtor,
         UndoRenameFailure,
         UnificationError,
+        WrongNumInstantiationsInApp,
         WrongReturnType
       ),
     Id,
@@ -228,7 +236,7 @@ import Covenant.Internal.Unification
     UnifyM,
     checkApp,
     fixUp,
-    lookupDatatypeInfo',
+    lookupDatatypeInfo,
     reconcile,
     runUnifyM,
     substitute,
@@ -271,7 +279,7 @@ import Data.Vector (Vector)
 import Data.Vector qualified as Vector
 import Data.Vector.NonEmpty qualified as NonEmpty
 import Data.Void (Void, vacuous)
-import Data.Wedge (Wedge, wedge)
+import Data.Wedge (Wedge (Nowhere), wedge)
 import Data.Word (Word32)
 import Optics.Core
   ( A_Lens,
@@ -310,6 +318,12 @@ newtype ASG = ASG (Id, Map Id ASGNode)
 -- different `ASG`s and mixing up their `Id`s. However, this is both vanishingly
 -- unlikely and probably not worth trying to protect against, given the nuisance
 -- of having to work in `Maybe` all the time.
+
+-- | Retrieves the top-level 'Id' of an ASG.
+--
+-- @since 1.3.0
+topLevelId :: ASG -> Id
+topLevelId (ASG (i, _)) = i
 
 -- | Retrieves the top-level node of an ASG.
 --
@@ -525,12 +539,12 @@ newtype ASGBuilder (a :: Type)
 --
 -- @since 1.1.0
 defaultDatatypes :: Map TyName (DatatypeInfo AbstractTy)
-defaultDatatypes = foldMap go ledgerTypes
+defaultDatatypes = foldMap go ledgerTypes <> primBaseFunctorInfos
   where
     go :: DataDeclaration AbstractTy -> Map TyName (DatatypeInfo AbstractTy)
     go decl = case mkDatatypeInfo decl of
       Left err' -> error $ "Unexpected failure in default datatypes: " <> show err'
-      Right info -> Map.singleton (view #datatypeName decl) info
+      Right info -> info
 
 -- | Executes an 'ASGBuilder' to make a \'finished\' ASG.
 --
@@ -729,14 +743,19 @@ app fId argRefs instTys = do
   case lookedUp of
     CompNodeType fT -> case runRenameM scopeInfo . renameCompT $ fT of
       Left err' -> throwError . RenameFunctionFailed fT $ err'
-      Right renamedFT -> do
-        instantiatedFT <- instantiate subs renamedFT
-        renamedArgs <- traverse renameArg argRefs
-        tyDict <- asks (view #datatypeInfo)
-        result <- either (throwError . UnificationError) pure $ checkApp tyDict instantiatedFT (Vector.toList renamedArgs)
-        restored <- undoRenameM result
-        checkEncodingWithInfo tyDict restored
-        refTo . AValNode restored . AppInternal fId $ argRefs
+      Right renamedFT@(CompT count _) -> do
+        let numInstantiations = Vector.length instTys
+            numVars = review intCount count
+        if numInstantiations /= numVars
+          then throwError $ WrongNumInstantiationsInApp renamedFT numVars numInstantiations
+          else do
+            instantiatedFT <- instantiate subs renamedFT
+            renamedArgs <- traverse renameArg argRefs
+            tyDict <- asks (view #datatypeInfo)
+            result <- either (throwError . UnificationError) pure $ checkApp tyDict instantiatedFT (Vector.toList renamedArgs)
+            restored <- undoRenameM result
+            checkEncodingWithInfo tyDict restored
+            refTo . AValNode restored . AppInternal fId $ argRefs
     ValNodeType t -> throwError . ApplyToValType $ t
     ErrorNodeType -> throwError ApplyToError
   where
@@ -914,7 +933,7 @@ dataConstructor tyName ctorName fields = do
       m (Constructor a)
     findConstructor xs = case find (\x -> view #constructorName x == ctorName) xs of
       Nothing -> throwError $ ConstructorDoesNotExistForType tyName ctorName
-      Just ctor' -> pure ctor'
+      Just ctor'' -> pure ctor''
 
     -- Looks up the DatatypeInfo for the type argument supplied
     -- and also renames (and rethrows the rename error if renaming fails)
@@ -998,10 +1017,10 @@ cata rAlg rVal =
                 appliedArgT <- case valT of
                   BuiltinFlat bT -> case bT of
                     ByteStringT -> do
-                      unless (bfName == "ByteString_F") (throwError . CataUnsuitable algT $ valT)
-                      pure $ Datatype "ByteString_F" . Vector.singleton $ lastTyArg
+                      unless (bfName == "#ByteString") (throwError . CataUnsuitable algT $ valT)
+                      pure $ Datatype "#ByteString" . Vector.singleton $ lastTyArg
                     IntegerT -> do
-                      let isSuitableBaseFunctor = bfName == "Natural_F" || bfName == "Negative_F"
+                      let isSuitableBaseFunctor = bfName == "#Natural" || bfName == "#Negative"
                       unless isSuitableBaseFunctor (throwError . CataUnsuitable algT $ valT)
                       pure $ Datatype bfName . Vector.singleton $ lastTyArg
                     _ -> throwError . CataWrongBuiltinType $ bT
@@ -1050,10 +1069,10 @@ match scrutinee handlers = do
   where
     isRecursive :: ValT AbstractTy -> m Bool
     isRecursive (Datatype tyName _) = do
-      datatypes <- asks (view #datatypeInfo)
-      case lookupDatatypeInfo' datatypes tyName of
-        Nothing -> throwError $ MatchNoDatatypeInfo tyName
-        Just info -> pure $ isJust (view #baseFunctor info)
+      datatypeInfoExists <- asks (isJust . preview (#datatypeInfo % ix tyName))
+      if datatypeInfoExists
+        then asks (isJust . join . preview (#datatypeInfo % ix tyName % #baseFunctor))
+        else throwError $ MatchNoDatatypeInfo tyName
     isRecursive _ = pure False
 
     goRecursive :: TyName -> Vector (ValT AbstractTy) -> m Id
@@ -1085,7 +1104,7 @@ match scrutinee handlers = do
             Right res -> pure res
           -- The type constructor for the base-functor variant of the scrutinee type.
           let scrut = Datatype tn tyConArgs
-          let scrutF = Datatype (TyName $ rawTn <> "_F") (Vector.snoc tyConArgs scrut)
+          let scrutF = Datatype (TyName $ "#" <> rawTn) (Vector.snoc tyConArgs scrut)
           -- These are arguments to the original type constructor plus the snoc'd original type.
           -- E.g. if we have:
           --      Scrutinee: List Int
@@ -1116,13 +1135,7 @@ match scrutinee handlers = do
 
     goNonRecursive :: TyName -> Vector (ValT AbstractTy) -> m Id
     goNonRecursive tn tyConArgs = do
-      -- TODO/FIXME: I need a version of lookupDatatypeInfo that gives me a configurable error so I can use it here
-      --             and get *something* halfway useful when debugging
-      datatypes <- asks (view #datatypeInfo)
-      thisInfo <- case lookupDatatypeInfo' datatypes tn of
-        Nothing -> throwError $ MatchNoDatatypeInfo tn
-        Just it -> pure it
-      let rawBBF = fromJust $ preview #bbForm thisInfo
+      rawBBF <- asks (fromJust . preview (#datatypeInfo % ix tn % #bbForm))
       (instantiatedBBF :: CompT Renamed) <- instantiateBB rawBBF tyConArgs
       handlers' <- Vector.toList <$> traverse cleanupHandler handlers
       tyDict <- asks (view #datatypeInfo)
@@ -1156,7 +1169,7 @@ match scrutinee handlers = do
 -- the value to be torn down by the catamorphism, in order to use the
 -- unification machinery to get the type of the final result.
 --
--- To be specific, suppose we have `<List_F r (Maybe r) -> !Maybe r>` as our algebra
+-- To be specific, suppose we have `<#List r (Maybe r) -> !Maybe r>` as our algebra
 -- argument (where `r` is some rigid), and `List r` as the value to be torn
 -- down. If we assume the rigid is bound one scope away, `r`'s DeBruijn index
 -- will be `S Z` for
@@ -1174,15 +1187,15 @@ match scrutinee handlers = do
 -- Following the steps above for our example, we would proceed as follows:
 --
 -- 1. Set `last` as `Maybe r`.
--- 2. Cook up `List_F r (Maybe r)`. Note that this matches what the algebra
+-- 2. Cook up `#List r (Maybe r)`. Note that this matches what the algebra
 --    expects.
--- 3. Use the unifier with `List_F r (Maybe r) -> !Maybe r`, applying the
---    argument `List_F r (Maybe r)` from Step 2.
+-- 3. Use the unifier with `#List r (Maybe r) -> !Maybe r`, applying the
+--    argument `#List r (Maybe r)` from Step 2.
 --
 -- However, if `last` is a rigid, we have an 'off by one error'. To see why,
 -- consider the form of the algebra argument:
 --
--- `ThunkT . Comp0 $ Datatype "List_F" [tyvar (S (S Z)) ix0, ....`
+-- `ThunkT . Comp0 $ Datatype "#List" [tyvar (S (S Z)) ix0, ....`
 --
 -- However, `tyvar (S (S Z)) ix0` is not valid in the scope of the value to be
 -- torn down: that same rigid would have DeBruijn index `S Z` there instead.
@@ -1349,6 +1362,38 @@ ctor tn cn args instTys = do
   dataForced <- force (AnId dataThunk)
   app dataForced mempty instTys
 
+-- | 'ctor' without the instantiation arguments, which are left up to inference.
+-- @since 1.3.0
+ctor' ::
+  forall (m :: Type -> Type).
+  (MonadHashCons Id ASGNode m, MonadError CovenantTypeError m, MonadReader ASGEnv m) =>
+  TyName ->
+  ConstructorName ->
+  Vector.Vector Ref ->
+  m Id
+ctor' tn cn args = do
+  dataThunk <- dataConstructor tn cn args
+  dataForced <- force (AnId dataThunk)
+  app' dataForced mempty
+
+-- | A variant of `app` which does not take a vector of type instantiation arguments and
+--   attempts to infer all type variables.
+-- @since 1.3.0
+app' ::
+  forall (m :: Type -> Type).
+  (MonadHashCons Id ASGNode m, MonadError CovenantTypeError m, MonadReader ASGEnv m) =>
+  Id ->
+  Vector Ref ->
+  m Id
+app' fId args =
+  typeId fId >>= \case
+    CompNodeType (CompT count _) -> do
+      let numVars = review intCount count
+          instArgs = Vector.replicate numVars Nowhere
+      app fId args instArgs
+    ValNodeType t -> throwError . ApplyToValType $ t
+    ErrorNodeType -> throwError ApplyToError
+
 -- | As 'lam', but produces a thunk value instead of a computation.
 --
 -- @since 1.2.0
@@ -1365,3 +1410,37 @@ lazyLam expected bodyComp = lam expected bodyComp >>= thunk
 -- @since 1.2.0
 dtype :: TyName -> [ValT AbstractTy] -> ValT AbstractTy
 dtype tn = Datatype tn . Vector.fromList
+
+-- | Helper for constructing a base functor name without having know the internal naming convention for
+--   base functors.
+--
+-- @since 1.3.0
+baseFunctorOf ::
+  forall (m :: Type -> Type).
+  (MonadError CovenantTypeError m, MonadReader ASGEnv m) =>
+  TyName ->
+  m TyName
+baseFunctorOf (TyName tn) = do
+  let bfTn = TyName ("#" <> tn)
+  tyDict <- asks (view #datatypeInfo)
+  case preview (ix bfTn) tyDict of
+    Nothing -> throwError $ BaseFunctorDoesNotExistFor (TyName tn)
+    Just {} -> pure bfTn
+
+-- Hardcoded constants for Integer base functors.
+-- Integer is the only type that has TWO base functors and so
+-- its base functor cannot be determined from its type alone.
+
+-- | The name of the Natural base functor for Integer.
+-- Integer is the only type that has TWO base functors and so
+-- its base functor cannot be determined from its type name alone.
+-- @since 1.3.0
+naturalBF :: TyName
+naturalBF = TyName "#Natural"
+
+-- | The name of the Negative base functor for Integer
+-- Integer is the only type that has TWO base functors and so
+-- its base functor cannot be determined from its type name alone.
+-- @since 1.3.0
+negativeBF :: TyName
+negativeBF = TyName "#Negative"

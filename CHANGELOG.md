@@ -4,6 +4,15 @@ All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
+## UNRELEASED
+
+* Zipper for the ASG in `Covenant.Zipper`
+* `topLevelId` function in `Covenant.ASG`
+* Changed type name representation of base functors from a `_F` suffix to a `#` prefix. For example, the base functor for `List` is now named `#List` instead of `List_F`. 
+* Changed base functor lookup machinery / representation to not require raw TyName text manipulation 
+* Provided helper function for safe construction of base functor names from the parent TyName 
+
+
 ## 1.2.0 -- 2025-08-27
 
 * Helper function for safely retrieving an in-scope type variable when constructing the ASG  
