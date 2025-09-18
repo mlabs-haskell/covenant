@@ -131,7 +131,8 @@ import Covenant.Internal.Rename
   )
 import Covenant.Internal.Strategy
   ( DataEncoding (PlutusData, SOP),
-    PlutusDataStrategy (ConstrData), PlutusDataConstructor (PlutusI),
+    PlutusDataConstructor (PlutusI),
+    PlutusDataStrategy (ConstrData),
   )
 import Covenant.Internal.Term (ASGNodeType (CompNodeType, ValNodeType), typeId)
 import Covenant.Internal.Type
@@ -167,6 +168,7 @@ import Data.Map.Strict (Map)
 import Data.Map.Strict qualified as M
 import Data.Maybe (fromJust, mapMaybe)
 import Data.Set (Set)
+import Data.Set qualified as S
 import Data.Set qualified as Set
 import Data.Text (Text)
 import Data.Text qualified as T
@@ -203,7 +205,6 @@ import Test.QuickCheck.GenT qualified as GT
 import Test.QuickCheck.Instances.Containers ()
 import Test.QuickCheck.Instances.Vector ()
 import Test.Tasty.HUnit (assertFailure)
-import qualified Data.Set as S
 
 -- | Wrapper for 'ValT' to provide an 'Arbitrary' instance to generate only
 -- value types without any type variables.
@@ -387,7 +388,7 @@ unsafeMkDatatypeInfos = foldl' (\acc decl -> unsafeMkDatatypeInfo decl <> acc) M
     unsafeMkDatatypeInfo d = case mkDatatypeInfo d of
       Left err -> error (show err)
       Right res -> res
-      
+
 -- | Helper for tests to quickly construct 'Datatype's. This is unsafe, as it
 -- allows construction of nonsensical renamings.
 --
@@ -963,7 +964,6 @@ conformance_Void = mkDecl $ Decl "Void" count0 [] SOP
 
 conformance_OpaqueFoo :: DataDeclaration AbstractTy
 conformance_OpaqueFoo = OpaqueData "Foo" (S.fromList [PlutusI])
-
 
 conformance_Maybe_SOP :: DataDeclaration AbstractTy
 conformance_Maybe_SOP =

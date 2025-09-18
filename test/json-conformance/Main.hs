@@ -7,7 +7,7 @@ import Covenant.Constant
 import Covenant.Data (mkDatatypeInfo)
 import Covenant.DeBruijn
 import Covenant.Index
-import Covenant.Prim (TwoArgFunc (AddInteger, SubtractInteger, EqualsInteger))
+import Covenant.Prim (TwoArgFunc (AddInteger, EqualsInteger, SubtractInteger))
 import Covenant.Test
 import Covenant.Type
 import Data.Vector qualified as Vector
@@ -179,10 +179,10 @@ f mabPairIntFoo =
 -}
 
 conformance_body2 :: Either CovenantError ASG
-conformance_body2 =   runASGBuilder
+conformance_body2 =
+  runASGBuilder
     (unsafeMkDatatypeInfos conformanceDatatypes2)
     conformance_body2_builder
-
 
 conformance_body2_builder :: ASGBuilder Id
 conformance_body2_builder = lam topLevelTy body
@@ -201,36 +201,35 @@ conformance_body2_builder = lam topLevelTy body
         nothingHandlerT :: CompT AbstractTy
         nothingHandlerT = Comp1 $ ReturnT (tyvar Z ix0)
 
-    justHandler ::  Id -> ASGBuilder Id
+    justHandler :: Id -> ASGBuilder Id
     justHandler gx = lazyLam justHandlerTy $ do
       intFooPair <- AnArg <$> arg Z ix0
       pairHandler' <- pairHandler gx
       AnId <$> match intFooPair [AnId pairHandler']
-     where
-       justHandlerTy :: CompT AbstractTy
-       justHandlerTy = Comp0 $ pairIntFooT :--:> ReturnT maybeBoolT
+      where
+        justHandlerTy :: CompT AbstractTy
+        justHandlerTy = Comp0 $ pairIntFooT :--:> ReturnT maybeBoolT
 
     pairHandler :: Id -> ASGBuilder Id
     pairHandler gx = lazyLam pairHandlerTy $ do
       intArg <- AnArg <$> arg Z ix0
       fooArg <- AnArg <$> arg Z ix1
-      doubled <- AnId <$> app' gx [intArg,fooArg]
-      zero    <- doubled #- doubled
+      doubled <- AnId <$> app' gx [intArg, fooArg]
+      zero <- doubled #- doubled
       zeroIs0 <- zero #== zero
       AnId <$> ctor' "Maybe" "Just" [zeroIs0]
-     where
-       pairHandlerTy :: CompT AbstractTy
-       pairHandlerTy = Comp0 $ integerT :--:> fooT :--:> ReturnT maybeBoolT
+      where
+        pairHandlerTy :: CompT AbstractTy
+        pairHandlerTy = Comp0 $ integerT :--:> fooT :--:> ReturnT maybeBoolT
 
     g :: ASGBuilder Id
     g = lam gTy $ do
       intArg <- AnArg <$> arg Z ix0
       intArg #+ intArg
-     where
-       gTy :: CompT AbstractTy
-       gTy = Comp1 $ integerT :--:> tyvar Z ix0 :--:> ReturnT integerT
+      where
+        gTy :: CompT AbstractTy
+        gTy = Comp1 $ integerT :--:> tyvar Z ix0 :--:> ReturnT integerT
 
-    
     topLevelTy :: CompT AbstractTy
     topLevelTy = Comp0 $ maybePairIntFooT :--:> ReturnT maybeBoolT
 

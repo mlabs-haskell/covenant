@@ -10,7 +10,7 @@ module Covenant.Internal.Unification
     substitute,
     fixUp,
     reconcile,
-    lookupDatatypeInfo
+    lookupDatatypeInfo,
   )
 where
 
@@ -117,7 +117,6 @@ lookupDatatypeInfo tn =
   where
     renamedToUnify :: Either RenameError (DatatypeInfo Renamed) -> UnifyM (DatatypeInfo Renamed)
     renamedToUnify = either (throwError . DatatypeInfoRenameFailed tn) pure
-
 
 lookupBBForm :: TyName -> UnifyM (ValT Renamed)
 lookupBBForm tn =
