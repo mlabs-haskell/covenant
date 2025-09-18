@@ -28,9 +28,10 @@ import Covenant.Internal.Type
     BuiltinFlatT,
     CompT (CompT),
     CompTBody (CompTBody),
+    DataDeclaration (OpaqueData),
     Renamed (Rigid, Unifiable, Wildcard),
     TyName,
-    ValT (Abstraction, BuiltinFlat, Datatype, ThunkT), DataDeclaration (OpaqueData),
+    ValT (Abstraction, BuiltinFlat, Datatype, ThunkT),
   )
 import Data.Kind (Type)
 import Data.Map (Map)
@@ -126,9 +127,10 @@ lookupBBForm tn =
 -- Opaque types do not (and cannot) have a BB form, which breaks unification machinery that assumes all inhabiated types
 -- have such a form. We need to branch on the "Opacity" of a type in `expectDatatype` and this lets us do that
 isOpaqueType :: TyName -> UnifyM Bool
-isOpaqueType tn = lookupDatatypeInfo tn >>= \dti -> case view #originalDecl dti of
-  OpaqueData{} -> pure True
-  _ -> pure False
+isOpaqueType tn =
+  lookupDatatypeInfo tn >>= \dti -> case view #originalDecl dti of
+    OpaqueData {} -> pure True
+    _ -> pure False
 
 -- | Given information about in-scope datatypes, a computation type, and a list
 -- of arguments (some of which may be errors), try to construct the type of the
@@ -356,13 +358,13 @@ unify expected actual =
                   unify bbFormConcreteE bbFormConcreteA
             _ -> unificationError
         True -> case actual of
-          Abstraction Rigid{} -> unificationError
+          Abstraction Rigid {} -> unificationError
           Abstraction _ -> noSubUnify
           -- Opaque datatypes cannot be parameterized, so we only need to check the TyName
           Datatype tn' _args ->
             if tn == tn'
-             then noSubUnify
-             else unificationError
+              then noSubUnify
+              else unificationError
           _ -> unificationError
     concretify :: ValT Renamed -> Vector (ValT Renamed) -> UnifyM (ValT Renamed)
     concretify (ThunkT (CompT count (CompTBody fn))) args = fixUp $ ThunkT (CompT count (CompTBody newFn))

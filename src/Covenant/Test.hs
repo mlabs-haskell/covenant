@@ -153,7 +153,8 @@ import Covenant.Internal.Type
 import Covenant.Internal.Unification (checkApp)
 import Covenant.Type
   ( CompT (Comp0, CompN),
-    CompTBody (ArgsAndResult), PlutusDataConstructor (PlutusI),
+    CompTBody (ArgsAndResult),
+    PlutusDataConstructor (PlutusI),
   )
 import Covenant.Util (prettyStr)
 import Data.Coerce (coerce)
