@@ -153,7 +153,7 @@ import Covenant.Internal.Type
 import Covenant.Internal.Unification (checkApp)
 import Covenant.Type
   ( CompT (Comp0, CompN),
-    CompTBody (ArgsAndResult),
+    CompTBody (ArgsAndResult), PlutusDataConstructor (PlutusI),
   )
 import Covenant.Util (prettyStr)
 import Data.Coerce (coerce)
@@ -371,8 +371,10 @@ failLeft = either (assertFailure . show) pure
 --
 -- @since 1.1.0
 tyAppTestDatatypes :: M.Map TyName (DatatypeInfo AbstractTy)
-tyAppTestDatatypes =
-  foldl' (\acc decl -> unsafeMkDatatypeInfo decl <> acc) primBaseFunctorInfos testDatatypes
+tyAppTestDatatypes = unsafeMkDatatypeInfos testDatatypes
+
+unsafeMkDatatypeInfos :: [DataDeclaration AbstractTy] -> M.Map TyName (DatatypeInfo AbstractTy)
+unsafeMkDatatypeInfos = foldl' (\acc decl -> unsafeMkDatatypeInfo decl <> acc) primBaseFunctorInfos
   where
     unsafeMkDatatypeInfo d = case mkDatatypeInfo d of
       Left err -> error (show err)
@@ -930,4 +932,7 @@ unitT =
       (PlutusData ConstrData)
 
 testDatatypes :: [DataDeclaration AbstractTy]
-testDatatypes = [maybeT, eitherT, unitT, pair, list]
+testDatatypes = [maybeT, eitherT, unitT, pair, list, opaqueT]
+
+opaqueT :: DataDeclaration AbstractTy
+opaqueT = OpaqueData "Opaque" (Set.fromList [PlutusI])
