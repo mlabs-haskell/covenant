@@ -382,7 +382,7 @@ tyAppTestDatatypes = unsafeMkDatatypeInfos testDatatypes
 --   from a collection of data declarations (which are what people actually write)
 -- @since 1.3.0
 unsafeMkDatatypeInfos :: [DataDeclaration AbstractTy] -> M.Map TyName (DatatypeInfo AbstractTy)
-unsafeMkDatatypeInfos = foldl' (\acc decl -> unsafeMkDatatypeInfo decl <> acc) M.empty
+unsafeMkDatatypeInfos = mappend primBaseFunctorInfos .  foldl' (\acc decl -> unsafeMkDatatypeInfo decl <> acc) M.empty
   where
     unsafeMkDatatypeInfo d = case mkDatatypeInfo d of
       Left err -> error (show err)

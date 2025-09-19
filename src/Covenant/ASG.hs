@@ -236,7 +236,6 @@ import Covenant.Internal.Unification
     UnifyM,
     checkApp,
     fixUp,
-    lookupDatatypeInfo,
     reconcile,
     runUnifyM,
     substitute,
