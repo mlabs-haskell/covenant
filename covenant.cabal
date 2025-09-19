@@ -32,7 +32,7 @@ common lang
     -Wmisplaced-pragmas
     -Wmissing-export-lists
     -Wmissing-import-lists
-    -Wunused-imports 
+    -Wunused-imports
 
   default-extensions:
     BangPatterns
