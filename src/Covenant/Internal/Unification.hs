@@ -10,6 +10,7 @@ module Covenant.Internal.Unification
     substitute,
     fixUp,
     reconcile,
+    lookupDatatypeInfo,
   )
 where
 

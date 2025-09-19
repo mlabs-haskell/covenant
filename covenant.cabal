@@ -32,6 +32,7 @@ common lang
     -Wmisplaced-pragmas
     -Wmissing-export-lists
     -Wmissing-import-lists
+    -Wunused-imports
 
   default-extensions:
     BangPatterns
@@ -196,5 +197,11 @@ test-suite kindcheck
   type: exitcode-stdio-1.0
   main-is: Main.hs
   hs-source-dirs: test/kindcheck
+
+test-suite json-conformance
+  import: test-lang
+  type: exitcode-stdio-1.0
+  main-is: Main.hs
+  hs-source-dirs: test/json-conformance
 
 -- Benchmarks
