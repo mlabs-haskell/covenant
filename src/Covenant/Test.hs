@@ -168,7 +168,6 @@ import Data.Map.Strict (Map)
 import Data.Map.Strict qualified as M
 import Data.Maybe (fromJust, mapMaybe)
 import Data.Set (Set)
-import Data.Set qualified as S
 import Data.Set qualified as Set
 import Data.Text (Text)
 import Data.Text qualified as T
@@ -941,7 +940,7 @@ unitT =
       (PlutusData ConstrData)
 
 testDatatypes :: [DataDeclaration AbstractTy]
-testDatatypes = [maybeT, eitherT, unitT, pair, list]
+testDatatypes = [maybeT, eitherT, unitT, pair, list, conformance_OpaqueFoo]
 
 {- For conformance testing. All of the ledger types are data encoded, so we need some variants which
    are not data encoded to ensure adequate test coverage.
@@ -963,7 +962,7 @@ conformance_Void :: DataDeclaration AbstractTy
 conformance_Void = mkDecl $ Decl "Void" count0 [] SOP
 
 conformance_OpaqueFoo :: DataDeclaration AbstractTy
-conformance_OpaqueFoo = OpaqueData "Foo" (S.fromList [PlutusI])
+conformance_OpaqueFoo = OpaqueData "Foo" (Set.fromList [PlutusI])
 
 conformance_Maybe_SOP :: DataDeclaration AbstractTy
 conformance_Maybe_SOP =

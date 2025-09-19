@@ -29,6 +29,7 @@ import Covenant.Internal.Type
     BuiltinFlatT,
     CompT (CompT),
     CompTBody (CompTBody),
+    DataDeclaration (OpaqueData),
     Renamed (Rigid, Unifiable, Wildcard),
     TyName,
     ValT (Abstraction, BuiltinFlat, Datatype, ThunkT),
@@ -123,6 +124,14 @@ lookupBBForm tn =
   lookupDatatypeInfo tn >>= \dti -> case view #bbForm dti of
     Nothing -> throwError $ NoBBForm tn
     Just bbForm -> pure bbForm
+
+-- Opaque types do not (and cannot) have a BB form, which breaks unification machinery that assumes all inhabiated types
+-- have such a form. We need to branch on the "Opacity" of a type in `expectDatatype` and this lets us do that
+isOpaqueType :: TyName -> UnifyM Bool
+isOpaqueType tn =
+  lookupDatatypeInfo tn >>= \dti -> case view #originalDecl dti of
+    OpaqueData {} -> pure True
+    _ -> pure False
 
 -- | Given information about in-scope datatypes, a computation type, and a list
 -- of arguments (some of which may be errors), try to construct the type of the
@@ -332,18 +341,32 @@ unify expected actual =
     -- the BB form using the arguments to the actual datatype.
     -- For example, the BB form of `Maybe` is: forall a r. r -> (a -> r) -> r
     -- which, if we concretify while attempting to unify with `Maybe Int`, becomes: `forall r. r -> (Int -> r) -> r`
+    --
+    -- Opaque datatypes are a special exception and are treated analogously to Builtins: They unify only with themselves,
+    -- unifiables, or wildcards.
     expectDatatype tn args = do
-      bbForm <- lookupBBForm tn
-      bbFormConcreteE <- concretify bbForm args
-      case actual of
-        Abstraction (Rigid _ _) -> unificationError
-        Abstraction _ -> noSubUnify
-        Datatype tn' args'
-          | tn' /= tn -> unificationError
-          | otherwise -> do
-              bbFormConcreteA <- concretify bbForm args'
-              unify bbFormConcreteE bbFormConcreteA
-        _ -> unificationError
+      isOpaqueType tn >>= \case
+        False -> do
+          bbForm <- lookupBBForm tn
+          bbFormConcreteE <- concretify bbForm args
+          case actual of
+            Abstraction (Rigid _ _) -> unificationError
+            Abstraction _ -> noSubUnify
+            Datatype tn' args'
+              | tn' /= tn -> unificationError
+              | otherwise -> do
+                  bbFormConcreteA <- concretify bbForm args'
+                  unify bbFormConcreteE bbFormConcreteA
+            _ -> unificationError
+        True -> case actual of
+          Abstraction Rigid {} -> unificationError
+          Abstraction _ -> noSubUnify
+          -- Opaque datatypes cannot be parameterized, so we only need to check the TyName
+          Datatype tn' _args ->
+            if tn == tn'
+              then noSubUnify
+              else unificationError
+          _ -> unificationError
     concretify :: ValT Renamed -> Vector (ValT Renamed) -> UnifyM (ValT Renamed)
     concretify (ThunkT (CompT count (CompTBody fn))) args = fixUp $ ThunkT (CompT count (CompTBody newFn))
       where

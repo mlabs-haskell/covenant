@@ -161,7 +161,10 @@ main =
         [ matchMaybe,
           matchList,
           maybeToList
-        ]
+        ],
+      testGroup
+        "Opaque"
+        [unifyOpaque]
     ]
   where
     moreTests :: QuickCheckTests -> QuickCheckTests
@@ -785,6 +788,29 @@ maybeToList = runIntroFormTest "maybeToList" maybeToListTy $ do
 
     maybeToListTy :: ValT AbstractTy
     maybeToListTy = ThunkT maybeToListCompTy
+
+{- This tests that Opaques don't break the unifier. Arguably it should be in type-applications, but we need a bunch of
+   ASG stuff that's not imported there to construct the test, so it is here instead.
+
+   The lambda we construct has the type: Maybe Opaque -> Integer
+-}
+
+unifyOpaque :: TestTree
+unifyOpaque = runIntroFormTest "unifyOpaque" unifyOpaqueTy $ do
+  thonk <- lazyLam unifyOpaqueCompTy $ do
+    let nothingHandlerTy = Comp0 $ ReturnT (BuiltinFlat IntegerT)
+        justHandlerTy = Comp0 $ dtype "Foo" [] :--:> ReturnT (BuiltinFlat IntegerT)
+    nothingHandler <- lazyLam nothingHandlerTy $ (AnId <$> lit (AnInteger 0))
+    justHandler <- lazyLam justHandlerTy $ (AnId <$> lit (AnInteger 1))
+    scrutinee <- AnArg <$> arg Z ix0
+    AnId <$> match scrutinee (AnId <$> Vector.fromList [justHandler, nothingHandler])
+  typeIdTest thonk
+  where
+    unifyOpaqueCompTy :: CompT AbstractTy
+    unifyOpaqueCompTy = Comp0 $ dtype "Maybe" [dtype "Foo" []] :--:> ReturnT (BuiltinFlat IntegerT)
+
+    unifyOpaqueTy :: ValT AbstractTy
+    unifyOpaqueTy = ThunkT unifyOpaqueCompTy
 
 -- Helpers
 

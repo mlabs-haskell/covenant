@@ -3,18 +3,53 @@
 module Main where
 
 import Covenant.ASG
+  ( ASG,
+    ASGBuilder,
+    CovenantError
+      ( TypeError
+      ),
+    Id,
+    Ref (AnArg, AnId),
+    app',
+    arg,
+    builtin2,
+    cata,
+    ctor,
+    ctor',
+    dtype,
+    err,
+    lam,
+    lazyLam,
+    lit,
+    match,
+    runASGBuilder,
+  )
 import Covenant.Constant
-import Covenant.Data (mkDatatypeInfo)
-import Covenant.DeBruijn
-import Covenant.Index
+    ( AConstant (AnInteger, AString),
+  )
+import Covenant.DeBruijn (DeBruijn (S, Z))
+import Covenant.Index (ix0, ix1)
 import Covenant.Prim (TwoArgFunc (AddInteger, EqualsInteger, SubtractInteger))
-import Covenant.Test
-import Covenant.Type
+import Covenant.Type   ( AbstractTy,
+    BuiltinFlatT (IntegerT, StringT, BoolT),
+    CompT (Comp0, Comp1),
+    CompTBody (ReturnT, (:--:>)),
+    ValT (BuiltinFlat),
+    tyvar,
+  )
+import Covenant.Test (unsafeMkDatatypeInfos,
+                      conformanceDatatypes1, conformanceDatatypes2)
 import Data.Vector qualified as Vector
-import Data.Wedge
+import Data.Wedge (Wedge (There))
+import Test.Tasty.HUnit (testCase, assertBool)
+import Test.Tasty (defaultMain, testGroup) 
+import Data.Either (isRight)
 
 main :: IO ()
-main = pure ()
+main = defaultMain . testGroup "Conformance" $
+  [ testCase "conformance1_asg" (assertBool "case 1 compiles to asg" $ isRight conformance_body1),
+    testCase "conformance2_asg" (assertBool "case 2 compiles to asg" $ isRight conformance_body2)
+  ]
 
 {- Case 1:
 
@@ -127,7 +162,7 @@ conformance_body1_builder = lam topLevelTy body
       AnId <$> match listFInt (AnId <$> [nilHandler, consHandler])
       where
         listFIntT :: ValT AbstractTy
-        listFIntT = dtype "List_F" [intT, intT]
+        listFIntT = dtype "#List" [intT, intT]
 
     intT :: ValT AbstractTy
     intT = BuiltinFlat IntegerT
@@ -199,7 +234,7 @@ conformance_body2_builder = lam topLevelTy body
     nothingHandler = lazyLam nothingHandlerT (AnId <$> err)
       where
         nothingHandlerT :: CompT AbstractTy
-        nothingHandlerT = Comp1 $ ReturnT (tyvar Z ix0)
+        nothingHandlerT = Comp0 $ ReturnT maybeBoolT
 
     justHandler :: Id -> ASGBuilder Id
     justHandler gx = lazyLam justHandlerTy $ do
