@@ -30,9 +30,9 @@ common lang
     -Woperator-whitespace
     -Wambiguous-fields
     -Wmisplaced-pragmas
-
     -Wmissing-export-lists
     -Wmissing-import-lists
+
   default-extensions:
     BangPatterns
     BinaryLiterals

@@ -1,13 +1,11 @@
 {-# LANGUAGE OverloadedLists #-}
 
-module Main where
+module Main (main) where
 
 import Covenant.ASG
   ( ASG,
     ASGBuilder,
-    CovenantError
-      ( TypeError
-      ),
+    CovenantError,
     Id,
     Ref (AnArg, AnId),
     app',
@@ -25,31 +23,36 @@ import Covenant.ASG
     runASGBuilder,
   )
 import Covenant.Constant
-    ( AConstant (AnInteger, AString),
+  ( AConstant (AString, AnInteger),
   )
 import Covenant.DeBruijn (DeBruijn (S, Z))
 import Covenant.Index (ix0, ix1)
 import Covenant.Prim (TwoArgFunc (AddInteger, EqualsInteger, SubtractInteger))
-import Covenant.Type   ( AbstractTy,
-    BuiltinFlatT (IntegerT, StringT, BoolT),
+import Covenant.Test
+  ( conformanceDatatypes1,
+    conformanceDatatypes2,
+    unsafeMkDatatypeInfos,
+  )
+import Covenant.Type
+  ( AbstractTy,
+    BuiltinFlatT (BoolT, IntegerT, StringT),
     CompT (Comp0, Comp1),
     CompTBody (ReturnT, (:--:>)),
     ValT (BuiltinFlat),
     tyvar,
   )
-import Covenant.Test (unsafeMkDatatypeInfos,
-                      conformanceDatatypes1, conformanceDatatypes2)
+import Data.Either (isRight)
 import Data.Vector qualified as Vector
 import Data.Wedge (Wedge (There))
-import Test.Tasty.HUnit (testCase, assertBool)
-import Test.Tasty (defaultMain, testGroup) 
-import Data.Either (isRight)
+import Test.Tasty (defaultMain, testGroup)
+import Test.Tasty.HUnit (assertBool, testCase)
 
 main :: IO ()
-main = defaultMain . testGroup "Conformance" $
-  [ testCase "conformance1_asg" (assertBool "case 1 compiles to asg" $ isRight conformance_body1),
-    testCase "conformance2_asg" (assertBool "case 2 compiles to asg" $ isRight conformance_body2)
-  ]
+main =
+  defaultMain . testGroup "Conformance" $
+    [ testCase "conformance1_asg" (assertBool "case 1 compiles to asg" $ isRight conformance_body1),
+      testCase "conformance2_asg" (assertBool "case 2 compiles to asg" $ isRight conformance_body2)
+    ]
 
 {- Case 1:
 
