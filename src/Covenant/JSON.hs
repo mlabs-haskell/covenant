@@ -162,7 +162,6 @@ decodeVersion = withObject' "Version" $ \obj -> do
   minor <- withField "minor" (liftParser . parseJSON) obj
   pure $ Version major minor
 
-
 {- DataDeclaration & its components -}
 
 {- Special handling to account for base functors (including "strange" base functors for Natural)
@@ -206,9 +205,9 @@ decodeTyName = liftParser . go
 
 validateProperName :: Text -> Parser Text
 validateProperName nm
-      | T.null nm = fail  "Empty String cannot be a TyName or ConstructorName"
-      | (isUpper (T.head nm) || T.head nm == '#') && T.all (\c -> isAlphaNum c || c == '_') nm = pure nm
-      | otherwise = fail $ "Could not validate TyName or ConstructorName '" <> T.unpack nm <> "'"
+  | T.null nm = fail "Empty String cannot be a TyName or ConstructorName"
+  | (isUpper (T.head nm) || T.head nm == '#') && T.all (\c -> isAlphaNum c || c == '_') nm = pure nm
+  | otherwise = fail $ "Could not validate TyName or ConstructorName '" <> T.unpack nm <> "'"
 
 {- Encodes as a simple JSON string, e.g.
    ConstructorName "Foo" -> "Foo"
@@ -262,7 +261,7 @@ decodeConstructor = withObject' "Constructor" $ \obj -> do
 encodeDataEncoding :: DataEncoding -> Encoding
 encodeDataEncoding = \case
   SOP -> taggedFields "SOP" []
-  PlutusData strat -> taggedFields "PlutusData" [encodePlutusDataStrategy strat ]
+  PlutusData strat -> taggedFields "PlutusData" [encodePlutusDataStrategy strat]
   BuiltinStrategy internalStrat -> taggedFields "BuiltinStrategy" [encodeInternalStrategy internalStrat]
 
 -- | @since 1.3.0
@@ -315,7 +314,7 @@ decodePlutusDataStrategy =
 
 -}
 encodeInternalStrategy :: InternalStrategy -> Encoding
-encodeInternalStrategy  = encodeEnum
+encodeInternalStrategy = encodeEnum
 
 decodeInternalStrategy :: Value -> ASGParser InternalStrategy
 decodeInternalStrategy =
@@ -561,30 +560,31 @@ decodeValNodeInfo =
   caseOnTag
     [ "LitInternal" :=> withField0 (fmap LitInternal . decodeAConstant),
       "AppInternal"
-        :=> withFields $ \fieldsArr -> do
-              f <- withIndex 0 decodeId fieldsArr
-              args <- withIndex 1 (withArray' "App args" (traverse decodeRef)) fieldsArr
-              pure $ AppInternal f args
-          ,
+        :=> withFields
+        $ \fieldsArr -> do
+          f <- withIndex 0 decodeId fieldsArr
+          args <- withIndex 1 (withArray' "App args" (traverse decodeRef)) fieldsArr
+          pure $ AppInternal f args,
       "ThunkInternal" :=> withField0 (fmap ThunkInternal . decodeId),
       "CataInternal"
-        :=> withFields $ \fieldsArr -> do
-              r1 <- withIndex 0 decodeRef fieldsArr
-              r2 <- withIndex 1 decodeRef fieldsArr
-              pure $ CataInternal r1 r2
-          ,
+        :=> withFields
+        $ \fieldsArr -> do
+          r1 <- withIndex 0 decodeRef fieldsArr
+          r2 <- withIndex 1 decodeRef fieldsArr
+          pure $ CataInternal r1 r2,
       "DataConstructorInternal"
-        :=> withFields $ \fieldsArr -> do
-              tn <- withIndex 0 decodeTyName fieldsArr
-              ctorNm <- withIndex 1 decodeConstructorName fieldsArr
-              args <- withIndex 2 (withArray' "Datatype args" (traverse decodeRef)) fieldsArr
-              pure $ DataConstructorInternal tn ctorNm args
-          ,
+        :=> withFields
+        $ \fieldsArr -> do
+          tn <- withIndex 0 decodeTyName fieldsArr
+          ctorNm <- withIndex 1 decodeConstructorName fieldsArr
+          args <- withIndex 2 (withArray' "Datatype args" (traverse decodeRef)) fieldsArr
+          pure $ DataConstructorInternal tn ctorNm args,
       "MatchInternal"
-        :=> withFields $ \fieldsArr -> do
-              scrut <- withIndex 0 decodeRef fieldsArr
-              args <- withIndex 1 (withArray' "Match branches" (traverse decodeRef)) fieldsArr
-              pure $ MatchInternal scrut args
+        :=> withFields
+        $ \fieldsArr -> do
+          scrut <- withIndex 0 decodeRef fieldsArr
+          args <- withIndex 1 (withArray' "Match branches" (traverse decodeRef)) fieldsArr
+          pure $ MatchInternal scrut args
     ]
 
 {- CompNodeInfo
@@ -906,9 +906,9 @@ decodeValTAbstractTy =
       "ThunkT" :=> withField0 (fmap ThunkT . decodeCompT),
       "BuiltinFlat" :=> withField0 (fmap BuiltinFlat . decodeBuiltinFlatT),
       "Datatype" :=> withFields $ \arr -> do
-              tn <- withIndex 0 decodeTyName arr
-              ctors <- withIndex 1 (withArray' "datatype args" (traverse decodeValTAbstractTy)) arr
-              pure $ Datatype tn ctors
+        tn <- withIndex 0 decodeTyName arr
+        ctors <- withIndex 1 (withArray' "datatype args" (traverse decodeValTAbstractTy)) arr
+        pure $ Datatype tn ctors
     ]
 
 -- Helpers
