@@ -157,15 +157,11 @@ encodeVersion (Version major minor) = pairs ("major" .= major <> "minor" .= mino
 
 -- | @since 1.3.0
 decodeVersion :: Value -> ASGParser Version
-decodeVersion =
-  liftParser
-    . withObject
-      "Version"
-      ( \obj -> do
-          major <- lookupAndParse obj "major" parseJSON
-          minor <- lookupAndParse obj "minor" parseJSON
-          pure $ Version major minor
-      )
+decodeVersion = withObject' "Version" $ \obj -> do
+  major <- withField "major" (liftParser . parseJSON) obj
+  minor <- withField "minor" (liftParser . parseJSON) obj
+  pure $ Version major minor
+
 
 {- DataDeclaration & its components -}
 
@@ -193,7 +189,7 @@ decodeTyName :: Value -> ASGParser TyName
 decodeTyName = liftParser . go
   where
     {- This is annoying. The thing we're getting *might* be an object or it might be a string,
-        and we have to validate the result.
+        and we have to validate the result. Our helpers can't help us much here.
     -}
     go :: Value -> Parser TyName
     go = \case
@@ -208,12 +204,11 @@ decodeTyName = liftParser . go
         Just tn -> TyName <$> (parseJSON tn >>= validateProperName)
       other -> fail $ "Expected a String or Object for TyName, but got: " <> show other
 
--- For type and constructor names
 validateProperName :: Text -> Parser Text
 validateProperName nm
-  | T.null nm = fail $ "Empty String cannot be a TyName"
-  | isUpper (T.head nm) && T.all isAlphaNum nm = pure nm
-  | otherwise = fail $ "Could not validate TyName '" <> T.unpack nm <> "'"
+      | T.null nm = fail  "Empty String cannot be a TyName or ConstructorName"
+      | (isUpper (T.head nm) || T.head nm == '#') && T.all (\c -> isAlphaNum c || c == '_') nm = pure nm
+      | otherwise = fail $ "Could not validate TyName or ConstructorName '" <> T.unpack nm <> "'"
 
 {- Encodes as a simple JSON string, e.g.
    ConstructorName "Foo" -> "Foo"
@@ -228,14 +223,7 @@ encodeConstructorName (ConstructorName cn) = toEncoding cn
 --   2. Consist only of alphanumeric characters and underscores
 -- @since 1.3.0
 decodeConstructorName :: Value -> ASGParser ConstructorName
-decodeConstructorName =
-  liftParser
-    . withText
-      "ConstructorName"
-      ( \nm -> do
-          validated <- validateProperName nm
-          pure . ConstructorName $ validated
-      )
+decodeConstructorName = withText' "ConstructorName" $ fmap ConstructorName . liftParser . validateProperName
 
 {- Encodes as an object. E.g.:
 
@@ -273,17 +261,9 @@ decodeConstructor = withObject' "Constructor" $ \obj -> do
 -- | @since 1.3.0
 encodeDataEncoding :: DataEncoding -> Encoding
 encodeDataEncoding = \case
-  SOP -> pairs ("tag" .= ("SOP" :: String) <> "fields" .= ([] :: [String]))
-  PlutusData strat ->
-    let fields = list encodePlutusDataStrategy [strat]
-     in pairs $
-          "tag" .= ("PlutusData" :: String)
-            <> pair "fields" fields
-  BuiltinStrategy internalStrat ->
-    let fields = list encodeInternalStrategy [internalStrat]
-     in pairs $
-          "tag" .= ("BuiltinStrategy" :: String)
-            <> pair "fields" fields
+  SOP -> taggedFields "SOP" []
+  PlutusData strat -> taggedFields "PlutusData" [encodePlutusDataStrategy strat ]
+  BuiltinStrategy internalStrat -> taggedFields "BuiltinStrategy" [encodeInternalStrategy internalStrat]
 
 -- | @since 1.3.0
 decodeDataEncoding :: Value -> ASGParser DataEncoding
@@ -314,7 +294,7 @@ decodeDataEncoding = withObject' "DataEncoding" go
 
 -- | @since 1.3.0
 encodePlutusDataStrategy :: PlutusDataStrategy -> Encoding
-encodePlutusDataStrategy strat = pairs $ "tag" .= show strat
+encodePlutusDataStrategy = encodeEnum
 
 -- | @since 1.3.0
 decodePlutusDataStrategy :: Value -> ASGParser PlutusDataStrategy
@@ -335,7 +315,7 @@ decodePlutusDataStrategy =
 
 -}
 encodeInternalStrategy :: InternalStrategy -> Encoding
-encodeInternalStrategy strat = pairs $ "tag" .= show strat
+encodeInternalStrategy  = encodeEnum
 
 decodeInternalStrategy :: Value -> ASGParser InternalStrategy
 decodeInternalStrategy =
@@ -358,7 +338,7 @@ decodeInternalStrategy =
 
 -- | @since 1.3.0
 encodePlutusDataConstructor :: PlutusDataConstructor -> Encoding
-encodePlutusDataConstructor pdc = pairs $ "tag" .= show pdc
+encodePlutusDataConstructor = encodeEnum
 
 -- | @since 1.3.0
 decodePlutusDataConstructor :: Value -> ASGParser PlutusDataConstructor
@@ -474,16 +454,8 @@ decodeId = fmap Id . liftParser . parseJSON
 -- | @since 1.3.0
 encodeRef :: Ref -> Encoding
 encodeRef = \case
-  AnArg arg' ->
-    let argEnc = list encodeArg [arg']
-     in pairs $
-          "tag" .= ("AnArg" :: String)
-            <> pair "fields" argEnc
-  AnId i ->
-    let idEnc = list encodeId [i]
-     in pairs $
-          "tag" .= ("AnId" :: String)
-            <> pair "fields" idEnc
+  AnArg arg' -> taggedFields "AnArg" [encodeArg arg']
+  AnId i -> taggedFields "AnId" [encodeId i]
 
 -- | @since 1.3.0
 decodeRef :: Value -> ASGParser Ref
@@ -537,22 +509,10 @@ decodeArg = withObject' "Arg" $ \obj -> do
 encodeAConstant :: AConstant -> Encoding
 encodeAConstant = \case
   AUnit -> pairs $ pair "tag" "AUnit"
-  ABoolean b ->
-    pairs $
-      pair "tag" "ABoolean"
-        <> "fields" .= [b]
-  AnInteger i ->
-    pairs $
-      pair "tag" "AnInteger"
-        <> "fields" .= [i]
-  AByteString bs ->
-    pairs $
-      pair "tag" "AByteString"
-        <> "fields" .= [Hex.encodeHex bs]
-  AString str ->
-    pairs $
-      pair "tag" "AString"
-        <> "fields" .= [str]
+  ABoolean b -> taggedFields "ABoolean" [toEncoding b]
+  AnInteger i -> taggedFields "AnInteger" [toEncoding i]
+  AByteString bs -> taggedFields "AByteString" [toEncoding . Hex.encodeHex $ bs]
+  AString str -> taggedFields "AString" [toEncoding str]
 
 -- | @since 1.3.0
 decodeAConstant :: Value -> ASGParser AConstant
@@ -601,35 +561,30 @@ decodeValNodeInfo =
   caseOnTag
     [ "LitInternal" :=> withField0 (fmap LitInternal . decodeAConstant),
       "AppInternal"
-        :=> withFields
-          ( \fieldsArr -> do
+        :=> withFields $ \fieldsArr -> do
               f <- withIndex 0 decodeId fieldsArr
               args <- withIndex 1 (withArray' "App args" (traverse decodeRef)) fieldsArr
               pure $ AppInternal f args
-          ),
+          ,
       "ThunkInternal" :=> withField0 (fmap ThunkInternal . decodeId),
       "CataInternal"
-        :=> withFields
-          ( \fieldsArr -> do
+        :=> withFields $ \fieldsArr -> do
               r1 <- withIndex 0 decodeRef fieldsArr
               r2 <- withIndex 1 decodeRef fieldsArr
               pure $ CataInternal r1 r2
-          ),
+          ,
       "DataConstructorInternal"
-        :=> withFields
-          ( \fieldsArr -> do
+        :=> withFields $ \fieldsArr -> do
               tn <- withIndex 0 decodeTyName fieldsArr
               ctorNm <- withIndex 1 decodeConstructorName fieldsArr
               args <- withIndex 2 (withArray' "Datatype args" (traverse decodeRef)) fieldsArr
               pure $ DataConstructorInternal tn ctorNm args
-          ),
+          ,
       "MatchInternal"
-        :=> withFields
-          ( \fieldsArr -> do
+        :=> withFields $ \fieldsArr -> do
               scrut <- withIndex 0 decodeRef fieldsArr
               args <- withIndex 1 (withArray' "Match branches" (traverse decodeRef)) fieldsArr
               pure $ MatchInternal scrut args
-          )
     ]
 
 {- CompNodeInfo
@@ -854,14 +809,14 @@ encodeBuiltinFlatT = encodeEnum
 decodeBuiltinFlatT :: Value -> ASGParser BuiltinFlatT
 decodeBuiltinFlatT =
   caseOnTag
-    [ "UnitT" :=> \_ -> pure UnitT,
-      "BoolT" :=> \_ -> pure BoolT,
-      "IntegerT" :=> \_ -> pure IntegerT,
-      "StringT" :=> \_ -> pure StringT,
-      "ByteStringT" :=> \_ -> pure ByteStringT,
-      "BLS12_381_G1_ElementT" :=> \_ -> pure BLS12_381_G1_ElementT,
-      "BLS12_381_G2_ElementT" :=> \_ -> pure BLS12_381_G2_ElementT,
-      "BLS12_381_MlResultT" :=> \_ -> pure BLS12_381_MlResultT
+    [ "UnitT" :=> constM UnitT,
+      "BoolT" :=> constM BoolT,
+      "IntegerT" :=> constM IntegerT,
+      "StringT" :=> constM StringT,
+      "ByteStringT" :=> constM ByteStringT,
+      "BLS12_381_G1_ElementT" :=> constM BLS12_381_G1_ElementT,
+      "BLS12_381_G2_ElementT" :=> constM BLS12_381_G2_ElementT,
+      "BLS12_381_MlResultT" :=> constM BLS12_381_MlResultT
     ]
 
 {- OneArgFunc
@@ -938,13 +893,10 @@ decodeSixArgFunc = error "TODO: Implement decodeSixArgFunc"
 -- | @since 1.3.0
 encodeValTAbstractTy :: ValT AbstractTy -> Encoding
 encodeValTAbstractTy = \case
-  Abstraction x -> pairs $ pair "tag" "Abstraction" <> pair "fields" (list encodeAbstractTy [x])
-  ThunkT compT -> pairs $ pair "tag" "ThunkT" <> pair "fields" (list encodeCompT [compT])
-  BuiltinFlat biFlat -> pairs $ pair "tag" "BuiltinFlat" <> pair "fields" (list encodeBuiltinFlatT [biFlat])
-  Datatype tn args ->
-    pairs $
-      pair "tag" "Datatype"
-        <> pair "fields" (econcat [encodeTyName tn, list encodeValTAbstractTy . toList $ args])
+  Abstraction x -> taggedFields "Abstraction" [encodeAbstractTy x]
+  ThunkT compT -> taggedFields "ThunkT" [encodeCompT compT]
+  BuiltinFlat biFlat -> taggedFields "BuiltinFlat" [encodeBuiltinFlatT biFlat]
+  Datatype tn args -> taggedFields "Datatype" [encodeTyName tn, list encodeValTAbstractTy . toList $ args]
 
 -- | @since 1.3.0
 decodeValTAbstractTy :: Value -> ASGParser (ValT AbstractTy)
@@ -953,13 +905,10 @@ decodeValTAbstractTy =
     [ "Abstraction" :=> withField0 (fmap Abstraction . decodeAbstractTy),
       "ThunkT" :=> withField0 (fmap ThunkT . decodeCompT),
       "BuiltinFlat" :=> withField0 (fmap BuiltinFlat . decodeBuiltinFlatT),
-      "Datatype"
-        :=> withFields
-          ( \arr -> do
+      "Datatype" :=> withFields $ \arr -> do
               tn <- withIndex 0 decodeTyName arr
               ctors <- withIndex 1 (withArray' "datatype args" (traverse decodeValTAbstractTy)) arr
               pure $ Datatype tn ctors
-          )
     ]
 
 -- Helpers
@@ -972,6 +921,8 @@ data (:=>) a b = a :=> b
 
 infixr 0 :=>
 
+-- Simulated pattern matching on the `tag` field of an object. Will throw an error if the
+-- value is not an object. This is a convenience function, and it is *very* convenient.
 caseOnTag :: forall (a :: Type). [Text :=> (Object -> ASGParser a)] -> Value -> ASGParser a
 caseOnTag xs = withObject' "CaseOnTag" go
   where
@@ -983,13 +934,15 @@ caseOnTag xs = withObject' "CaseOnTag" go
         Just f -> f obj
         Nothing -> failParse $ "Expected a tagged object with one of the tags: " <> show (M.keys caseDict) <> " but got " <> show obj
 
+-- Stupid helper to avoid have to type `\_ -> pure x` a million times in `caseOnTag` matches
 constM :: forall (f :: Type -> Type) (a :: Type). (Applicative f) => a -> (forall (b :: Type). b -> f a)
 constM x _ = pure x
 
--- This isn't imported from Aeson.Types.Internal but I need it -_-
+-- This isn't exported from Aeson.Types.Internal but I need it -_-
 prependContext :: forall (a :: Type). String -> Parser a -> Parser a
 prependContext name = prependFailure ("parsing " ++ name ++ " failed, ")
 
+-- Like `withObject` but runs in our parser monad
 withObject' ::
   forall (a :: Type).
   String ->
@@ -999,6 +952,7 @@ withObject' ::
 withObject' _ f (Object obj) = f obj
 withObject' nm _ v = liftParser $ prependContext nm (typeMismatch "Object" v)
 
+-- Like `withArray` but runs in our parser monad
 withArray' ::
   forall (a :: Type).
   String ->
@@ -1008,6 +962,7 @@ withArray' ::
 withArray' _ f (Array arr) = f arr
 withArray' nm _ v = liftParser $ prependContext nm (typeMismatch "Array" v)
 
+-- Like `withText` but runs in our parser monad
 withText' ::
   forall (a :: Type).
   String ->
@@ -1037,31 +992,30 @@ withField k f obj = lookupAndParse' obj k f
 withField0 :: forall (a :: Type). (Value -> ASGParser a) -> Object -> ASGParser a
 withField0 f = withFields (withIndex 0 f)
 
-lookupAndParse :: forall (a :: Type). Object -> Key -> (Value -> Parser a) -> Parser a
-lookupAndParse obj k f = case KM.lookup k obj of
-  Nothing -> fail $ "No key '" <> show k <> "' found in object"
-  Just v -> f v
-
+-- Lookup the key in an object and apply the given monadic function to the value you get.
 lookupAndParse' :: forall (a :: Type). Object -> Key -> (Value -> ASGParser a) -> ASGParser a
 lookupAndParse' obj k f = case KM.lookup k obj of
   Nothing -> failParse $ "No key '" <> show k <> "' found in object"
   Just v -> f v
 
+-- convenience to prevent me having to type 'liftParser . fail' a million times
 failParse :: forall (a :: Type). String -> ASGParser a
 failParse = liftParser . fail
 
+-- NOTE: Must *ONLY* be used on *true* Enums, i.e. sum types with only 0-argument constructors
 encodeEnum :: forall (a :: Type). (Show a) => a -> Encoding
 encodeEnum = pairs . ("tag" .=) . show
 
+-- Checks whether a tyname corresponds to our base functor naming convention
 isBaseFunctor :: TyName -> Bool
 isBaseFunctor (TyName tn) = T.head tn == '#'
 
-tag :: forall (v :: Type). (ToJSON v) => v -> Series
-tag v = "tag" .= v
-
+-- Helper for constructing sum type Encodings.
+-- 'taggedFields "name" [f1,f2,f3]' generates '{tag: "name", fields: [f1,f2,f3]}
 taggedFields :: Text -> [Encoding] -> Encoding
 taggedFields tg fieldArgs = pairs $ "tag" .= tg <> pair "fields" (econcat fieldArgs)
 
+-- Decodes a hex encoded bytestring
 decodeByteStringHex :: Value -> ASGParser ByteString
 decodeByteStringHex = withText' "ByteString (Hex Encoded)" $ \txt -> case Hex.decodeHex txt of
   Nothing -> failParse $ "Failed to decode hex bytestring: " <> show txt
