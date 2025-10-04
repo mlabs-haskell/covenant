@@ -23,28 +23,49 @@
 -- @since 1.3.0
 module Covenant.JSON where
 
+import Control.Monad (foldM, unless, void)
 import Control.Monad.Error.Class (MonadError)
 import Control.Monad.HashCons (HashConsT, MonadHashCons (lookupRef))
+import Control.Monad.Reader (local)
 import Control.Monad.Reader.Class (MonadReader)
 import Control.Monad.Trans (MonadTrans (lift))
 import Control.Monad.Trans.Except (ExceptT)
 import Control.Monad.Trans.Reader (ReaderT)
 import Covenant.ASG
-  ( ASGEnv,
+  ( ASG,
+    ASGBuilder,
+    ASGEnv,
     ASGNode,
     Arg,
     CompNodeInfo,
+    CovenantError,
     Id,
     Ref,
-    ValNodeInfo, ASGBuilder, thunk, lit, err, force,  builtin1, builtin2, builtin3, builtin6, lam, app', cata, match, dataConstructor, CovenantError, ASG, runASGBuilder
+    ValNodeInfo,
+    app',
+    builtin1,
+    builtin2,
+    builtin3,
+    builtin6,
+    cata,
+    dataConstructor,
+    err,
+    force,
+    lam,
+    lit,
+    match,
+    runASGBuilder,
+    thunk,
   )
 import Covenant.Constant (AConstant (ABoolean, AByteString, AString, AUnit, AnInteger))
+import Covenant.Data (BBFError, DatatypeInfo, mkDatatypeInfo, primBaseFunctorInfos)
 import Covenant.DeBruijn (DeBruijn, asInt)
 import Covenant.Index (Count, Index, intCount, intIndex)
+import Covenant.Internal.KindCheck (checkDataDecls)
 import Covenant.Internal.Strategy (InternalStrategy (InternalAssocMapStrat, InternalListStrat, InternalOpaqueStrat, InternalPairStrat))
 import Covenant.Internal.Term (ASGNode (ACompNode, AValNode, AnError), Arg (Arg), CompNodeInfo (Builtin1Internal, Builtin2Internal, Builtin3Internal, Builtin6Internal, ForceInternal, LamInternal), CovenantTypeError, Id (Id), Ref (AnArg, AnId), ValNodeInfo (AppInternal, CataInternal, DataConstructorInternal, LitInternal, MatchInternal, ThunkInternal))
 import Covenant.Internal.Type (AbstractTy (BoundAt), CompT (CompT), CompTBody (CompTBody), ConstructorName (ConstructorName), DataDeclaration (OpaqueData), ValT (BuiltinFlat, ThunkT))
-import Covenant.Prim (OneArgFunc (Sha2_256, LengthOfByteString, Blake2b_256, Sha3_256, DecodeUtf8, EncodeUtf8, FstPair, SndPair, HeadList, TailList, NullList, MapData, ListData, IData, BData, UnConstrData, UnMapData, UnListData, UnBData, UnIData, SerialiseData, BLS12_381_G1_neg, BLS12_381_G1_compress, BLS12_381_G1_uncompress, BLS12_381_G2_neg, BLS12_381_G2_compress, BLS12_381_G2_uncompress, Keccak_256, Blake2b_224, ComplementByteString, CountSetBits, FindFirstSetBit, Ripemd_160), SixArgFunc (ChooseData, CaseData), ThreeArgFunc (VerifyEd25519Signature, VerifyEcdsaSecp256k1Signature, VerifySchnorrSecp256k1Signature, IntegerToByteString, OrByteString, XorByteString, ExpModInteger, WriteBits, AndByteString, ChooseList, IfThenElse, CaseList), TwoArgFunc (AddInteger, SubtractInteger, MultiplyInteger, DivideInteger, QuotientInteger, RemainderInteger, ModInteger, EqualsInteger, LessThanInteger, LessThanEqualsInteger, AppendByteString, ConsByteString, IndexByteString, EqualsByteString, LessThanByteString, LessThanEqualsByteString, AppendString, EqualsString, ChooseUnit, Trace, MkCons, ConstrData, EqualsData, MkPairData, BLS12_381_G1_add, BLS12_381_G1_scalarMul, BLS12_381_G1_equal, BLS12_381_G1_hashToGroup, BLS12_381_G2_add, BLS12_381_G2_scalarMul, BLS12_381_G2_equal, BLS12_381_G2_hashToGroup, BLS12_381_millerLoop, BLS12_381_mulMlResult, BLS12_381_finalVerify, ByteStringToInteger, ReadBit, ReplicateByte, ShiftByteString, RotateByteString))
+import Covenant.Prim (OneArgFunc (BData, BLS12_381_G1_compress, BLS12_381_G1_neg, BLS12_381_G1_uncompress, BLS12_381_G2_compress, BLS12_381_G2_neg, BLS12_381_G2_uncompress, Blake2b_224, Blake2b_256, ComplementByteString, CountSetBits, DecodeUtf8, EncodeUtf8, FindFirstSetBit, FstPair, HeadList, IData, Keccak_256, LengthOfByteString, ListData, MapData, NullList, Ripemd_160, SerialiseData, Sha2_256, Sha3_256, SndPair, TailList, UnBData, UnConstrData, UnIData, UnListData, UnMapData), SixArgFunc (CaseData, ChooseData), ThreeArgFunc (AndByteString, CaseList, ChooseList, ExpModInteger, IfThenElse, IntegerToByteString, OrByteString, VerifyEcdsaSecp256k1Signature, VerifyEd25519Signature, VerifySchnorrSecp256k1Signature, WriteBits, XorByteString), TwoArgFunc (AddInteger, AppendByteString, AppendString, BLS12_381_G1_add, BLS12_381_G1_equal, BLS12_381_G1_hashToGroup, BLS12_381_G1_scalarMul, BLS12_381_G2_add, BLS12_381_G2_equal, BLS12_381_G2_hashToGroup, BLS12_381_G2_scalarMul, BLS12_381_finalVerify, BLS12_381_millerLoop, BLS12_381_mulMlResult, ByteStringToInteger, ChooseUnit, ConsByteString, ConstrData, DivideInteger, EqualsByteString, EqualsData, EqualsInteger, EqualsString, IndexByteString, LessThanByteString, LessThanEqualsByteString, LessThanEqualsInteger, LessThanInteger, MkCons, MkPairData, ModInteger, MultiplyInteger, QuotientInteger, ReadBit, RemainderInteger, ReplicateByte, RotateByteString, ShiftByteString, SubtractInteger, Trace))
 import Covenant.Type
   ( BuiltinFlatT (BLS12_381_G1_ElementT, BLS12_381_G2_ElementT, BLS12_381_MlResultT, BoolT, ByteStringT, IntegerT, StringT, UnitT),
     Constructor (Constructor),
@@ -55,20 +76,21 @@ import Covenant.Type
     TyName (TyName),
     ValT (Abstraction, Datatype),
   )
-import qualified Covenant.Type as Ty
+import Covenant.Type qualified as Ty
 import Data.Aeson
   ( FromJSON (parseJSON),
     ToJSON (toEncoding, toJSON),
     Value,
     (.=),
   )
-import Data.Aeson.Encoding (Encoding, pair, pairs, text, list, int)
+import Data.Aeson.Encoding (Encoding, int, list, pair, pairs, text)
 import Data.Aeson.Encoding.Internal (econcat, (><))
 import Data.Aeson.KeyMap qualified as KM
 import Data.Aeson.Types (Array, Key, Object, Parser, Value (Array, Object, String), prependFailure, typeMismatch)
+import Data.Bifunctor (first)
 import Data.ByteString (ByteString)
 import Data.Char (isAlphaNum, isUpper)
-import Data.Foldable ( foldl', toList, traverse_ )
+import Data.Foldable (foldl', toList, traverse_)
 import Data.Kind (Type)
 import Data.Map (Map)
 import Data.Map qualified as M
@@ -81,11 +103,6 @@ import Data.Vector.NonEmpty qualified as NEV
 import GHC.TypeLits (KnownSymbol, Symbol)
 import Optics.Core (preview, review, set, view)
 import Text.Hex qualified as Hex
-import Covenant.Internal.KindCheck (checkDataDecls)
-import Control.Monad.Reader(local)
-import Control.Monad (void, unless, foldM)
-import Covenant.Data (DatatypeInfo, mkDatatypeInfo, primBaseFunctorInfos, BBFError)
-import Data.Bifunctor (first)
 
 -- | A concrete monadic stack, providing the minimum amount of functionality
 -- needed to build an ASG using the combinators given in this module, plus
@@ -130,45 +147,42 @@ validateCompilationUnit' (CompilationUnit datatypes asg _) = do
   case checkDataDecls tyDict of
     Left kcErr -> error $ "KindCheck error: " <> show kcErr
     Right _ -> do
-      case mkDatatypeInfos tyDict  of
+      case mkDatatypeInfos tyDict of
         Left dtErr -> error $ "DatatypeInfo error: " <> show dtErr
         Right infos -> local (set #datatypeInfo infos) $ traverse_ go (M.toList asg)
   where
-    mkDatatypeInfos :: Map TyName (DataDeclaration AbstractTy)
-                    -> Either BBFError (Map TyName (DatatypeInfo AbstractTy))
-    mkDatatypeInfos
-      = foldl' (\acc decl -> (<>) <$> mkDatatypeInfo decl <*> acc) (Right primBaseFunctorInfos)
+    mkDatatypeInfos ::
+      Map TyName (DataDeclaration AbstractTy) ->
+      Either BBFError (Map TyName (DatatypeInfo AbstractTy))
+    mkDatatypeInfos =
+      foldl' (\acc decl -> (<>) <$> mkDatatypeInfo decl <*> acc) (Right primBaseFunctorInfos)
 
     go :: (Id, ASGNode) -> ASGBuilder ()
-    go (parsedId,parsedNode) = case parsedNode  of
+    go (parsedId, parsedNode) = case parsedNode of
       ACompNode compT compInfo -> case compInfo of
-         Builtin1Internal bi1 -> checkNode "builtin1" (builtin1 bi1)
-         Builtin2Internal bi2 -> checkNode "builtin2" (builtin2 bi2)
-         Builtin3Internal bi3 -> checkNode "builtin3" (builtin3 bi3)
-         Builtin6Internal bi6 -> checkNode "builtin6" (builtin6 bi6)
-         LamInternal bodyRef -> checkNode "lam" $ lam compT (pure bodyRef)
-         ForceInternal ref -> checkNode "force" $ force ref
-
+        Builtin1Internal bi1 -> checkNode "builtin1" (builtin1 bi1)
+        Builtin2Internal bi2 -> checkNode "builtin2" (builtin2 bi2)
+        Builtin3Internal bi3 -> checkNode "builtin3" (builtin3 bi3)
+        Builtin6Internal bi6 -> checkNode "builtin6" (builtin6 bi6)
+        LamInternal bodyRef -> checkNode "lam" $ lam compT (pure bodyRef)
+        ForceInternal ref -> checkNode "force" $ force ref
       AValNode _ valInfo -> case valInfo of
-         LitInternal aConstant -> checkNode "Lit" (lit aConstant)
-         AppInternal fId argRefs -> checkNode "App" (app' fId argRefs)
-         ThunkInternal i -> checkNode "Thunk" (thunk i)
-         CataInternal r1 r2 -> checkNode "Cata" (cata r1 r2)
-         DataConstructorInternal tn cn args -> checkNode "DataConstructor" (dataConstructor tn cn args)
-         MatchInternal scrut matcharms -> checkNode "Match" (match scrut matcharms)
-
-      AnError -> checkNode "errorNode" err 
-     where
-       checkNode :: String -> ASGBuilder Id -> ASGBuilder ()
-       checkNode msg constructedId = do
-         xid <- constructedId
-         unless (parsedId == xid) $ error $ msg <> " id mismatch"
-         lookupRef xid >>= \case
-           Nothing -> error $ msg <> " node not found"
-           Just asgNode ->
-             unless (asgNode == parsedNode) $ error $ msg <> " unexpected node"
-
-
+        LitInternal aConstant -> checkNode "Lit" (lit aConstant)
+        AppInternal fId argRefs -> checkNode "App" (app' fId argRefs)
+        ThunkInternal i -> checkNode "Thunk" (thunk i)
+        CataInternal r1 r2 -> checkNode "Cata" (cata r1 r2)
+        DataConstructorInternal tn cn args -> checkNode "DataConstructor" (dataConstructor tn cn args)
+        MatchInternal scrut matcharms -> checkNode "Match" (match scrut matcharms)
+      AnError -> checkNode "errorNode" err
+      where
+        checkNode :: String -> ASGBuilder Id -> ASGBuilder ()
+        checkNode msg constructedId = do
+          xid <- constructedId
+          unless (parsedId == xid) $ error $ msg <> " id mismatch"
+          lookupRef xid >>= \case
+            Nothing -> error $ msg <> " node not found"
+            Just asgNode ->
+              unless (asgNode == parsedNode) $ error $ msg <> " unexpected node"
 
 {- CompilationUnit
 
@@ -181,11 +195,11 @@ validateCompilationUnit' (CompilationUnit datatypes asg _) = do
 -}
 
 encodeCompilationUnit :: CompilationUnit -> Encoding
-encodeCompilationUnit (CompilationUnit datatypes asg version)
- = pairs $
+encodeCompilationUnit (CompilationUnit datatypes asg version) =
+  pairs $
     pair "datatypes" (list encodeDataDeclarationAbstractTy datatypes)
-    <> pair "asg" (encodeMap encodeId encodeASGNode asg)
-    <> pair "version" (encodeVersion version)
+      <> pair "asg" (encodeMap encodeId encodeASGNode asg)
+      <> pair "version" (encodeVersion version)
 
 instance FromJSON CompilationUnit where
   parseJSON = error "TODO: Implement fromEncoding for CompilationUnit"
@@ -225,9 +239,9 @@ encodeTyName :: TyName -> Encoding
 encodeTyName (TyName tn) = case T.stripPrefix "#" tn of
   Nothing -> pairs ("tyName" .= tn)
   Just rootTypeName -> case rootTypeName of
-      "#Natural" -> text "NaturalBF"
-      "#Negative" -> text "NegativeBF"
-      other -> pairs ("baseFunctorOf" .= other)
+    "#Natural" -> text "NaturalBF"
+    "#Negative" -> text "NegativeBF"
+    other -> pairs ("baseFunctorOf" .= other)
 
 -- | The type name must conform with the type naming rules, i.e. it must
 --   1. Begin with a capital letter
@@ -726,7 +740,7 @@ decodeDeBruijn v = do
   vRaw <- liftParser $ parseJSON @Int v
   if vRaw < 0
     then failParse "Negative DeBruijn"
-    else  pure . fromJust . preview asInt $ vRaw
+    else pure . fromJust . preview asInt $ vRaw
 
 {- AbstractTy
 
@@ -772,7 +786,7 @@ decodeCount v = do
   vRaw <- liftParser $ parseJSON @Int v
   if vRaw < 0
     then failParse "Negative Count"
-    else  pure . fromJust . preview intCount $ vRaw
+    else pure . fromJust . preview intCount $ vRaw
 
 {- Index
 
@@ -840,7 +854,7 @@ decodeCompTBody :: Value -> ASGParser (CompTBody AbstractTy)
 decodeCompTBody = withArray' "CompTBody" $ \arr -> do
   decodedBody <- NEV.fromVector <$> traverse decodeValTAbstractTy arr
   case decodedBody of
-    Nothing ->  failParse "Empty vector of types in a CompTBody"
+    Nothing -> failParse "Empty vector of types in a CompTBody"
     Just res -> pure . CompTBody $ res
 
 {- BuiltinFlatT
@@ -889,42 +903,42 @@ encodeOneArgFunc = encodeEnum
 
 -- | @since 1.3.0
 decodeOneArgFunc :: Value -> ASGParser OneArgFunc
-decodeOneArgFunc
-  = caseOnTag
-        ["LengthOfByteString" :=> constM LengthOfByteString,
-          "Sha2_256" :=> constM Sha2_256,
-          "Sha3_256" :=> constM Sha3_256,
-          "Blake2b_256" :=> constM Blake2b_256,
-          "EncodeUtf8" :=> constM EncodeUtf8,
-          "DecodeUtf8" :=> constM DecodeUtf8,
-          "FstPair" :=> constM FstPair,
-          "SndPair" :=> constM SndPair,
-          "HeadList" :=> constM HeadList,
-          "TailList" :=> constM TailList,
-          "NullList" :=> constM NullList,
-          "MapData" :=> constM MapData,
-          "ListData" :=> constM ListData,
-          "IData" :=> constM IData,
-          "BData" :=> constM BData,
-          "UnConstrData" :=> constM UnConstrData,
-          "UnMapData" :=> constM UnMapData,
-          "UnListData" :=> constM UnListData,
-          "UnIData" :=> constM UnIData,
-          "UnBData" :=> constM UnBData,
-          "SerialiseData" :=> constM SerialiseData,
-          "BLS12_381_G1_neg" :=> constM BLS12_381_G1_neg,
-          "BLS12_381_G1_compress" :=> constM BLS12_381_G1_compress,
-          "BLS12_381_G1_uncompress" :=> constM BLS12_381_G1_uncompress,
-          "BLS12_381_G2_neg" :=> constM BLS12_381_G2_neg,
-          "BLS12_381_G2_compress" :=> constM BLS12_381_G2_compress,
-          "BLS12_381_G2_uncompress" :=> constM BLS12_381_G2_uncompress,
-          "Keccak_256" :=> constM Keccak_256,
-          "Blake2b_224" :=> constM Blake2b_224,
-          "ComplementByteString" :=> constM ComplementByteString,
-          "CountSetBits" :=> constM CountSetBits,
-          "FindFirstSetBit" :=> constM FindFirstSetBit,
-          "Ripemd_160" :=> constM Ripemd_160
-        ]
+decodeOneArgFunc =
+  caseOnTag
+    [ "LengthOfByteString" :=> constM LengthOfByteString,
+      "Sha2_256" :=> constM Sha2_256,
+      "Sha3_256" :=> constM Sha3_256,
+      "Blake2b_256" :=> constM Blake2b_256,
+      "EncodeUtf8" :=> constM EncodeUtf8,
+      "DecodeUtf8" :=> constM DecodeUtf8,
+      "FstPair" :=> constM FstPair,
+      "SndPair" :=> constM SndPair,
+      "HeadList" :=> constM HeadList,
+      "TailList" :=> constM TailList,
+      "NullList" :=> constM NullList,
+      "MapData" :=> constM MapData,
+      "ListData" :=> constM ListData,
+      "IData" :=> constM IData,
+      "BData" :=> constM BData,
+      "UnConstrData" :=> constM UnConstrData,
+      "UnMapData" :=> constM UnMapData,
+      "UnListData" :=> constM UnListData,
+      "UnIData" :=> constM UnIData,
+      "UnBData" :=> constM UnBData,
+      "SerialiseData" :=> constM SerialiseData,
+      "BLS12_381_G1_neg" :=> constM BLS12_381_G1_neg,
+      "BLS12_381_G1_compress" :=> constM BLS12_381_G1_compress,
+      "BLS12_381_G1_uncompress" :=> constM BLS12_381_G1_uncompress,
+      "BLS12_381_G2_neg" :=> constM BLS12_381_G2_neg,
+      "BLS12_381_G2_compress" :=> constM BLS12_381_G2_compress,
+      "BLS12_381_G2_uncompress" :=> constM BLS12_381_G2_uncompress,
+      "Keccak_256" :=> constM Keccak_256,
+      "Blake2b_224" :=> constM Blake2b_224,
+      "ComplementByteString" :=> constM ComplementByteString,
+      "CountSetBits" :=> constM CountSetBits,
+      "FindFirstSetBit" :=> constM FindFirstSetBit,
+      "Ripemd_160" :=> constM Ripemd_160
+    ]
 
 {- TwoArgFunc
 
@@ -939,49 +953,49 @@ encodeTwoArgFunc = encodeEnum
 
 -- | @since 1.3.0
 decodeTwoArgFunc :: Value -> ASGParser TwoArgFunc
-decodeTwoArgFunc
-  = caseOnTag
-        ["AddInteger" :=> constM AddInteger,
-          "SubtractInteger" :=> constM SubtractInteger,
-          "MultiplyInteger" :=> constM MultiplyInteger,
-          "DivideInteger" :=> constM DivideInteger,
-          "QuotientInteger" :=> constM QuotientInteger,
-          "RemainderInteger" :=> constM RemainderInteger,
-          "ModInteger" :=> constM ModInteger,
-          "EqualsInteger" :=> constM EqualsInteger,
-          "LessThanInteger" :=> constM LessThanInteger,
-          "LessThanEqualsInteger" :=> constM LessThanEqualsInteger,
-          "AppendByteString" :=> constM AppendByteString,
-          "ConsByteString" :=> constM ConsByteString,
-          "IndexByteString" :=> constM IndexByteString,
-          "EqualsByteString" :=> constM EqualsByteString,
-          "LessThanByteString" :=> constM LessThanByteString,
-          "LessThanEqualsByteString" :=> constM LessThanEqualsByteString,
-          "AppendString" :=> constM AppendString,
-          "EqualsString" :=> constM EqualsString,
-          "ChooseUnit" :=> constM ChooseUnit,
-          "Trace" :=> constM Trace,
-          "MkCons" :=> constM MkCons,
-          "ConstrData" :=> constM ConstrData,
-          "EqualsData" :=> constM EqualsData,
-          "MkPairData" :=> constM MkPairData,
-          "BLS12_381_G1_add" :=> constM BLS12_381_G1_add,
-          "BLS12_381_G1_scalarMul" :=> constM BLS12_381_G1_scalarMul,
-          "BLS12_381_G1_equal" :=> constM BLS12_381_G1_equal,
-          "BLS12_381_G1_hashToGroup" :=> constM BLS12_381_G1_hashToGroup,
-          "BLS12_381_G2_add" :=> constM BLS12_381_G2_add,
-          "BLS12_381_G2_scalarMul" :=> constM BLS12_381_G2_scalarMul,
-          "BLS12_381_G2_equal" :=> constM BLS12_381_G2_equal,
-          "BLS12_381_G2_hashToGroup" :=> constM BLS12_381_G2_hashToGroup,
-          "BLS12_381_millerLoop" :=> constM BLS12_381_millerLoop,
-          "BLS12_381_mulMlResult" :=> constM BLS12_381_mulMlResult,
-          "BLS12_381_finalVerify" :=> constM BLS12_381_finalVerify,
-          "ByteStringToInteger" :=> constM ByteStringToInteger,
-          "ReadBit" :=> constM ReadBit,
-          "ReplicateByte" :=> constM ReplicateByte,
-          "ShiftByteString" :=> constM ShiftByteString,
-          "RotateByteString" :=> constM RotateByteString
-        ]
+decodeTwoArgFunc =
+  caseOnTag
+    [ "AddInteger" :=> constM AddInteger,
+      "SubtractInteger" :=> constM SubtractInteger,
+      "MultiplyInteger" :=> constM MultiplyInteger,
+      "DivideInteger" :=> constM DivideInteger,
+      "QuotientInteger" :=> constM QuotientInteger,
+      "RemainderInteger" :=> constM RemainderInteger,
+      "ModInteger" :=> constM ModInteger,
+      "EqualsInteger" :=> constM EqualsInteger,
+      "LessThanInteger" :=> constM LessThanInteger,
+      "LessThanEqualsInteger" :=> constM LessThanEqualsInteger,
+      "AppendByteString" :=> constM AppendByteString,
+      "ConsByteString" :=> constM ConsByteString,
+      "IndexByteString" :=> constM IndexByteString,
+      "EqualsByteString" :=> constM EqualsByteString,
+      "LessThanByteString" :=> constM LessThanByteString,
+      "LessThanEqualsByteString" :=> constM LessThanEqualsByteString,
+      "AppendString" :=> constM AppendString,
+      "EqualsString" :=> constM EqualsString,
+      "ChooseUnit" :=> constM ChooseUnit,
+      "Trace" :=> constM Trace,
+      "MkCons" :=> constM MkCons,
+      "ConstrData" :=> constM ConstrData,
+      "EqualsData" :=> constM EqualsData,
+      "MkPairData" :=> constM MkPairData,
+      "BLS12_381_G1_add" :=> constM BLS12_381_G1_add,
+      "BLS12_381_G1_scalarMul" :=> constM BLS12_381_G1_scalarMul,
+      "BLS12_381_G1_equal" :=> constM BLS12_381_G1_equal,
+      "BLS12_381_G1_hashToGroup" :=> constM BLS12_381_G1_hashToGroup,
+      "BLS12_381_G2_add" :=> constM BLS12_381_G2_add,
+      "BLS12_381_G2_scalarMul" :=> constM BLS12_381_G2_scalarMul,
+      "BLS12_381_G2_equal" :=> constM BLS12_381_G2_equal,
+      "BLS12_381_G2_hashToGroup" :=> constM BLS12_381_G2_hashToGroup,
+      "BLS12_381_millerLoop" :=> constM BLS12_381_millerLoop,
+      "BLS12_381_mulMlResult" :=> constM BLS12_381_mulMlResult,
+      "BLS12_381_finalVerify" :=> constM BLS12_381_finalVerify,
+      "ByteStringToInteger" :=> constM ByteStringToInteger,
+      "ReadBit" :=> constM ReadBit,
+      "ReplicateByte" :=> constM ReplicateByte,
+      "ShiftByteString" :=> constM ShiftByteString,
+      "RotateByteString" :=> constM RotateByteString
+    ]
 
 {- ThreeArgFunc
 
@@ -996,20 +1010,21 @@ encodeThreeArgFunc = encodeEnum
 
 -- | @since 1.3.0
 decodeThreeArgFunc :: Value -> ASGParser ThreeArgFunc
-decodeThreeArgFunc
-  = caseOnTag [ "VerifyEd25519Signature" :=> constM VerifyEd25519Signature
-              , "VerifyEcdsaSecp256k1Signature" :=> constM VerifyEcdsaSecp256k1Signature
-              , "VerifySchnorrSecp256k1Signature" :=> constM VerifySchnorrSecp256k1Signature
-              , "IfThenElse" :=> constM IfThenElse
-              , "ChooseList" :=> constM ChooseList
-              , "CaseList" :=> constM CaseList
-              , "IntegerToByteString" :=> constM IntegerToByteString
-              , "AndByteString" :=> constM AndByteString
-              , "OrByteString" :=> constM OrByteString
-              , "XorByteString" :=> constM XorByteString
-              , "WriteBits" :=> constM WriteBits
-              , "ExpModInteger" :=> constM ExpModInteger
-              ]
+decodeThreeArgFunc =
+  caseOnTag
+    [ "VerifyEd25519Signature" :=> constM VerifyEd25519Signature,
+      "VerifyEcdsaSecp256k1Signature" :=> constM VerifyEcdsaSecp256k1Signature,
+      "VerifySchnorrSecp256k1Signature" :=> constM VerifySchnorrSecp256k1Signature,
+      "IfThenElse" :=> constM IfThenElse,
+      "ChooseList" :=> constM ChooseList,
+      "CaseList" :=> constM CaseList,
+      "IntegerToByteString" :=> constM IntegerToByteString,
+      "AndByteString" :=> constM AndByteString,
+      "OrByteString" :=> constM OrByteString,
+      "XorByteString" :=> constM XorByteString,
+      "WriteBits" :=> constM WriteBits,
+      "ExpModInteger" :=> constM ExpModInteger
+    ]
 
 {- SixArgFunc
 
@@ -1024,10 +1039,11 @@ encodeSixArgFunc = encodeEnum
 
 -- | @since 1.3.0
 decodeSixArgFunc :: Value -> ASGParser SixArgFunc
-decodeSixArgFunc
-  = caseOnTag [ "ChooseData" :=> constM ChooseData
-              , "CaseData" :=> constM CaseData
-              ]
+decodeSixArgFunc =
+  caseOnTag
+    [ "ChooseData" :=> constM ChooseData,
+      "CaseData" :=> constM CaseData
+    ]
 
 {- ValT
 
@@ -1064,23 +1080,32 @@ decodeValTAbstractTy =
 -- Helpers
 
 encodeMap :: forall k v. (k -> Encoding) -> (v -> Encoding) -> Map k v -> Encoding
-encodeMap fk fv m = list id $ M.foldlWithKey' (\acc k v ->
-                    let entry = pairs $ pair "key" (fk k) <> pair "value" (fv v)
-                    in entry : acc
-                  ) [] m
+encodeMap fk fv m =
+  list id $
+    M.foldlWithKey'
+      ( \acc k v ->
+          let entry = pairs $ pair "key" (fk k) <> pair "value" (fv v)
+           in entry : acc
+      )
+      []
+      m
 
-decodeMapM :: forall k v
-            . (Ord k)
-           => (Value -> ASGParser k)
-           -> (Value -> ASGParser v)
-           -> Value
-           -> ASGParser (Map k v)
+decodeMapM ::
+  forall k v.
+  (Ord k) =>
+  (Value -> ASGParser k) ->
+  (Value -> ASGParser v) ->
+  Value ->
+  ASGParser (Map k v)
 decodeMapM fk fv = withArray' "Map" $ \arr ->
-  foldM (\acc x -> flip (withObject' "kvPair") x $ \obj -> do
-            kfield <- lookupAndParse' obj "key" fk
-            vfield <- lookupAndParse' obj "value" fv
-            pure $ M.insert kfield vfield acc
-           ) M.empty arr
+  foldM
+    ( \acc x -> flip (withObject' "kvPair") x $ \obj -> do
+        kfield <- lookupAndParse' obj "key" fk
+        vfield <- lookupAndParse' obj "value" fv
+        pure $ M.insert kfield vfield acc
+    )
+    M.empty
+    arr
 
 liftParser :: forall (a :: Type). Parser a -> ASGParser a
 liftParser = ASGParser . lift . lift . lift
@@ -1141,12 +1166,16 @@ withText' ::
 withText' _ f (String str) = f str
 withText' nm _ v = liftParser $ prependContext nm (typeMismatch "Text" v)
 
-guardArrLen :: Int -> Array ->  ASGParser ()
+guardArrLen :: Int -> Array -> ASGParser ()
 guardArrLen expectedLen arr
   | Vector.length arr == expectedLen = pure ()
-  | otherwise = failParse $ "Expected an array with " <> show expectedLen
-                            <> " elements, but got one with " <> show (Vector.length arr)
-                            <> " elements"
+  | otherwise =
+      failParse $
+        "Expected an array with "
+          <> show expectedLen
+          <> " elements, but got one with "
+          <> show (Vector.length arr)
+          <> " elements"
 
 -- Do something with the array at the tag "fields" in an object. Convenience helper.
 withFields :: forall (a :: Type). (Array -> ASGParser a) -> Object -> ASGParser a
