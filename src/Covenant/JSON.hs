@@ -24,7 +24,7 @@
 module Covenant.JSON where
 
 import Control.Monad.Error.Class (MonadError)
-import Control.Monad.HashCons (HashConsT, MonadHashCons)
+import Control.Monad.HashCons (HashConsT, MonadHashCons (lookupRef))
 import Control.Monad.Reader.Class (MonadReader)
 import Control.Monad.Trans (MonadTrans (lift))
 import Control.Monad.Trans.Except (ExceptT)
@@ -36,60 +36,56 @@ import Covenant.ASG
     CompNodeInfo,
     Id,
     Ref,
-    ValNodeInfo,
+    ValNodeInfo, ASGBuilder, thunk, lit, err, force,  builtin1, builtin2, builtin3, builtin6, lam, app', cata, match, dataConstructor, CovenantError, ASG, runASGBuilder
   )
 import Covenant.Constant (AConstant (ABoolean, AByteString, AString, AUnit, AnInteger))
 import Covenant.DeBruijn (DeBruijn, asInt)
 import Covenant.Index (Count, Index, intCount, intIndex)
 import Covenant.Internal.Strategy (InternalStrategy (InternalAssocMapStrat, InternalListStrat, InternalOpaqueStrat, InternalPairStrat))
-import Covenant.Internal.Term (ASGNode (ACompNode, AValNode, AnError), Arg (..), CompNodeInfo (Builtin1Internal, Builtin2Internal, Builtin3Internal, Builtin6Internal, ForceInternal, LamInternal), CovenantTypeError, Id (Id), Ref (AnArg, AnId), ValNodeInfo (AppInternal, CataInternal, DataConstructorInternal, LitInternal, MatchInternal, ThunkInternal))
+import Covenant.Internal.Term (ASGNode (ACompNode, AValNode, AnError), Arg (Arg), CompNodeInfo (Builtin1Internal, Builtin2Internal, Builtin3Internal, Builtin6Internal, ForceInternal, LamInternal), CovenantTypeError, Id (Id), Ref (AnArg, AnId), ValNodeInfo (AppInternal, CataInternal, DataConstructorInternal, LitInternal, MatchInternal, ThunkInternal))
 import Covenant.Internal.Type (AbstractTy (BoundAt), CompT (CompT), CompTBody (CompTBody), ConstructorName (ConstructorName), DataDeclaration (OpaqueData), ValT (BuiltinFlat, ThunkT))
-import Covenant.Prim (OneArgFunc, SixArgFunc, ThreeArgFunc, TwoArgFunc)
+import Covenant.Prim (OneArgFunc (Sha2_256, LengthOfByteString, Blake2b_256, Sha3_256, DecodeUtf8, EncodeUtf8, FstPair, SndPair, HeadList, TailList, NullList, MapData, ListData, IData, BData, UnConstrData, UnMapData, UnListData, UnBData, UnIData, SerialiseData, BLS12_381_G1_neg, BLS12_381_G1_compress, BLS12_381_G1_uncompress, BLS12_381_G2_neg, BLS12_381_G2_compress, BLS12_381_G2_uncompress, Keccak_256, Blake2b_224, ComplementByteString, CountSetBits, FindFirstSetBit, Ripemd_160), SixArgFunc (ChooseData, CaseData), ThreeArgFunc (VerifyEd25519Signature, VerifyEcdsaSecp256k1Signature, VerifySchnorrSecp256k1Signature, IntegerToByteString, OrByteString, XorByteString, ExpModInteger, WriteBits, AndByteString, ChooseList, IfThenElse, CaseList), TwoArgFunc (AddInteger, SubtractInteger, MultiplyInteger, DivideInteger, QuotientInteger, RemainderInteger, ModInteger, EqualsInteger, LessThanInteger, LessThanEqualsInteger, AppendByteString, ConsByteString, IndexByteString, EqualsByteString, LessThanByteString, LessThanEqualsByteString, AppendString, EqualsString, ChooseUnit, Trace, MkCons, ConstrData, EqualsData, MkPairData, BLS12_381_G1_add, BLS12_381_G1_scalarMul, BLS12_381_G1_equal, BLS12_381_G1_hashToGroup, BLS12_381_G2_add, BLS12_381_G2_scalarMul, BLS12_381_G2_equal, BLS12_381_G2_hashToGroup, BLS12_381_millerLoop, BLS12_381_mulMlResult, BLS12_381_finalVerify, ByteStringToInteger, ReadBit, ReplicateByte, ShiftByteString, RotateByteString))
 import Covenant.Type
-  ( AbstractTy,
-    BuiltinFlatT (BLS12_381_G1_ElementT, BLS12_381_G2_ElementT, BLS12_381_MlResultT, BoolT, ByteStringT, IntegerT, StringT, UnitT),
-    CompT,
-    CompTBody,
+  ( BuiltinFlatT (BLS12_381_G1_ElementT, BLS12_381_G2_ElementT, BLS12_381_MlResultT, BoolT, ByteStringT, IntegerT, StringT, UnitT),
     Constructor (Constructor),
-    ConstructorName,
     DataDeclaration (DataDeclaration),
     DataEncoding (BuiltinStrategy, PlutusData, SOP),
     PlutusDataConstructor (PlutusB, PlutusConstr, PlutusI, PlutusList, PlutusMap),
-    PlutusDataStrategy (ConstrData, EnumData, NewtypeData, ProductListData),
+    PlutusDataStrategy (EnumData, NewtypeData, ProductListData),
     TyName (TyName),
     ValT (Abstraction, Datatype),
   )
+import qualified Covenant.Type as Ty
 import Data.Aeson
-  ( Encoding,
-    FromJSON (parseJSON),
-    KeyValue,
+  ( FromJSON (parseJSON),
     ToJSON (toEncoding, toJSON),
     Value,
-    fromJSON,
     (.=),
   )
-import Data.Aeson.Encoding
-import Data.Aeson.Encoding.Internal (econcat)
+import Data.Aeson.Encoding (Encoding, pair, pairs, text, list, int)
+import Data.Aeson.Encoding.Internal (econcat, (><))
 import Data.Aeson.KeyMap qualified as KM
-import Data.Aeson.Types (Array, Key, Object, Parser, Value (Array, Object, String), prependFailure, toJSON1, typeMismatch, withArray, withObject, withText)
+import Data.Aeson.Types (Array, Key, Object, Parser, Value (Array, Object, String), prependFailure, typeMismatch)
 import Data.ByteString (ByteString)
 import Data.Char (isAlphaNum, isUpper)
-import Data.Foldable (foldl', toList)
+import Data.Foldable ( foldl', toList, traverse_ )
 import Data.Kind (Type)
-import Data.List.NonEmpty (NonEmpty ((:|)))
 import Data.Map (Map)
 import Data.Map qualified as M
 import Data.Maybe (fromJust)
 import Data.Set qualified as S
 import Data.Text (Text)
 import Data.Text qualified as T
-import Data.Vector (Vector)
 import Data.Vector qualified as Vector
 import Data.Vector.NonEmpty qualified as NEV
-import Data.Word (Word32)
 import GHC.TypeLits (KnownSymbol, Symbol)
-import Optics.Core (preview, review)
+import Optics.Core (preview, review, set, view)
 import Text.Hex qualified as Hex
+import Covenant.Internal.KindCheck (checkDataDecls)
+import Control.Monad.Reader(local)
+import Control.Monad (void, unless, foldM)
+import Covenant.Data (DatatypeInfo, mkDatatypeInfo, primBaseFunctorInfos, BBFError)
+import Data.Bifunctor (first)
 
 -- | A concrete monadic stack, providing the minimum amount of functionality
 -- needed to build an ASG using the combinators given in this module, plus
@@ -118,11 +114,61 @@ data Version = Version {_major :: Int, _minor :: Int}
 
 data CompilationUnit
   = CompilationUnit
-  { _datatypes :: Map TyName (DataDeclaration AbstractTy),
+  { _datatypes :: [DataDeclaration AbstractTy],
     _asg :: Map Id ASGNode,
     _version :: Version
   }
   deriving stock (Show, Eq)
+
+-- NOTE: We run w/ an empty map because the declarations get inserted after they are kindchecked
+validateCompilationUnit :: CompilationUnit -> Either CovenantError ASG
+validateCompilationUnit = runASGBuilder M.empty . validateCompilationUnit'
+
+validateCompilationUnit' :: CompilationUnit -> ASGBuilder ()
+validateCompilationUnit' (CompilationUnit datatypes asg _) = do
+  let tyDict = foldl' (\acc x -> M.insert (view #datatypeName x) x acc) M.empty datatypes
+  case checkDataDecls tyDict of
+    Left kcErr -> error $ "KindCheck error: " <> show kcErr
+    Right _ -> do
+      case mkDatatypeInfos tyDict  of
+        Left dtErr -> error $ "DatatypeInfo error: " <> show dtErr
+        Right infos -> local (set #datatypeInfo infos) $ traverse_ go (M.toList asg)
+  where
+    mkDatatypeInfos :: Map TyName (DataDeclaration AbstractTy)
+                    -> Either BBFError (Map TyName (DatatypeInfo AbstractTy))
+    mkDatatypeInfos
+      = foldl' (\acc decl -> (<>) <$> mkDatatypeInfo decl <*> acc) (Right primBaseFunctorInfos)
+
+    go :: (Id, ASGNode) -> ASGBuilder ()
+    go (parsedId,parsedNode) = case parsedNode  of
+      ACompNode compT compInfo -> case compInfo of
+         Builtin1Internal bi1 -> checkNode "builtin1" (builtin1 bi1)
+         Builtin2Internal bi2 -> checkNode "builtin2" (builtin2 bi2)
+         Builtin3Internal bi3 -> checkNode "builtin3" (builtin3 bi3)
+         Builtin6Internal bi6 -> checkNode "builtin6" (builtin6 bi6)
+         LamInternal bodyRef -> checkNode "lam" $ lam compT (pure bodyRef)
+         ForceInternal ref -> checkNode "force" $ force ref
+
+      AValNode _ valInfo -> case valInfo of
+         LitInternal aConstant -> checkNode "Lit" (lit aConstant)
+         AppInternal fId argRefs -> checkNode "App" (app' fId argRefs)
+         ThunkInternal i -> checkNode "Thunk" (thunk i)
+         CataInternal r1 r2 -> checkNode "Cata" (cata r1 r2)
+         DataConstructorInternal tn cn args -> checkNode "DataConstructor" (dataConstructor tn cn args)
+         MatchInternal scrut matcharms -> checkNode "Match" (match scrut matcharms)
+
+      AnError -> checkNode "errorNode" err 
+     where
+       checkNode :: String -> ASGBuilder Id -> ASGBuilder ()
+       checkNode msg constructedId = do
+         xid <- constructedId
+         unless (parsedId == xid) $ error $ msg <> " id mismatch"
+         lookupRef xid >>= \case
+           Nothing -> error $ msg <> " node not found"
+           Just asgNode ->
+             unless (asgNode == parsedNode) $ error $ msg <> " unexpected node"
+
+
 
 {- CompilationUnit
 
@@ -134,9 +180,12 @@ data CompilationUnit
    }
 -}
 
-instance ToJSON CompilationUnit where
-  toEncoding = error "TODO: Implement toEncoding for CompilationUnit"
-  toJSON = error "TODO: Implement toJSON for CompilationUnit"
+encodeCompilationUnit :: CompilationUnit -> Encoding
+encodeCompilationUnit (CompilationUnit datatypes asg version)
+ = pairs $
+    pair "datatypes" (list encodeDataDeclarationAbstractTy datatypes)
+    <> pair "asg" (encodeMap encodeId encodeASGNode asg)
+    <> pair "version" (encodeVersion version)
 
 instance FromJSON CompilationUnit where
   parseJSON = error "TODO: Implement fromEncoding for CompilationUnit"
@@ -173,12 +222,12 @@ decodeVersion = withObject' "Version" $ \obj -> do
 
 -- | @since 1.3.0
 encodeTyName :: TyName -> Encoding
-encodeTyName t@(TyName tn)
-  | isBaseFunctor t = case tn of
-      "#Natural" -> "NaturalBF"
-      "#Negative" -> "NegativeBF"
-      _ -> pairs ("baseFunctorOf" .= T.drop 1 tn)
-  | otherwise = pairs ("tyName" .= tn)
+encodeTyName (TyName tn) = case T.stripPrefix "#" tn of
+  Nothing -> pairs ("tyName" .= tn)
+  Just rootTypeName -> case rootTypeName of
+      "#Natural" -> text "NaturalBF"
+      "#Negative" -> text "NegativeBF"
+      other -> pairs ("baseFunctorOf" .= other)
 
 -- | The type name must conform with the type naming rules, i.e. it must
 --   1. Begin with a capital letter
@@ -301,7 +350,7 @@ decodePlutusDataStrategy =
   caseOnTag
     [ "EnumData" :=> constM EnumData,
       "ProductListData" :=> constM ProductListData,
-      "ConstrData" :=> constM ConstrData,
+      "ConstrData" :=> constM Ty.ConstrData,
       "NewtypeData" :=> constM NewtypeData
     ]
 
@@ -407,8 +456,7 @@ decodeDataDeclarationAbstractTy =
       "OpaqueData" :=> goOpaqueData
     ]
   where
-    goDataDecl, goOpaqueData :: Object -> ASGParser (DataDeclaration AbstractTy)
-
+    goDataDecl :: Object -> ASGParser (DataDeclaration AbstractTy)
     goDataDecl obj = do
       fieldsObj <- lookupAndParse' obj "fields" (withObject' "Datatype fields" pure)
       dtName <- lookupAndParse' fieldsObj "datatypeName" decodeTyName
@@ -417,6 +465,7 @@ decodeDataDeclarationAbstractTy =
       dtEncoding <- lookupAndParse' fieldsObj "datatypeEncoding" decodeDataEncoding
       pure $ DataDeclaration dtName dtBinders dtCtors dtEncoding
 
+    goOpaqueData :: Object -> ASGParser (DataDeclaration AbstractTy)
     goOpaqueData obj = do
       fieldsObj <- lookupAndParse' obj "fields" (withObject' "Datatype fields (Opaque)" pure)
       dtName <- lookupAndParse' fieldsObj "datatypeName" decodeTyName
@@ -528,58 +577,58 @@ decodeAConstant =
 
    Serializes as a sum type without named fields:
 
-   {tag: "LitInternal", fields: [a]}
-   | {tag: "AppInternal", fields: [a,b]}
-   | {tag: "ThunkInternal",fields: [a]}
-   | {tag: "CataInternal", fields: [a,b]}
-   | {tag: "DataConstructorInternal", fields: [a,b,c]}
-   | {tag: "MatchInternal", fields: [a,b]}
+   {tag: "Lit", fields: [a]}
+   | {tag: "App", fields: [a,b]}
+   | {tag: "Thunk",fields: [a]}
+   | {tag: "Cata", fields: [a,b]}
+   | {tag: "DataConstructor", fields: [a,b,c]}
+   | {tag: "Match", fields: [a,b]}
 
 -}
 
 -- | @since 1.3.0
 encodeValNodeInfo :: ValNodeInfo -> Encoding
 encodeValNodeInfo = \case
-  LitInternal aconst -> taggedFields "LitInternal" [encodeAConstant aconst]
-  AppInternal f args -> taggedFields "AppInternal" [encodeId f, list encodeRef . toList $ args]
-  ThunkInternal f -> taggedFields "ThunkInternal" [encodeId f]
-  CataInternal r1 r2 -> taggedFields "CataInternal" [encodeRef r1, encodeRef r2]
+  LitInternal aconst -> taggedFields "Lit" [encodeAConstant aconst]
+  AppInternal f args -> taggedFields "App" [encodeId f, list encodeRef . toList $ args]
+  ThunkInternal f -> taggedFields "Thunk" [encodeId f]
+  CataInternal r1 r2 -> taggedFields "Cata" [encodeRef r1, encodeRef r2]
   DataConstructorInternal tn cn args ->
     taggedFields
-      "DataConstructorInternal"
+      "DataConstructor"
       [ encodeTyName tn,
         encodeConstructorName cn,
         list encodeRef . toList $ args
       ]
   MatchInternal scrut branches ->
-    taggedFields "MatchInternal" [encodeRef scrut, list encodeRef . toList $ branches]
+    taggedFields "Match" [encodeRef scrut, list encodeRef . toList $ branches]
 
 -- | @since 1.3.0
 decodeValNodeInfo :: Value -> ASGParser ValNodeInfo
 decodeValNodeInfo =
   caseOnTag
-    [ "LitInternal" :=> withField0 (fmap LitInternal . decodeAConstant),
-      "AppInternal"
+    [ "Lit" :=> withField0 (fmap LitInternal . decodeAConstant),
+      "App"
         :=> withFields
         $ \fieldsArr -> do
           f <- withIndex 0 decodeId fieldsArr
           args <- withIndex 1 (withArray' "App args" (traverse decodeRef)) fieldsArr
           pure $ AppInternal f args,
-      "ThunkInternal" :=> withField0 (fmap ThunkInternal . decodeId),
-      "CataInternal"
+      "Thunk" :=> withField0 (fmap ThunkInternal . decodeId),
+      "Cata"
         :=> withFields
         $ \fieldsArr -> do
           r1 <- withIndex 0 decodeRef fieldsArr
           r2 <- withIndex 1 decodeRef fieldsArr
           pure $ CataInternal r1 r2,
-      "DataConstructorInternal"
+      "DataConstructor"
         :=> withFields
         $ \fieldsArr -> do
           tn <- withIndex 0 decodeTyName fieldsArr
           ctorNm <- withIndex 1 decodeConstructorName fieldsArr
           args <- withIndex 2 (withArray' "Datatype args" (traverse decodeRef)) fieldsArr
           pure $ DataConstructorInternal tn ctorNm args,
-      "MatchInternal"
+      "Match"
         :=> withFields
         $ \fieldsArr -> do
           scrut <- withIndex 0 decodeRef fieldsArr
@@ -674,8 +723,10 @@ encodeDeBruijn = int . review asInt
 -- | @since 1.3.0
 decodeDeBruijn :: Value -> ASGParser DeBruijn
 decodeDeBruijn v = do
-  vRaw <- liftParser $ parseJSON @Word32 v
-  pure . fromJust . preview asInt . fromIntegral $ vRaw
+  vRaw <- liftParser $ parseJSON @Int v
+  if vRaw < 0
+    then failParse "Negative DeBruijn"
+    else  pure . fromJust . preview asInt $ vRaw
 
 {- AbstractTy
 
@@ -688,11 +739,12 @@ decodeDeBruijn v = do
 
 -- | @since 1.3.0
 encodeAbstractTy :: AbstractTy -> Encoding
-encodeAbstractTy (BoundAt db i) = econcat [encodeDeBruijn db, encodeIndex i]
+encodeAbstractTy (BoundAt db i) = encodeDeBruijn db >< encodeIndex i
 
 -- | @since 1.3.0
 decodeAbstractTy :: Value -> ASGParser AbstractTy
 decodeAbstractTy = withArray' "AbstractTy" $ \arr -> do
+  guardArrLen 2 arr
   db <- withIndex 0 decodeDeBruijn arr
   i <- withIndex 1 decodeIndex arr
   pure $ BoundAt db i
@@ -717,8 +769,10 @@ encodeCount = int . review intCount
 -- | @since 1.3.0
 decodeCount :: forall (s :: Symbol). (KnownSymbol s) => Value -> ASGParser (Count s)
 decodeCount v = do
-  vRaw <- liftParser $ parseJSON @Word32 v
-  pure . fromJust . preview intCount . fromIntegral $ vRaw
+  vRaw <- liftParser $ parseJSON @Int v
+  if vRaw < 0
+    then failParse "Negative Count"
+    else  pure . fromJust . preview intCount $ vRaw
 
 {- Index
 
@@ -740,8 +794,10 @@ encodeIndex = int . review intIndex
 -- | @since 1.3.0
 decodeIndex :: forall (s :: Symbol). (KnownSymbol s) => Value -> ASGParser (Index s)
 decodeIndex v = do
-  vRaw <- liftParser $ parseJSON @Word32 v
-  pure . fromJust . preview intIndex . fromIntegral $ vRaw
+  vRaw <- liftParser $ parseJSON @Int v
+  if vRaw < 0
+    then failParse "Negative Index"
+    else pure . fromJust . preview intIndex $ vRaw
 
 {- CompT AbstractTy
 
@@ -755,11 +811,12 @@ decodeIndex v = do
 
 -- | @since 1.3.0
 encodeCompT :: CompT AbstractTy -> Encoding
-encodeCompT (CompT cnt body) = econcat [encodeCount cnt, encodeCompTBody body]
+encodeCompT (CompT cnt body) = encodeCount cnt >< encodeCompTBody body
 
 -- | @since 1.3.0
 decodeCompT :: Value -> ASGParser (CompT AbstractTy)
 decodeCompT = withArray' "CompT" $ \arr -> do
+  guardArrLen 2 arr
   cnt <- withIndex 0 decodeCount arr
   body <- withIndex 1 decodeCompTBody arr
   pure $ CompT cnt body
@@ -781,10 +838,10 @@ encodeCompTBody (CompTBody tys) = econcat . map encodeValTAbstractTy . toList $ 
 -- | @since 1.3.0
 decodeCompTBody :: Value -> ASGParser (CompTBody AbstractTy)
 decodeCompTBody = withArray' "CompTBody" $ \arr -> do
-  tysAsList <- traverse decodeValTAbstractTy . toList $ arr
-  case tysAsList of
-    [] -> failParse "Empty vector of types in a CompTBody"
-    (x : xs) -> pure . CompTBody $ NEV.fromNonEmpty (x :| xs)
+  decodedBody <- NEV.fromVector <$> traverse decodeValTAbstractTy arr
+  case decodedBody of
+    Nothing ->  failParse "Empty vector of types in a CompTBody"
+    Just res -> pure . CompTBody $ res
 
 {- BuiltinFlatT
 
@@ -832,7 +889,42 @@ encodeOneArgFunc = encodeEnum
 
 -- | @since 1.3.0
 decodeOneArgFunc :: Value -> ASGParser OneArgFunc
-decodeOneArgFunc = error "TODO: Implement decodeOneArgFunc"
+decodeOneArgFunc
+  = caseOnTag
+        ["LengthOfByteString" :=> constM LengthOfByteString,
+          "Sha2_256" :=> constM Sha2_256,
+          "Sha3_256" :=> constM Sha3_256,
+          "Blake2b_256" :=> constM Blake2b_256,
+          "EncodeUtf8" :=> constM EncodeUtf8,
+          "DecodeUtf8" :=> constM DecodeUtf8,
+          "FstPair" :=> constM FstPair,
+          "SndPair" :=> constM SndPair,
+          "HeadList" :=> constM HeadList,
+          "TailList" :=> constM TailList,
+          "NullList" :=> constM NullList,
+          "MapData" :=> constM MapData,
+          "ListData" :=> constM ListData,
+          "IData" :=> constM IData,
+          "BData" :=> constM BData,
+          "UnConstrData" :=> constM UnConstrData,
+          "UnMapData" :=> constM UnMapData,
+          "UnListData" :=> constM UnListData,
+          "UnIData" :=> constM UnIData,
+          "UnBData" :=> constM UnBData,
+          "SerialiseData" :=> constM SerialiseData,
+          "BLS12_381_G1_neg" :=> constM BLS12_381_G1_neg,
+          "BLS12_381_G1_compress" :=> constM BLS12_381_G1_compress,
+          "BLS12_381_G1_uncompress" :=> constM BLS12_381_G1_uncompress,
+          "BLS12_381_G2_neg" :=> constM BLS12_381_G2_neg,
+          "BLS12_381_G2_compress" :=> constM BLS12_381_G2_compress,
+          "BLS12_381_G2_uncompress" :=> constM BLS12_381_G2_uncompress,
+          "Keccak_256" :=> constM Keccak_256,
+          "Blake2b_224" :=> constM Blake2b_224,
+          "ComplementByteString" :=> constM ComplementByteString,
+          "CountSetBits" :=> constM CountSetBits,
+          "FindFirstSetBit" :=> constM FindFirstSetBit,
+          "Ripemd_160" :=> constM Ripemd_160
+        ]
 
 {- TwoArgFunc
 
@@ -847,7 +939,49 @@ encodeTwoArgFunc = encodeEnum
 
 -- | @since 1.3.0
 decodeTwoArgFunc :: Value -> ASGParser TwoArgFunc
-decodeTwoArgFunc = error "TODO: Implement decodeTwoArgFunc"
+decodeTwoArgFunc
+  = caseOnTag
+        ["AddInteger" :=> constM AddInteger,
+          "SubtractInteger" :=> constM SubtractInteger,
+          "MultiplyInteger" :=> constM MultiplyInteger,
+          "DivideInteger" :=> constM DivideInteger,
+          "QuotientInteger" :=> constM QuotientInteger,
+          "RemainderInteger" :=> constM RemainderInteger,
+          "ModInteger" :=> constM ModInteger,
+          "EqualsInteger" :=> constM EqualsInteger,
+          "LessThanInteger" :=> constM LessThanInteger,
+          "LessThanEqualsInteger" :=> constM LessThanEqualsInteger,
+          "AppendByteString" :=> constM AppendByteString,
+          "ConsByteString" :=> constM ConsByteString,
+          "IndexByteString" :=> constM IndexByteString,
+          "EqualsByteString" :=> constM EqualsByteString,
+          "LessThanByteString" :=> constM LessThanByteString,
+          "LessThanEqualsByteString" :=> constM LessThanEqualsByteString,
+          "AppendString" :=> constM AppendString,
+          "EqualsString" :=> constM EqualsString,
+          "ChooseUnit" :=> constM ChooseUnit,
+          "Trace" :=> constM Trace,
+          "MkCons" :=> constM MkCons,
+          "ConstrData" :=> constM ConstrData,
+          "EqualsData" :=> constM EqualsData,
+          "MkPairData" :=> constM MkPairData,
+          "BLS12_381_G1_add" :=> constM BLS12_381_G1_add,
+          "BLS12_381_G1_scalarMul" :=> constM BLS12_381_G1_scalarMul,
+          "BLS12_381_G1_equal" :=> constM BLS12_381_G1_equal,
+          "BLS12_381_G1_hashToGroup" :=> constM BLS12_381_G1_hashToGroup,
+          "BLS12_381_G2_add" :=> constM BLS12_381_G2_add,
+          "BLS12_381_G2_scalarMul" :=> constM BLS12_381_G2_scalarMul,
+          "BLS12_381_G2_equal" :=> constM BLS12_381_G2_equal,
+          "BLS12_381_G2_hashToGroup" :=> constM BLS12_381_G2_hashToGroup,
+          "BLS12_381_millerLoop" :=> constM BLS12_381_millerLoop,
+          "BLS12_381_mulMlResult" :=> constM BLS12_381_mulMlResult,
+          "BLS12_381_finalVerify" :=> constM BLS12_381_finalVerify,
+          "ByteStringToInteger" :=> constM ByteStringToInteger,
+          "ReadBit" :=> constM ReadBit,
+          "ReplicateByte" :=> constM ReplicateByte,
+          "ShiftByteString" :=> constM ShiftByteString,
+          "RotateByteString" :=> constM RotateByteString
+        ]
 
 {- ThreeArgFunc
 
@@ -862,7 +996,20 @@ encodeThreeArgFunc = encodeEnum
 
 -- | @since 1.3.0
 decodeThreeArgFunc :: Value -> ASGParser ThreeArgFunc
-decodeThreeArgFunc = error "TODO: Implement decodeThreeArgFunc"
+decodeThreeArgFunc
+  = caseOnTag [ "VerifyEd25519Signature" :=> constM VerifyEd25519Signature
+              , "VerifyEcdsaSecp256k1Signature" :=> constM VerifyEcdsaSecp256k1Signature
+              , "VerifySchnorrSecp256k1Signature" :=> constM VerifySchnorrSecp256k1Signature
+              , "IfThenElse" :=> constM IfThenElse
+              , "ChooseList" :=> constM ChooseList
+              , "CaseList" :=> constM CaseList
+              , "IntegerToByteString" :=> constM IntegerToByteString
+              , "AndByteString" :=> constM AndByteString
+              , "OrByteString" :=> constM OrByteString
+              , "XorByteString" :=> constM XorByteString
+              , "WriteBits" :=> constM WriteBits
+              , "ExpModInteger" :=> constM ExpModInteger
+              ]
 
 {- SixArgFunc
 
@@ -877,7 +1024,10 @@ encodeSixArgFunc = encodeEnum
 
 -- | @since 1.3.0
 decodeSixArgFunc :: Value -> ASGParser SixArgFunc
-decodeSixArgFunc = error "TODO: Implement decodeSixArgFunc"
+decodeSixArgFunc
+  = caseOnTag [ "ChooseData" :=> constM ChooseData
+              , "CaseData" :=> constM CaseData
+              ]
 
 {- ValT
 
@@ -912,6 +1062,25 @@ decodeValTAbstractTy =
     ]
 
 -- Helpers
+
+encodeMap :: forall k v. (k -> Encoding) -> (v -> Encoding) -> Map k v -> Encoding
+encodeMap fk fv m = list id $ M.foldlWithKey' (\acc k v ->
+                    let entry = pairs $ pair "key" (fk k) <> pair "value" (fv v)
+                    in entry : acc
+                  ) [] m
+
+decodeMapM :: forall k v
+            . (Ord k)
+           => (Value -> ASGParser k)
+           -> (Value -> ASGParser v)
+           -> Value
+           -> ASGParser (Map k v)
+decodeMapM fk fv = withArray' "Map" $ \arr ->
+  foldM (\acc x -> flip (withObject' "kvPair") x $ \obj -> do
+            kfield <- lookupAndParse' obj "key" fk
+            vfield <- lookupAndParse' obj "value" fv
+            pure $ M.insert kfield vfield acc
+           ) M.empty arr
 
 liftParser :: forall (a :: Type). Parser a -> ASGParser a
 liftParser = ASGParser . lift . lift . lift
@@ -972,6 +1141,13 @@ withText' ::
 withText' _ f (String str) = f str
 withText' nm _ v = liftParser $ prependContext nm (typeMismatch "Text" v)
 
+guardArrLen :: Int -> Array ->  ASGParser ()
+guardArrLen expectedLen arr
+  | Vector.length arr == expectedLen = pure ()
+  | otherwise = failParse $ "Expected an array with " <> show expectedLen
+                            <> " elements, but got one with " <> show (Vector.length arr)
+                            <> " elements"
+
 -- Do something with the array at the tag "fields" in an object. Convenience helper.
 withFields :: forall (a :: Type). (Array -> ASGParser a) -> Object -> ASGParser a
 withFields f obj = lookupAndParse' obj "fields" $ \arrVal -> withArray' "field array" f arrVal
@@ -990,7 +1166,7 @@ withField k f obj = lookupAndParse' obj k f
 -- Because this is intended to be used with either `withObject` or `caseOnTag`, it takes an Object which is expected to have a
 -- "fields" fieldName with an array
 withField0 :: forall (a :: Type). (Value -> ASGParser a) -> Object -> ASGParser a
-withField0 f = withFields (withIndex 0 f)
+withField0 f = withFields (\arr -> guardArrLen 1 arr >> withIndex 0 f arr)
 
 -- Lookup the key in an object and apply the given monadic function to the value you get.
 lookupAndParse' :: forall (a :: Type). Object -> Key -> (Value -> ASGParser a) -> ASGParser a
@@ -1005,10 +1181,6 @@ failParse = liftParser . fail
 -- NOTE: Must *ONLY* be used on *true* Enums, i.e. sum types with only 0-argument constructors
 encodeEnum :: forall (a :: Type). (Show a) => a -> Encoding
 encodeEnum = pairs . ("tag" .=) . show
-
--- Checks whether a tyname corresponds to our base functor naming convention
-isBaseFunctor :: TyName -> Bool
-isBaseFunctor (TyName tn) = T.head tn == '#'
 
 -- Helper for constructing sum type Encodings.
 -- 'taggedFields "name" [f1,f2,f3]' generates '{tag: "name", fields: [f1,f2,f3]}
