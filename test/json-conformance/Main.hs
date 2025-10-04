@@ -2,6 +2,7 @@
 
 module Main (main) where
 
+import Control.Monad (void)
 import Covenant.ASG
   ( ASG,
     ASGBuilder,
@@ -27,6 +28,7 @@ import Covenant.Constant
   )
 import Covenant.DeBruijn (DeBruijn (S, Z))
 import Covenant.Index (ix0, ix1)
+import Covenant.JSON (deserializeAndValidate)
 import Covenant.Prim (TwoArgFunc (AddInteger, EqualsInteger, SubtractInteger))
 import Covenant.Test
   ( conformanceDatatypes1,
@@ -51,7 +53,9 @@ main :: IO ()
 main =
   defaultMain . testGroup "Conformance" $
     [ testCase "conformance1_asg" (assertBool "case 1 compiles to asg" $ isRight conformance_body1),
-      testCase "conformance2_asg" (assertBool "case 2 compiles to asg" $ isRight conformance_body2)
+      testCase "conformance2_asg" (assertBool "case 2 compiles to asg" $ isRight conformance_body2),
+      testCase "deserialize_1" (void $ deserializeAndValidate "./test/json-conformance/conformance_case_1.json"),
+      testCase "deserialize_2" (void $ deserializeAndValidate "./test/json-conformance/conformance_case_2.json")
     ]
 
 {- Case 1:

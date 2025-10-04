@@ -143,6 +143,7 @@ import Covenant.Internal.Term
   ( ASGNode (ACompNode, AValNode, AnError),
     ASGNodeType (CompNodeType, ErrorNodeType, ValNodeType),
     Arg (Arg),
+    BoundTyVar(BoundTyVar),
     CompNodeInfo
       ( Builtin1Internal,
         Builtin2Internal,
@@ -453,8 +454,8 @@ pattern Lit c <- LitInternal c
 -- 'Vector' field).
 --
 -- @since 1.0.0
-pattern App :: Id -> Vector Ref -> ValNodeInfo
-pattern App f args <- AppInternal f args
+pattern App :: Id -> Vector Ref -> Vector (Wedge BoundTyVar (ValT Void)) -> ValNodeInfo
+pattern App f args instTys <- AppInternal f args instTys 
 
 -- | Wrap a computation into a value (essentially delaying it).
 --
@@ -754,7 +755,7 @@ app fId argRefs instTys = do
             result <- either (throwError . UnificationError) pure $ checkApp tyDict instantiatedFT (Vector.toList renamedArgs)
             restored <- undoRenameM result
             checkEncodingWithInfo tyDict restored
-            refTo . AValNode restored . AppInternal fId $ argRefs
+            refTo . AValNode restored $  AppInternal fId  argRefs instTys
     ValNodeType t -> throwError . ApplyToValType $ t
     ErrorNodeType -> throwError ApplyToError
   where
@@ -1254,17 +1255,7 @@ tryApply algebraT argT =
 
 -- Putting this here to reduce chance of annoying manual merge (will move later)
 
--- | Wrapper around an `Arg` that we know represents an in-scope type variable.
--- @since 1.2.0
-data BoundTyVar = BoundTyVar DeBruijn (Index "tyvar")
-  deriving stock
-    ( -- @since 1.2.0
-      Show,
-      -- @since 1.2.0
-      Eq,
-      -- @since 1.2.0
-      Ord
-    )
+
 
 -- | Given a DeBruijn index (designating scope) and positional index (designating
 -- which variable in that scope we are interested in), retrieve an in-scope type

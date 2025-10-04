@@ -59,7 +59,7 @@ import Covenant.ASG
     lit,
     match,
     runASGBuilder,
-    thunk,
+    thunk, app,
   )
 import Covenant.Constant (AConstant (ABoolean, AByteString, AString, AUnit, AnInteger))
 import Covenant.Data (DatatypeInfo, mkDatatypeInfo, primBaseFunctorInfos)
@@ -95,7 +95,7 @@ import Covenant.Internal.Term
         LitInternal,
         MatchInternal,
         ThunkInternal
-      ),
+      ), BoundTyVar (BoundTyVar),
   )
 import Covenant.Internal.Type
   ( AbstractTy (BoundAt),
@@ -241,7 +241,6 @@ import Data.Aeson.Encoding
     pairs,
     text,
   )
-import Data.Aeson.Encoding.Internal (econcat, (><))
 import Data.Aeson.KeyMap qualified as KM
 import Data.Aeson.Types
   ( Array,
@@ -271,6 +270,8 @@ import Data.Vector.NonEmpty qualified as NEV
 import GHC.TypeLits (KnownSymbol, Symbol)
 import Optics.Core (preview, review, set, view)
 import Text.Hex qualified as Hex
+import Data.Wedge (Wedge(Nowhere,Here,There))
+import Data.Void (Void, absurd)
 
 compileAndSerialize ::
   forall (a :: Type).
@@ -329,7 +330,7 @@ validateCompilationUnit' (CompilationUnit datatypes asg _) = do
         ForceInternal ref -> checkNode "force" $ force ref
       AValNode _ valInfo -> case valInfo of
         LitInternal aConstant -> checkNode "Lit" (lit aConstant)
-        AppInternal fId argRefs -> checkNode "App" (app' fId argRefs)
+        AppInternal fId argRefs instTys -> checkNode "App" (app fId argRefs instTys)
         ThunkInternal i -> checkNode "Thunk" (thunk i)
         CataInternal r1 r2 -> checkNode "Cata" (cata r1 r2)
         DataConstructorInternal tn cn args -> checkNode "DataConstructor" (dataConstructor tn cn args)
@@ -343,7 +344,11 @@ validateCompilationUnit' (CompilationUnit datatypes asg _) = do
           lookupRef xid >>= \case
             Nothing -> error $ msg <> " node not found"
             Just asgNode ->
-              unless (asgNode == parsedNode) $ error $ msg <> " unexpected node"
+              unless (asgNode == parsedNode) $ do
+                let errMsg = "unexpected " <> msg <> " node"
+                             <> "\n  expected: " <> show parsedNode
+                             <> "\n  actual: " <> show asgNode 
+                error errMsg
 
 {- CompilationUnit
 
@@ -763,7 +768,9 @@ decodeAConstant =
 encodeValNodeInfo :: ValNodeInfo -> Encoding
 encodeValNodeInfo = \case
   LitInternal aconst -> taggedFields "Lit" [encodeAConstant aconst]
-  AppInternal f args -> taggedFields "App" [encodeId f, list encodeRef . toList $ args]
+  AppInternal f args instTys -> taggedFields "App" [encodeId f
+                                                   , list encodeRef . toList $ args
+                                                   , list encodeInstTy . toList $ instTys]
   ThunkInternal f -> taggedFields "Thunk" [encodeId f]
   CataInternal r1 r2 -> taggedFields "Cata" [encodeRef r1, encodeRef r2]
   DataConstructorInternal tn cn args ->
@@ -786,7 +793,8 @@ decodeValNodeInfo =
         $ \fieldsArr -> do
           f <- withIndex 0 decodeId fieldsArr
           args <- withIndex 1 (withArray "App args" (traverse decodeRef)) fieldsArr
-          pure $ AppInternal f args,
+          instTys <- withIndex 2 (withArray "App instTys" (traverse decodeInstTy)) fieldsArr
+          pure $ AppInternal f args instTys,
       "Thunk" :=> withField0 (fmap ThunkInternal . decodeId),
       "Cata"
         :=> withFields
@@ -856,7 +864,7 @@ decodeCompNodeInfo =
 -- | @since 1.3.0
 encodeASGNode :: ASGNode -> Encoding
 encodeASGNode = \case
-  ACompNode compT compInfo -> taggedFields "ACompNode" [encodeCompT compT, encodeCompNodeInfo compInfo]
+  ACompNode compT compInfo -> taggedFields "ACompNode" [encodeCompT encodeAbstractTy compT, encodeCompNodeInfo compInfo]
   AValNode valT valInfo -> taggedFields "AValNode" [encodeValTAbstractTy valT, encodeValNodeInfo valInfo]
   AnError -> pairs $ pair "tag" "AnError"
 
@@ -865,7 +873,7 @@ decodeASGNode :: Value -> Parser ASGNode
 decodeASGNode =
   caseOnTag
     [ "ACompNode" :=> withFields $ \fields -> do
-        compT <- withIndex 0 decodeCompT fields
+        compT <- withIndex 0 (decodeCompT decodeAbstractTy) fields
         compInfo <- withIndex 1 decodeCompNodeInfo fields
         pure $ ACompNode compT compInfo,
       "AValNode" :=> withFields $ \fields -> do
@@ -912,7 +920,7 @@ decodeDeBruijn v = do
 
 -- | @since 1.3.0
 encodeAbstractTy :: AbstractTy -> Encoding
-encodeAbstractTy (BoundAt db i) = encodeDeBruijn db >< encodeIndex i
+encodeAbstractTy (BoundAt db i) = list id [encodeDeBruijn db, encodeIndex i]
 
 -- | @since 1.3.0
 decodeAbstractTy :: Value -> Parser AbstractTy
@@ -983,15 +991,15 @@ decodeIndex v = do
 -}
 
 -- | @since 1.3.0
-encodeCompT :: CompT AbstractTy -> Encoding
-encodeCompT (CompT cnt body) = encodeCount cnt >< encodeCompTBody body
+encodeCompT :: forall (a :: Type). (a -> Encoding) -> CompT a -> Encoding
+encodeCompT fa (CompT cnt body) = list id [encodeCount cnt,encodeCompTBody fa body]
 
 -- | @since 1.3.0
-decodeCompT :: Value -> Parser (CompT AbstractTy)
-decodeCompT = withArray "CompT" $ \arr -> do
+decodeCompT :: forall (a :: Type). (Value -> Parser a) ->  Value -> Parser (CompT a)
+decodeCompT fa = withArray "CompT" $ \arr -> do
   guardArrLen 2 arr
   cnt <- withIndex 0 decodeCount arr
-  body <- withIndex 1 decodeCompTBody arr
+  body <- withIndex 1 (decodeCompTBody fa) arr
   pure $ CompT cnt body
 
 {- CompTBodyAbstractTy
@@ -1005,13 +1013,13 @@ decodeCompT = withArray "CompT" $ \arr -> do
 -}
 
 -- | @since 1.3.0
-encodeCompTBody :: CompTBody AbstractTy -> Encoding
-encodeCompTBody (CompTBody tys) = econcat . map encodeValTAbstractTy . toList $ tys
+encodeCompTBody :: forall (a :: Type). (a -> Encoding) -> CompTBody a -> Encoding
+encodeCompTBody fa (CompTBody tys) = list (encodeValT fa) . toList $ tys
 
 -- | @since 1.3.0
-decodeCompTBody :: Value -> Parser (CompTBody AbstractTy)
-decodeCompTBody = withArray "CompTBody" $ \arr -> do
-  decodedBody <- NEV.fromVector <$> traverse decodeValTAbstractTy arr
+decodeCompTBody :: forall (a :: Type). (Value -> Parser a) -> Value -> Parser (CompTBody a)
+decodeCompTBody fa = withArray "CompTBody" $ \arr -> do
+  decodedBody <- NEV.fromVector <$> traverse (decodeValT fa) arr
   case decodedBody of
     Nothing -> fail "Empty vector of types in a CompTBody"
     Just res -> pure . CompTBody $ res
@@ -1215,29 +1223,63 @@ decodeSixArgFunc =
 
 -}
 
--- | @since 1.3.0
-encodeValTAbstractTy :: ValT AbstractTy -> Encoding
-encodeValTAbstractTy = \case
-  Abstraction x -> taggedFields "Abstraction" [encodeAbstractTy x]
-  ThunkT compT -> taggedFields "ThunkT" [encodeCompT compT]
+encodeValT :: forall (a :: Type). (a -> Encoding) -> ValT a -> Encoding
+encodeValT fa = \case
+  Abstraction x -> taggedFields "Abstraction" [fa x]
+  ThunkT compT -> taggedFields "ThunkT" [encodeCompT fa compT]
   BuiltinFlat biFlat -> taggedFields "BuiltinFlat" [encodeBuiltinFlatT biFlat]
-  Datatype tn args -> taggedFields "Datatype" [encodeTyName tn, list encodeValTAbstractTy . toList $ args]
+  Datatype tn args -> taggedFields "Datatype" [encodeTyName tn, list (encodeValT fa)  . toList $ args]
 
--- | @since 1.3.0
-decodeValTAbstractTy :: Value -> Parser (ValT AbstractTy)
-decodeValTAbstractTy =
-  caseOnTag
-    [ "Abstraction" :=> withField0 (fmap Abstraction . decodeAbstractTy),
-      "ThunkT" :=> withField0 (fmap ThunkT . decodeCompT),
+decodeValT :: forall (a :: Type). (Value -> Parser a) -> Value -> Parser (ValT a)
+decodeValT fa
+  = caseOnTag
+    [ "Abstraction" :=> withField0 (fmap Abstraction . fa),
+      "ThunkT" :=> withField0 (fmap ThunkT . decodeCompT fa),
       "BuiltinFlat" :=> withField0 (fmap BuiltinFlat . decodeBuiltinFlatT),
       "Datatype" :=> withFields $ \arr -> do
         tn <- withIndex 0 decodeTyName arr
-        ctors <- withIndex 1 (withArray "datatype args" (traverse decodeValTAbstractTy)) arr
+        ctors <- withIndex 1 (withArray "datatype args" (traverse (decodeValT fa))) arr
         pure $ Datatype tn ctors
     ]
 
+{- Encodes as an array [DeBruijn, Index "tyvar"]
+-}
+encodeBoundTyVar :: BoundTyVar -> Encoding
+encodeBoundTyVar (BoundTyVar db ix) = list id [encodeDeBruijn db, encodeIndex ix]
+
+decodeBoundTyVar :: Value -> Parser BoundTyVar
+decodeBoundTyVar = withArray "BoundTyVar" $ \arr -> do
+  db <- withIndex 0 decodeDeBruijn arr
+  ix <- withIndex 1 decodeIndex arr
+  pure $ BoundTyVar db ix
+
+{- Encoding is fully determined by other functions
+-}
+encodeInstTy :: Wedge BoundTyVar (ValT Void) -> Encoding
+encodeInstTy = encodeWedge encodeBoundTyVar (encodeValT encodeVoid)
+
+decodeInstTy :: Value -> Parser (Wedge BoundTyVar (ValT Void))
+decodeInstTy = decodeWedge decodeBoundTyVar (decodeValT decodeVoid)
+
+
+-- | @since 1.3.0
+encodeValTAbstractTy :: ValT AbstractTy -> Encoding
+encodeValTAbstractTy = encodeValT encodeAbstractTy
+
+-- | @since 1.3.0
+decodeValTAbstractTy :: Value -> Parser (ValT AbstractTy)
+decodeValTAbstractTy = decodeValT decodeAbstractTy
+
 -- Helpers
 
+encodeVoid :: Void -> Encoding
+encodeVoid = absurd
+
+decodeVoid :: Value -> Parser Void
+decodeVoid _ = fail "Void isn't inhabited, you can't decode a value to it"
+
+{- We encode maps as arrays of {key: k, value: v} pairs
+-}
 encodeMap :: forall k v. (k -> Encoding) -> (v -> Encoding) -> Map k v -> Encoding
 encodeMap fk fv m =
   list id $
@@ -1265,6 +1307,33 @@ decodeMap fk fv = withArray "Map" $ \arr ->
     )
     M.empty
     arr
+
+{- We encode wedges as a normal sum type, a la:
+
+    {tag: "Nowhere"}
+    | {tag: "Here", fields: [a]}
+    | {tag: "There", fields: [b]}
+-}
+encodeWedge :: forall (a :: Type) (b :: Type)
+             . (a -> Encoding)
+             -> (b -> Encoding)
+             -> Wedge a b
+             -> Encoding
+encodeWedge fa fb = \case
+  Nowhere -> pairs $ pair "tag" "Nowhere"
+  Here a -> taggedFields "Here" [fa a]
+  There b -> taggedFields "There" [fb b]
+
+decodeWedge :: forall (a :: Type) (b :: Type)
+             . (Value -> Parser a)
+            -> (Value -> Parser b)
+            -> Value
+            -> Parser (Wedge a b)
+decodeWedge fa fb
+  = caseOnTag ["Nowhere" :=> constM Nowhere,
+               "Here" :=> fmap Here . withField0 fa,
+               "There" :=> fmap There . withField0 fb
+              ]
 
 -- Mainly for readability/custom fixity, effectively (,)
 data (:=>) a b = a :=> b
@@ -1332,7 +1401,7 @@ encodeEnum = pairs . ("tag" .=) . show
 -- Helper for constructing sum type Encodings.
 -- 'taggedFields "name" [f1,f2,f3]' generates '{tag: "name", fields: [f1,f2,f3]}
 taggedFields :: Text -> [Encoding] -> Encoding
-taggedFields tg fieldArgs = pairs $ "tag" .= tg <> pair "fields" (econcat fieldArgs)
+taggedFields tg fieldArgs = pairs $ "tag" .= tg <> pair "fields" (list id fieldArgs)
 
 -- Decodes a hex encoded bytestring
 decodeByteStringHex :: Value -> Parser ByteString

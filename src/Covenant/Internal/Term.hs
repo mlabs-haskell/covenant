@@ -11,6 +11,7 @@ module Covenant.Internal.Term
     ASGNode (..),
     typeASGNode,
     ASGNodeType (..),
+    BoundTyVar (..),
   )
 where
 
@@ -36,6 +37,8 @@ import Data.Set qualified as Set
 import Data.Text (Text)
 import Data.Vector (Vector)
 import Data.Word (Word64)
+import Data.Void (Void)
+import Data.Wedge (Wedge)
 
 -- | An error that can arise during the construction of an ASG by programmatic
 -- means.
@@ -389,7 +392,7 @@ data CompNodeInfo
 -- @since 1.0.0
 data ValNodeInfo
   = LitInternal AConstant
-  | AppInternal Id (Vector Ref)
+  | AppInternal Id (Vector Ref) (Vector (Wedge BoundTyVar (ValT Void)))
   | ThunkInternal Id
   | -- | @since 1.1.0
     CataInternal Ref Ref
@@ -455,4 +458,17 @@ data ASGNodeType
       Ord,
       -- | @since 1.0.0
       Show
+    )
+
+-- NOTE: Had to move this here
+-- | Wrapper around an `Arg` that we know represents an in-scope type variable.
+-- @since 1.2.0
+data BoundTyVar = BoundTyVar DeBruijn (Index "tyvar")
+  deriving stock
+    ( -- @since 1.2.0
+      Show,
+      -- @since 1.2.0
+      Eq,
+      -- @since 1.2.0
+      Ord
     )
