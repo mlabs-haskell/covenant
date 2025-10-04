@@ -66,10 +66,25 @@ import Covenant.Data (DatatypeInfo, mkDatatypeInfo, primBaseFunctorInfos)
 import Covenant.DeBruijn (DeBruijn, asInt)
 import Covenant.Index (Count, Index, intCount, intIndex)
 import Covenant.Internal.KindCheck (checkDataDecls)
-import Covenant.Internal.Strategy (InternalStrategy (InternalAssocMapStrat, InternalListStrat, InternalOpaqueStrat, InternalPairStrat))
-import Covenant.Internal.Term (ASGNode (ACompNode, AValNode, AnError),
-                               Arg (Arg), CompNodeInfo (Builtin1Internal,
-                                                        Builtin2Internal, Builtin3Internal, Builtin6Internal, ForceInternal, LamInternal), CovenantTypeError (OtherError), Id (Id), Ref (AnArg, AnId), ValNodeInfo (AppInternal, CataInternal, DataConstructorInternal, LitInternal, MatchInternal, ThunkInternal))
+import Covenant.Internal.Strategy (InternalStrategy (InternalAssocMapStrat,
+                                                     InternalListStrat, InternalOpaqueStrat, InternalPairStrat))
+import Covenant.Internal.Term
+  ( ASGNode (ACompNode, AValNode, AnError),
+    Arg (Arg),
+    CompNodeInfo
+      ( Builtin1Internal,
+        Builtin2Internal,
+        Builtin3Internal,
+        Builtin6Internal,
+        ForceInternal,
+        LamInternal
+      ),
+    CovenantTypeError (OtherError),
+    Id (Id),
+    Ref (AnArg, AnId),
+    ValNodeInfo (AppInternal,
+                 CataInternal, DataConstructorInternal, LitInternal, MatchInternal, ThunkInternal),
+  )
 import Covenant.Internal.Type
   ( AbstractTy (BoundAt),
     CompT (CompT),
@@ -115,19 +130,84 @@ import Covenant.Prim
         UnMapData
       ),
     SixArgFunc (CaseData, ChooseData),
-    ThreeArgFunc (AndByteString,
-                  CaseList, ChooseList, ExpModInteger, IfThenElse, IntegerToByteString, OrByteString, VerifyEcdsaSecp256k1Signature, VerifyEd25519Signature, VerifySchnorrSecp256k1Signature, WriteBits, XorByteString),
-    TwoArgFunc (AddInteger,
-                AppendByteString, AppendString, BLS12_381_G1_add, BLS12_381_G1_equal, BLS12_381_G1_hashToGroup, BLS12_381_G1_scalarMul, BLS12_381_G2_add, BLS12_381_G2_equal, BLS12_381_G2_hashToGroup, BLS12_381_G2_scalarMul, BLS12_381_finalVerify, BLS12_381_millerLoop, BLS12_381_mulMlResult, ByteStringToInteger, ChooseUnit, ConsByteString, ConstrData, DivideInteger, EqualsByteString, EqualsData, EqualsInteger, EqualsString, IndexByteString, LessThanByteString, LessThanEqualsByteString, LessThanEqualsInteger, LessThanInteger, MkCons, MkPairData, ModInteger, MultiplyInteger, QuotientInteger, ReadBit, RemainderInteger, ReplicateByte, RotateByteString, ShiftByteString, SubtractInteger, Trace),
+    ThreeArgFunc
+      ( AndByteString,
+        CaseList,
+        ChooseList,
+        ExpModInteger,
+        IfThenElse,
+        IntegerToByteString,
+        OrByteString,
+        VerifyEcdsaSecp256k1Signature,
+        VerifyEd25519Signature,
+        VerifySchnorrSecp256k1Signature,
+        WriteBits,
+        XorByteString
+      ),
+    TwoArgFunc
+      ( AddInteger,
+        AppendByteString,
+        AppendString,
+        BLS12_381_G1_add,
+        BLS12_381_G1_equal,
+        BLS12_381_G1_hashToGroup,
+        BLS12_381_G1_scalarMul,
+        BLS12_381_G2_add,
+        BLS12_381_G2_equal,
+        BLS12_381_G2_hashToGroup,
+        BLS12_381_G2_scalarMul,
+        BLS12_381_finalVerify,
+        BLS12_381_millerLoop,
+        BLS12_381_mulMlResult,
+        ByteStringToInteger,
+        ChooseUnit,
+        ConsByteString,
+        ConstrData,
+        DivideInteger,
+        EqualsByteString,
+        EqualsData,
+        EqualsInteger,
+        EqualsString,
+        IndexByteString,
+        LessThanByteString,
+        LessThanEqualsByteString,
+        LessThanEqualsInteger,
+        LessThanInteger,
+        MkCons,
+        MkPairData,
+        ModInteger,
+        MultiplyInteger,
+        QuotientInteger,
+        ReadBit,
+        RemainderInteger,
+        ReplicateByte,
+        RotateByteString,
+        ShiftByteString,
+        SubtractInteger,
+        Trace
+      ),
   )
 import Covenant.Type
-  ( BuiltinFlatT (BLS12_381_G1_ElementT,
-                  BLS12_381_G2_ElementT, BLS12_381_MlResultT, BoolT, ByteStringT, IntegerT, StringT, UnitT),
+  ( BuiltinFlatT
+      ( BLS12_381_G1_ElementT,
+        BLS12_381_G2_ElementT,
+        BLS12_381_MlResultT,
+        BoolT,
+        ByteStringT,
+        IntegerT,
+        StringT,
+        UnitT
+      ),
     Constructor (Constructor),
     DataDeclaration (DataDeclaration),
     DataEncoding (BuiltinStrategy, PlutusData, SOP),
-    PlutusDataConstructor (PlutusB,
-                           PlutusConstr, PlutusI, PlutusList, PlutusMap),
+    PlutusDataConstructor
+      ( PlutusB,
+        PlutusConstr,
+        PlutusI,
+        PlutusList,
+        PlutusMap
+      ),
     PlutusDataStrategy (EnumData, NewtypeData, ProductListData),
     TyName (TyName),
     ValT (Abstraction, Datatype),
@@ -140,7 +220,8 @@ import Data.Aeson
     eitherDecodeFileStrict,
     (.=),
   )
-import Data.Aeson.Encoding (Encoding, encodingToLazyByteString, int, list, pair, pairs, text)
+import Data.Aeson.Encoding (Encoding,
+                            encodingToLazyByteString, int, list, pair, pairs, text)
 import Data.Aeson.Encoding.Internal (econcat, (><))
 import Data.Aeson.KeyMap qualified as KM
 import Data.Aeson.Types
