@@ -36,9 +36,9 @@ import Data.Kind (Type)
 import Data.Set qualified as Set
 import Data.Text (Text)
 import Data.Vector (Vector)
-import Data.Word (Word64)
 import Data.Void (Void)
 import Data.Wedge (Wedge)
+import Data.Word (Word64)
 
 -- | An error that can arise during the construction of an ASG by programmatic
 -- means.
@@ -461,6 +461,7 @@ data ASGNodeType
     )
 
 -- NOTE: Had to move this here
+
 -- | Wrapper around an `Arg` that we know represents an in-scope type variable.
 -- @since 1.2.0
 data BoundTyVar = BoundTyVar DeBruijn (Index "tyvar")

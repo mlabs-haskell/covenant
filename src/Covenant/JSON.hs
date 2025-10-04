@@ -46,6 +46,7 @@ import Covenant.ASG
     Id,
     Ref,
     ValNodeInfo,
+    app,
     app',
     builtin1,
     builtin2,
@@ -59,7 +60,7 @@ import Covenant.ASG
     lit,
     match,
     runASGBuilder,
-    thunk, app,
+    thunk,
   )
 import Covenant.Constant (AConstant (ABoolean, AByteString, AString, AUnit, AnInteger))
 import Covenant.Data (DatatypeInfo, mkDatatypeInfo, primBaseFunctorInfos)
@@ -77,6 +78,7 @@ import Covenant.Internal.Strategy
 import Covenant.Internal.Term
   ( ASGNode (ACompNode, AValNode, AnError),
     Arg (Arg),
+    BoundTyVar (BoundTyVar),
     CompNodeInfo
       ( Builtin1Internal,
         Builtin2Internal,
@@ -95,7 +97,7 @@ import Covenant.Internal.Term
         LitInternal,
         MatchInternal,
         ThunkInternal
-      ), BoundTyVar (BoundTyVar),
+      ),
   )
 import Covenant.Internal.Type
   ( AbstractTy (BoundAt),
@@ -267,11 +269,11 @@ import Data.Text qualified as T
 import Data.Vector (Vector)
 import Data.Vector qualified as Vector
 import Data.Vector.NonEmpty qualified as NEV
+import Data.Void (Void, absurd)
+import Data.Wedge (Wedge (Here, Nowhere, There))
 import GHC.TypeLits (KnownSymbol, Symbol)
 import Optics.Core (preview, review, set, view)
 import Text.Hex qualified as Hex
-import Data.Wedge (Wedge(Nowhere,Here,There))
-import Data.Void (Void, absurd)
 
 compileAndSerialize ::
   forall (a :: Type).
@@ -345,9 +347,14 @@ validateCompilationUnit' (CompilationUnit datatypes asg _) = do
             Nothing -> error $ msg <> " node not found"
             Just asgNode ->
               unless (asgNode == parsedNode) $ do
-                let errMsg = "unexpected " <> msg <> " node"
-                             <> "\n  expected: " <> show parsedNode
-                             <> "\n  actual: " <> show asgNode 
+                let errMsg =
+                      "unexpected "
+                        <> msg
+                        <> " node"
+                        <> "\n  expected: "
+                        <> show parsedNode
+                        <> "\n  actual: "
+                        <> show asgNode
                 error errMsg
 
 {- CompilationUnit
@@ -768,9 +775,13 @@ decodeAConstant =
 encodeValNodeInfo :: ValNodeInfo -> Encoding
 encodeValNodeInfo = \case
   LitInternal aconst -> taggedFields "Lit" [encodeAConstant aconst]
-  AppInternal f args instTys -> taggedFields "App" [encodeId f
-                                                   , list encodeRef . toList $ args
-                                                   , list encodeInstTy . toList $ instTys]
+  AppInternal f args instTys ->
+    taggedFields
+      "App"
+      [ encodeId f,
+        list encodeRef . toList $ args,
+        list encodeInstTy . toList $ instTys
+      ]
   ThunkInternal f -> taggedFields "Thunk" [encodeId f]
   CataInternal r1 r2 -> taggedFields "Cata" [encodeRef r1, encodeRef r2]
   DataConstructorInternal tn cn args ->
@@ -992,10 +1003,10 @@ decodeIndex v = do
 
 -- | @since 1.3.0
 encodeCompT :: forall (a :: Type). (a -> Encoding) -> CompT a -> Encoding
-encodeCompT fa (CompT cnt body) = list id [encodeCount cnt,encodeCompTBody fa body]
+encodeCompT fa (CompT cnt body) = list id [encodeCount cnt, encodeCompTBody fa body]
 
 -- | @since 1.3.0
-decodeCompT :: forall (a :: Type). (Value -> Parser a) ->  Value -> Parser (CompT a)
+decodeCompT :: forall (a :: Type). (Value -> Parser a) -> Value -> Parser (CompT a)
 decodeCompT fa = withArray "CompT" $ \arr -> do
   guardArrLen 2 arr
   cnt <- withIndex 0 decodeCount arr
@@ -1228,11 +1239,11 @@ encodeValT fa = \case
   Abstraction x -> taggedFields "Abstraction" [fa x]
   ThunkT compT -> taggedFields "ThunkT" [encodeCompT fa compT]
   BuiltinFlat biFlat -> taggedFields "BuiltinFlat" [encodeBuiltinFlatT biFlat]
-  Datatype tn args -> taggedFields "Datatype" [encodeTyName tn, list (encodeValT fa)  . toList $ args]
+  Datatype tn args -> taggedFields "Datatype" [encodeTyName tn, list (encodeValT fa) . toList $ args]
 
 decodeValT :: forall (a :: Type). (Value -> Parser a) -> Value -> Parser (ValT a)
-decodeValT fa
-  = caseOnTag
+decodeValT fa =
+  caseOnTag
     [ "Abstraction" :=> withField0 (fmap Abstraction . fa),
       "ThunkT" :=> withField0 (fmap ThunkT . decodeCompT fa),
       "BuiltinFlat" :=> withField0 (fmap BuiltinFlat . decodeBuiltinFlatT),
@@ -1260,7 +1271,6 @@ encodeInstTy = encodeWedge encodeBoundTyVar (encodeValT encodeVoid)
 
 decodeInstTy :: Value -> Parser (Wedge BoundTyVar (ValT Void))
 decodeInstTy = decodeWedge decodeBoundTyVar (decodeValT decodeVoid)
-
 
 -- | @since 1.3.0
 encodeValTAbstractTy :: ValT AbstractTy -> Encoding
@@ -1314,26 +1324,29 @@ decodeMap fk fv = withArray "Map" $ \arr ->
     | {tag: "Here", fields: [a]}
     | {tag: "There", fields: [b]}
 -}
-encodeWedge :: forall (a :: Type) (b :: Type)
-             . (a -> Encoding)
-             -> (b -> Encoding)
-             -> Wedge a b
-             -> Encoding
+encodeWedge ::
+  forall (a :: Type) (b :: Type).
+  (a -> Encoding) ->
+  (b -> Encoding) ->
+  Wedge a b ->
+  Encoding
 encodeWedge fa fb = \case
   Nowhere -> pairs $ pair "tag" "Nowhere"
   Here a -> taggedFields "Here" [fa a]
   There b -> taggedFields "There" [fb b]
 
-decodeWedge :: forall (a :: Type) (b :: Type)
-             . (Value -> Parser a)
-            -> (Value -> Parser b)
-            -> Value
-            -> Parser (Wedge a b)
-decodeWedge fa fb
-  = caseOnTag ["Nowhere" :=> constM Nowhere,
-               "Here" :=> fmap Here . withField0 fa,
-               "There" :=> fmap There . withField0 fb
-              ]
+decodeWedge ::
+  forall (a :: Type) (b :: Type).
+  (Value -> Parser a) ->
+  (Value -> Parser b) ->
+  Value ->
+  Parser (Wedge a b)
+decodeWedge fa fb =
+  caseOnTag
+    [ "Nowhere" :=> constM Nowhere,
+      "Here" :=> fmap Here . withField0 fa,
+      "There" :=> fmap There . withField0 fb
+    ]
 
 -- Mainly for readability/custom fixity, effectively (,)
 data (:=>) a b = a :=> b

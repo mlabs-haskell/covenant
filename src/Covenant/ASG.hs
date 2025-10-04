@@ -143,7 +143,7 @@ import Covenant.Internal.Term
   ( ASGNode (ACompNode, AValNode, AnError),
     ASGNodeType (CompNodeType, ErrorNodeType, ValNodeType),
     Arg (Arg),
-    BoundTyVar(BoundTyVar),
+    BoundTyVar (BoundTyVar),
     CompNodeInfo
       ( Builtin1Internal,
         Builtin2Internal,
@@ -455,7 +455,7 @@ pattern Lit c <- LitInternal c
 --
 -- @since 1.0.0
 pattern App :: Id -> Vector Ref -> Vector (Wedge BoundTyVar (ValT Void)) -> ValNodeInfo
-pattern App f args instTys <- AppInternal f args instTys 
+pattern App f args instTys <- AppInternal f args instTys
 
 -- | Wrap a computation into a value (essentially delaying it).
 --
@@ -755,7 +755,7 @@ app fId argRefs instTys = do
             result <- either (throwError . UnificationError) pure $ checkApp tyDict instantiatedFT (Vector.toList renamedArgs)
             restored <- undoRenameM result
             checkEncodingWithInfo tyDict restored
-            refTo . AValNode restored $  AppInternal fId  argRefs instTys
+            refTo . AValNode restored $ AppInternal fId argRefs instTys
     ValNodeType t -> throwError . ApplyToValType $ t
     ErrorNodeType -> throwError ApplyToError
   where
@@ -1254,8 +1254,6 @@ tryApply algebraT argT =
           Right resultT -> undoRenameM resultT
 
 -- Putting this here to reduce chance of annoying manual merge (will move later)
-
-
 
 -- | Given a DeBruijn index (designating scope) and positional index (designating
 -- which variable in that scope we are interested in), retrieve an in-scope type
