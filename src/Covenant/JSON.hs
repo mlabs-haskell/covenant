@@ -66,8 +66,14 @@ import Covenant.Data (DatatypeInfo, mkDatatypeInfo, primBaseFunctorInfos)
 import Covenant.DeBruijn (DeBruijn, asInt)
 import Covenant.Index (Count, Index, intCount, intIndex)
 import Covenant.Internal.KindCheck (checkDataDecls)
-import Covenant.Internal.Strategy (InternalStrategy (InternalAssocMapStrat,
-                                                     InternalListStrat, InternalOpaqueStrat, InternalPairStrat))
+import Covenant.Internal.Strategy
+  ( InternalStrategy
+      ( InternalAssocMapStrat,
+        InternalListStrat,
+        InternalOpaqueStrat,
+        InternalPairStrat
+      ),
+  )
 import Covenant.Internal.Term
   ( ASGNode (ACompNode, AValNode, AnError),
     Arg (Arg),
@@ -82,8 +88,14 @@ import Covenant.Internal.Term
     CovenantTypeError (OtherError),
     Id (Id),
     Ref (AnArg, AnId),
-    ValNodeInfo (AppInternal,
-                 CataInternal, DataConstructorInternal, LitInternal, MatchInternal, ThunkInternal),
+    ValNodeInfo
+      ( AppInternal,
+        CataInternal,
+        DataConstructorInternal,
+        LitInternal,
+        MatchInternal,
+        ThunkInternal
+      ),
   )
 import Covenant.Internal.Type
   ( AbstractTy (BoundAt),
@@ -220,8 +232,15 @@ import Data.Aeson
     eitherDecodeFileStrict,
     (.=),
   )
-import Data.Aeson.Encoding (Encoding,
-                            encodingToLazyByteString, int, list, pair, pairs, text)
+import Data.Aeson.Encoding
+  ( Encoding,
+    encodingToLazyByteString,
+    int,
+    list,
+    pair,
+    pairs,
+    text,
+  )
 import Data.Aeson.Encoding.Internal (econcat, (><))
 import Data.Aeson.KeyMap qualified as KM
 import Data.Aeson.Types
