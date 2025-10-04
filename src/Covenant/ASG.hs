@@ -20,7 +20,7 @@ module Covenant.ASG
   ( -- * The ASG itself
 
     -- ** Types
-    ASG(..),
+    ASG (..),
 
     -- ** Functions
     topLevelId,
@@ -565,7 +565,6 @@ runASGBuilder tyDict (ASGBuilder comp) =
             AnError -> Left TopLevelError
             ACompNode _ _ -> pure . ASG $ (i, Bimap.toMap bm)
             AValNode t info -> Left . TopLevelValue bm t $ info
-
 
 -- | Given a scope and a positional argument index, construct that argument.
 -- Will fail if that argument doesn't exist in the specified scope, or if the

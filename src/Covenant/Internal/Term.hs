@@ -31,9 +31,9 @@ import Covenant.Internal.Type
 import Covenant.Internal.Unification (TypeAppError)
 import Covenant.Prim (OneArgFunc, SixArgFunc, ThreeArgFunc, TwoArgFunc)
 import Covenant.Type (ConstructorName, PlutusDataConstructor, Renamed)
-import Data.Text (Text)
 import Data.Kind (Type)
 import Data.Set qualified as Set
+import Data.Text (Text)
 import Data.Vector (Vector)
 import Data.Word (Word64)
 

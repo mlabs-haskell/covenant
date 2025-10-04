@@ -21,16 +21,19 @@
 -- arguments, but an object with names that correspond to the label optics. (The comments for each
 -- function make clear which types are encoded in which way.)
 -- @since 1.3.0
-module Covenant.JSON (
-   CompilationUnit(..),
-   Version(..),
-   compileAndSerialize,
-   deserializeAndValidate,
-   -- Helper, probably useful somewhere else too
-   mkDatatypeInfos
- ) where
+module Covenant.JSON
+  ( CompilationUnit (..),
+    Version (..),
+    compileAndSerialize,
+    deserializeAndValidate,
+    -- Helper, probably useful somewhere else too
+    mkDatatypeInfos,
+  )
+where
 
+import Control.Exception (throwIO)
 import Control.Monad (foldM, unless)
+import Control.Monad.Error.Class (MonadError (throwError))
 import Control.Monad.HashCons (MonadHashCons (lookupRef))
 import Control.Monad.Reader (local)
 import Covenant.ASG
@@ -64,17 +67,67 @@ import Covenant.DeBruijn (DeBruijn, asInt)
 import Covenant.Index (Count, Index, intCount, intIndex)
 import Covenant.Internal.KindCheck (checkDataDecls)
 import Covenant.Internal.Strategy (InternalStrategy (InternalAssocMapStrat, InternalListStrat, InternalOpaqueStrat, InternalPairStrat))
-import Covenant.Internal.Term (ASGNode (ACompNode, AValNode, AnError), Arg (Arg), CompNodeInfo (Builtin1Internal, Builtin2Internal, Builtin3Internal, Builtin6Internal, ForceInternal, LamInternal), Id (Id), Ref (AnArg, AnId), ValNodeInfo (AppInternal, CataInternal, DataConstructorInternal, LitInternal, MatchInternal, ThunkInternal), CovenantTypeError (OtherError))
-import Covenant.Internal.Type (AbstractTy (BoundAt), CompT (CompT), CompTBody (CompTBody),
-                               ConstructorName (ConstructorName), DataDeclaration (OpaqueData), ValT (BuiltinFlat, ThunkT))
-import Covenant.Prim (OneArgFunc (BData,
-                                  BLS12_381_G1_compress, BLS12_381_G1_neg, BLS12_381_G1_uncompress, BLS12_381_G2_compress, BLS12_381_G2_neg, BLS12_381_G2_uncompress, Blake2b_224, Blake2b_256, ComplementByteString, CountSetBits, DecodeUtf8, EncodeUtf8, FindFirstSetBit, FstPair, HeadList, IData, Keccak_256, LengthOfByteString, ListData, MapData, NullList, Ripemd_160, SerialiseData, Sha2_256, Sha3_256, SndPair, TailList, UnBData, UnConstrData, UnIData, UnListData, UnMapData), SixArgFunc (CaseData, ChooseData), ThreeArgFunc (AndByteString, CaseList, ChooseList, ExpModInteger, IfThenElse, IntegerToByteString, OrByteString, VerifyEcdsaSecp256k1Signature, VerifyEd25519Signature, VerifySchnorrSecp256k1Signature, WriteBits, XorByteString), TwoArgFunc (AddInteger, AppendByteString, AppendString, BLS12_381_G1_add, BLS12_381_G1_equal, BLS12_381_G1_hashToGroup, BLS12_381_G1_scalarMul, BLS12_381_G2_add, BLS12_381_G2_equal, BLS12_381_G2_hashToGroup, BLS12_381_G2_scalarMul, BLS12_381_finalVerify, BLS12_381_millerLoop, BLS12_381_mulMlResult, ByteStringToInteger, ChooseUnit, ConsByteString, ConstrData, DivideInteger, EqualsByteString, EqualsData, EqualsInteger, EqualsString, IndexByteString, LessThanByteString, LessThanEqualsByteString, LessThanEqualsInteger, LessThanInteger, MkCons, MkPairData, ModInteger, MultiplyInteger, QuotientInteger, ReadBit, RemainderInteger, ReplicateByte, RotateByteString, ShiftByteString, SubtractInteger, Trace))
+import Covenant.Internal.Term (ASGNode (ACompNode, AValNode, AnError),
+                               Arg (Arg), CompNodeInfo (Builtin1Internal,
+                                                        Builtin2Internal, Builtin3Internal, Builtin6Internal, ForceInternal, LamInternal), CovenantTypeError (OtherError), Id (Id), Ref (AnArg, AnId), ValNodeInfo (AppInternal, CataInternal, DataConstructorInternal, LitInternal, MatchInternal, ThunkInternal))
+import Covenant.Internal.Type
+  ( AbstractTy (BoundAt),
+    CompT (CompT),
+    CompTBody (CompTBody),
+    ConstructorName (ConstructorName),
+    DataDeclaration (OpaqueData),
+    ValT (BuiltinFlat, ThunkT),
+  )
+import Covenant.Prim
+  ( OneArgFunc
+      ( BData,
+        BLS12_381_G1_compress,
+        BLS12_381_G1_neg,
+        BLS12_381_G1_uncompress,
+        BLS12_381_G2_compress,
+        BLS12_381_G2_neg,
+        BLS12_381_G2_uncompress,
+        Blake2b_224,
+        Blake2b_256,
+        ComplementByteString,
+        CountSetBits,
+        DecodeUtf8,
+        EncodeUtf8,
+        FindFirstSetBit,
+        FstPair,
+        HeadList,
+        IData,
+        Keccak_256,
+        LengthOfByteString,
+        ListData,
+        MapData,
+        NullList,
+        Ripemd_160,
+        SerialiseData,
+        Sha2_256,
+        Sha3_256,
+        SndPair,
+        TailList,
+        UnBData,
+        UnConstrData,
+        UnIData,
+        UnListData,
+        UnMapData
+      ),
+    SixArgFunc (CaseData, ChooseData),
+    ThreeArgFunc (AndByteString,
+                  CaseList, ChooseList, ExpModInteger, IfThenElse, IntegerToByteString, OrByteString, VerifyEcdsaSecp256k1Signature, VerifyEd25519Signature, VerifySchnorrSecp256k1Signature, WriteBits, XorByteString),
+    TwoArgFunc (AddInteger,
+                AppendByteString, AppendString, BLS12_381_G1_add, BLS12_381_G1_equal, BLS12_381_G1_hashToGroup, BLS12_381_G1_scalarMul, BLS12_381_G2_add, BLS12_381_G2_equal, BLS12_381_G2_hashToGroup, BLS12_381_G2_scalarMul, BLS12_381_finalVerify, BLS12_381_millerLoop, BLS12_381_mulMlResult, ByteStringToInteger, ChooseUnit, ConsByteString, ConstrData, DivideInteger, EqualsByteString, EqualsData, EqualsInteger, EqualsString, IndexByteString, LessThanByteString, LessThanEqualsByteString, LessThanEqualsInteger, LessThanInteger, MkCons, MkPairData, ModInteger, MultiplyInteger, QuotientInteger, ReadBit, RemainderInteger, ReplicateByte, RotateByteString, ShiftByteString, SubtractInteger, Trace),
+  )
 import Covenant.Type
-  ( BuiltinFlatT (BLS12_381_G1_ElementT, BLS12_381_G2_ElementT, BLS12_381_MlResultT, BoolT, ByteStringT, IntegerT, StringT, UnitT),
+  ( BuiltinFlatT (BLS12_381_G1_ElementT,
+                  BLS12_381_G2_ElementT, BLS12_381_MlResultT, BoolT, ByteStringT, IntegerT, StringT, UnitT),
     Constructor (Constructor),
     DataDeclaration (DataDeclaration),
     DataEncoding (BuiltinStrategy, PlutusData, SOP),
-    PlutusDataConstructor (PlutusB, PlutusConstr, PlutusI, PlutusList, PlutusMap),
+    PlutusDataConstructor (PlutusB,
+                           PlutusConstr, PlutusI, PlutusList, PlutusMap),
     PlutusDataStrategy (EnumData, NewtypeData, ProductListData),
     TyName (TyName),
     ValT (Abstraction, Datatype),
@@ -84,13 +137,23 @@ import Data.Aeson
   ( FromJSON (parseJSON),
     ToJSON (toEncoding),
     Value,
-    (.=), eitherDecodeFileStrict,
+    eitherDecodeFileStrict,
+    (.=),
   )
-import Data.Aeson.Encoding (Encoding, int, list, pair, pairs, text, encodingToLazyByteString)
+import Data.Aeson.Encoding (Encoding, encodingToLazyByteString, int, list, pair, pairs, text)
 import Data.Aeson.Encoding.Internal (econcat, (><))
 import Data.Aeson.KeyMap qualified as KM
-import Data.Aeson.Types (Key, Object,
-                         Parser, Array, Value (Object, String), withObject, withArray, withText)
+import Data.Aeson.Types
+  ( Array,
+    Key,
+    Object,
+    Parser,
+    Value (Object, String),
+    withArray,
+    withObject,
+    withText,
+  )
+import Data.Bifunctor (Bifunctor (first))
 import Data.ByteString (ByteString)
 import Data.ByteString.Lazy qualified as BL
 import Data.Char (isAlphaNum, isUpper)
@@ -102,39 +165,37 @@ import Data.Maybe (fromJust)
 import Data.Set qualified as S
 import Data.Text (Text)
 import Data.Text qualified as T
-import Data.Vector qualified as Vector
 import Data.Vector (Vector)
+import Data.Vector qualified as Vector
 import Data.Vector.NonEmpty qualified as NEV
 import GHC.TypeLits (KnownSymbol, Symbol)
 import Optics.Core (preview, review, set, view)
 import Text.Hex qualified as Hex
-import Control.Exception (throwIO)
-import Data.Bifunctor (Bifunctor(first))
-import Control.Monad.Error.Class (MonadError(throwError))
 
-
-compileAndSerialize :: forall (a :: Type)
-                     . FilePath
-                    -> [DataDeclaration AbstractTy]
-                    -> ASGBuilder a
-                    -> Version
-                    -> IO ()
+compileAndSerialize ::
+  forall (a :: Type).
+  FilePath ->
+  [DataDeclaration AbstractTy] ->
+  ASGBuilder a ->
+  Version ->
+  IO ()
 compileAndSerialize path decls asgBuilder version = do
   case mkDatatypeInfos decls of
     Left err' -> throwIO . userError $ err'
     Right infos -> case runASGBuilder infos asgBuilder of
       Left err' -> throwIO . userError . show $ err'
-      Right (ASG (_,asg)) -> do
+      Right (ASG (_, asg)) -> do
         let cu = CompilationUnit (Vector.fromList decls) asg version
         writeJSONWith path cu encodeCompilationUnit
 
-deserializeAndValidate :: FilePath
-                       -> IO ASG
+deserializeAndValidate ::
+  FilePath ->
+  IO ASG
 deserializeAndValidate path = do
   rawCU <- readJSON @CompilationUnit path
   case validateCompilationUnit rawCU of
     Left err' -> throwIO . userError $ "Failed to validate ASG. Reason:\n" <> show err'
-    Right asg -> pure asg 
+    Right asg -> pure asg
 
 data Version = Version {_major :: Int, _minor :: Int}
   deriving stock (Show, Eq, Ord)
@@ -157,7 +218,6 @@ validateCompilationUnit' (CompilationUnit datatypes asg _) = do
     Left err' -> throwError $ OtherError (T.pack err')
     Right infos -> local (set #datatypeInfo infos) $ traverse_ go (M.toList asg)
   where
-
     go :: (Id, ASGNode) -> ASGBuilder ()
     go (parsedId, parsedNode) = case parsedNode of
       ACompNode compT compInfo -> case compInfo of
@@ -204,7 +264,7 @@ encodeCompilationUnit (CompilationUnit datatypes asg version) =
 
 instance FromJSON CompilationUnit where
   parseJSON = withObject "CompilationUnit" $ \obj -> do
-    datatypes <- lookupAndParse' obj "datatypes" $ withArray "datatype" $ \arr -> traverse decodeDataDeclarationAbstractTy  arr
+    datatypes <- lookupAndParse' obj "datatypes" $ withArray "datatype" $ \arr -> traverse decodeDataDeclarationAbstractTy arr
     asg <- lookupAndParse' obj "asg" $ decodeMap decodeId decodeASGNode
     version <- lookupAndParse' obj "version" decodeVersion
     pure $ CompilationUnit datatypes asg version
@@ -253,17 +313,17 @@ encodeTyName (TyName tn) = case T.stripPrefix "#" tn of
 --   2. Consist only of alphanumeric characters and underscores
 -- @since 1.3.0
 decodeTyName :: Value -> Parser TyName
-decodeTyName =  \case
-      String str -> case str of
-        "NaturalBF" -> pure "#Natural"
-        "NegativeBF" -> pure "#Negative"
-        other -> fail $ "Expected 'NaturalBF' or 'NegativeBF' but got " <> T.unpack other
-      Object km -> case KM.lookup "tyName" km of
-        Nothing -> case KM.lookup "baseFunctorOf" km of
-          Nothing -> fail "Received an object for TyName, but it didn't have any valid fields"
-          Just rootType -> TyName . ("#" <>) <$> (parseJSON rootType >>= validateProperName)
-        Just tn -> TyName <$> (parseJSON tn >>= validateProperName)
-      other -> fail $ "Expected a String or Object for TyName, but got: " <> show other
+decodeTyName = \case
+  String str -> case str of
+    "NaturalBF" -> pure "#Natural"
+    "NegativeBF" -> pure "#Negative"
+    other -> fail $ "Expected 'NaturalBF' or 'NegativeBF' but got " <> T.unpack other
+  Object km -> case KM.lookup "tyName" km of
+    Nothing -> case KM.lookup "baseFunctorOf" km of
+      Nothing -> fail "Received an object for TyName, but it didn't have any valid fields"
+      Just rootType -> TyName . ("#" <>) <$> (parseJSON rootType >>= validateProperName)
+    Just tn -> TyName <$> (parseJSON tn >>= validateProperName)
+  other -> fail $ "Expected a String or Object for TyName, but got: " <> show other
 
 validateProperName :: Text -> Parser Text
 validateProperName nm
@@ -338,11 +398,11 @@ decodeDataEncoding = withObject "DataEncoding" go
       case tagStr of
         "SOP" -> pure SOP
         otherTag -> case mfield0 of
-          Nothing ->  fail "No fields present when deserializing a PlutusData"
+          Nothing -> fail "No fields present when deserializing a PlutusData"
           Just field0 -> case otherTag of
             "PlutusData" -> PlutusData <$> decodePlutusDataStrategy field0
             "BuiltinStrategy" -> BuiltinStrategy <$> decodeInternalStrategy field0
-            other ->  fail $ "Invalid DataEncoding tag: " <> show other
+            other -> fail $ "Invalid DataEncoding tag: " <> show other
 
 {- PlutusDataStrategy encodes as a typical sum type. (Omitting the 'fields' field b/c it's an enumeration)
 
@@ -782,7 +842,7 @@ encodeCount = int . review intCount
 -- | @since 1.3.0
 decodeCount :: forall (s :: Symbol). (KnownSymbol s) => Value -> Parser (Count s)
 decodeCount v = do
-  vRaw <-  parseJSON @Int v
+  vRaw <- parseJSON @Int v
   if vRaw < 0
     then fail "Negative Count"
     else pure . fromJust . preview intCount $ vRaw
@@ -1106,7 +1166,6 @@ decodeMap fk fv = withArray "Map" $ \arr ->
     M.empty
     arr
 
-
 -- Mainly for readability/custom fixity, effectively (,)
 data (:=>) a b = a :=> b
 
@@ -1183,24 +1242,26 @@ decodeByteStringHex = withText "ByteString (Hex Encoded)" $ \txt -> case Hex.dec
 
 -- Misc helper (TODO: Probably should be somewhere else?)
 mkDatatypeInfos ::
-      [DataDeclaration AbstractTy] ->
-      Either String (Map TyName (DatatypeInfo AbstractTy))
+  [DataDeclaration AbstractTy] ->
+  Either String (Map TyName (DatatypeInfo AbstractTy))
 mkDatatypeInfos decls = do
   let tyDict = foldl' (\acc x -> M.insert (view #datatypeName x) x acc) M.empty decls
   case checkDataDecls tyDict of
-    Left kcErr -> Left $  "KindCheck error: " <> show kcErr
+    Left kcErr -> Left $ "KindCheck error: " <> show kcErr
     Right _ ->
-      first (("DatatypeInfo error: " <>) . show)
-        $ foldl' (\acc decl -> (<>) <$> mkDatatypeInfo decl <*> acc)
-                 (Right primBaseFunctorInfos)
-                 tyDict
+      first (("DatatypeInfo error: " <>) . show) $
+        foldl'
+          (\acc decl -> (<>) <$> mkDatatypeInfo decl <*> acc)
+          (Right primBaseFunctorInfos)
+          tyDict
 
 -- IO Helpers
 
 writeJSONWith :: forall (a :: Type). FilePath -> a -> (a -> Encoding) -> IO ()
-writeJSONWith path x f = BL.writeFile path (encodingToLazyByteString . f $ x )
+writeJSONWith path x f = BL.writeFile path (encodingToLazyByteString . f $ x)
 
-readJSON :: forall (a :: Type). FromJSON a => FilePath -> IO a
-readJSON path = eitherDecodeFileStrict @a path >>= \case
-  Left err' -> throwIO . userError $ err'
-  Right res -> pure res 
+readJSON :: forall (a :: Type). (FromJSON a) => FilePath -> IO a
+readJSON path =
+  eitherDecodeFileStrict @a path >>= \case
+    Left err' -> throwIO . userError $ err'
+    Right res -> pure res
