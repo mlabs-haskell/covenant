@@ -20,7 +20,8 @@ module Covenant.ASG
   ( -- * The ASG itself
 
     -- ** Types
-    ASG(ASGInner),
+    ASG (ASGInner),
+
     -- ** Functions
     topLevelId,
     topLevelNode,
@@ -307,9 +308,11 @@ newtype ASG = ASG (Id, Map Id ASGNode)
       -- | @since 1.0.0
       Show
     )
+
 {-# COMPLETE ASGInner #-}
+
 pattern ASGInner :: Map Id ASGNode -> ASG
-pattern ASGInner m <- ASG (_,m)
+pattern ASGInner m <- ASG (_, m)
 
 -- Note (Koz, 24/04/25): The `topLevelNode` and `nodeAt` functions use `fromJust`,
 -- because we can guarantee it's impossible to miss. For an end user, the only

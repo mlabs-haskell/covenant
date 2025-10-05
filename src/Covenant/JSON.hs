@@ -27,22 +27,25 @@ module Covenant.JSON
     -- Helper, probably useful somewhere else too
     mkDatatypeInfos,
     -- Error types
-    SerializeErr(..),
-    DeserializeErr(..),
+    SerializeErr (..),
+    DeserializeErr (..),
     -- Convenience for tests
-    deserializeAndValidate_
+    deserializeAndValidate_,
   )
 where
 
 #if __GLASGOW_HASKELL__==908
 import Data.Foldable (foldl')
 #endif
+import Control.Exception (throwIO)
 import Control.Monad (foldM, unless)
 import Control.Monad.Error.Class (MonadError (throwError))
 import Control.Monad.HashCons (MonadHashCons (lookupRef))
+import Control.Monad.IO.Class (MonadIO (liftIO))
 import Control.Monad.Reader (local)
+import Control.Monad.Trans.Except (ExceptT, runExceptT)
 import Covenant.ASG
-  ( ASG(ASGInner),
+  ( ASG (ASGInner),
     ASGBuilder,
     ASGNode,
     Arg,
@@ -278,22 +281,18 @@ import Data.Wedge (Wedge (Here, Nowhere, There))
 import GHC.TypeLits (KnownSymbol, Symbol)
 import Optics.Core (preview, review, set, view)
 import Text.Hex qualified as Hex
-import Control.Monad.Trans.Except (ExceptT, runExceptT)
-import Control.Monad.IO.Class (MonadIO(liftIO))
-import Control.Exception (throwIO)
-
 
 -- | The non-file-IO ways in which `compileAndSerialize` can fail.
 -- @since 1.3.0
 data SerializeErr
   = DatatypeConversionFailure String
   | ASGCompilationFailure CovenantError
-  deriving stock (
-  -- @since 1.3.0
-    Show,
-  -- @since 1.3.0
-    Eq
-  )
+  deriving stock
+    ( -- @since 1.3.0
+      Show,
+      -- @since 1.3.0
+      Eq
+    )
 
 -- | Given an output path, a set of data declarations, an ASGBuilder, and a version tag
 -- compiles the builder and writes the serialized output (bundled with the datatypes)
@@ -315,18 +314,17 @@ compileAndSerialize path decls asgBuilder version = do
         let cu = CompilationUnit (Vector.fromList decls) asg version
         liftIO $ writeJSONWith path cu encodeCompilationUnit
 
-
 -- | The non-file-IO ways in which `deserializeAndValidate` can fail.
 -- @since 1.3.0
 data DeserializeErr
   = JSONParseFailure String
   | ASGValidationFail CovenantError
-  deriving stock (
-  -- @since 1.3.0
-    Show,
-  -- @since 1.3.0
-    Eq
-  )
+  deriving stock
+    ( -- @since 1.3.0
+      Show,
+      -- @since 1.3.0
+      Eq
+    )
 
 -- | Given a file path to a serialized ASG, decode the ASG.
 -- @since 1.3.0
@@ -341,10 +339,8 @@ deserializeAndValidate path = do
 
 -- | Like 'deserializeAndValidate' but runs directly in IO. Convenience helper to avoid superfluous
 -- imports in the tests. You probably want to use the other one.
---
 deserializeAndValidate_ :: FilePath -> IO ASG
-deserializeAndValidate_ path  = runExceptT (deserializeAndValidate path)  >>= either (throwIO . userError . show) pure
-
+deserializeAndValidate_ path = runExceptT (deserializeAndValidate path) >>= either (throwIO . userError . show) pure
 
 -- | Represents a Covenant version. At the moment just a tag, but may be used in the future
 --   to enforce compatibility.
@@ -1497,5 +1493,5 @@ writeJSONWith path x f = BL.writeFile path (encodingToLazyByteString . f $ x)
 readJSON :: forall (a :: Type). (FromJSON a) => FilePath -> ExceptT DeserializeErr IO a
 readJSON path =
   liftIO (eitherDecodeFileStrict @a path) >>= \case
-    Left err' -> throwError . JSONParseFailure  $ err'
+    Left err' -> throwError . JSONParseFailure $ err'
     Right res -> pure res
