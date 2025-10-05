@@ -1,6 +1,5 @@
 {-# LANGUAGE CPP #-}
 {-# LANGUAGE RankNTypes #-}
-{-# OPTIONS_GHC -Wno-missing-export-lists #-}
 
 -- |
 -- Module: Covenant.ASG
@@ -22,22 +21,28 @@
 -- function make clear which types are encoded in which way.)
 -- @since 1.3.0
 module Covenant.JSON
-  ( CompilationUnit (..),
-    Version (..),
+  ( Version (..),
     compileAndSerialize,
     deserializeAndValidate,
     -- Helper, probably useful somewhere else too
     mkDatatypeInfos,
+    -- Error types
+    SerializeErr(..),
+    DeserializeErr(..),
+    -- Convenience for tests
+    deserializeAndValidate_
   )
 where
 
-import Control.Exception (throwIO)
+#if __GLASGOW_HASKELL__==908
+import Data.Foldable (foldl')
+#endif
 import Control.Monad (foldM, unless)
 import Control.Monad.Error.Class (MonadError (throwError))
 import Control.Monad.HashCons (MonadHashCons (lookupRef))
 import Control.Monad.Reader (local)
 import Covenant.ASG
-  ( ASG (ASG),
+  ( ASG(ASGInner),
     ASGBuilder,
     ASGNode,
     Arg,
@@ -257,7 +262,7 @@ import Data.Bifunctor (Bifunctor (first))
 import Data.ByteString (ByteString)
 import Data.ByteString.Lazy qualified as BL
 import Data.Char (isAlphaNum, isUpper)
-import Data.Foldable (foldl', toList, traverse_)
+import Data.Foldable (toList, traverse_)
 import Data.Kind (Type)
 import Data.Map (Map)
 import Data.Map qualified as M
@@ -273,32 +278,77 @@ import Data.Wedge (Wedge (Here, Nowhere, There))
 import GHC.TypeLits (KnownSymbol, Symbol)
 import Optics.Core (preview, review, set, view)
 import Text.Hex qualified as Hex
+import Control.Monad.Trans.Except (ExceptT, runExceptT)
+import Control.Monad.IO.Class (MonadIO(liftIO))
+import Control.Exception (throwIO)
 
+
+-- | The non-file-IO ways in which `compileAndSerialize` can fail.
+-- @since 1.3.0
+data SerializeErr
+  = DatatypeConversionFailure String
+  | ASGCompilationFailure CovenantError
+  deriving stock (
+  -- @since 1.3.0
+    Show,
+  -- @since 1.3.0
+    Eq
+  )
+
+-- | Given an output path, a set of data declarations, an ASGBuilder, and a version tag
+-- compiles the builder and writes the serialized output (bundled with the datatypes)
+-- to the designated path
+-- @since 1.3.0
 compileAndSerialize ::
   forall (a :: Type).
   FilePath ->
   [DataDeclaration AbstractTy] ->
   ASGBuilder a ->
   Version ->
-  IO ()
+  ExceptT SerializeErr IO ()
 compileAndSerialize path decls asgBuilder version = do
   case mkDatatypeInfos decls of
-    Left err' -> throwIO . userError $ err'
+    Left err' -> throwError . DatatypeConversionFailure $ err'
     Right infos -> case runASGBuilder infos asgBuilder of
-      Left err' -> throwIO . userError . show $ err'
-      Right (ASG (_, asg)) -> do
+      Left err' -> throwError . ASGCompilationFailure $ err'
+      Right (ASGInner asg) -> do
         let cu = CompilationUnit (Vector.fromList decls) asg version
-        writeJSONWith path cu encodeCompilationUnit
+        liftIO $ writeJSONWith path cu encodeCompilationUnit
 
+
+-- | The non-file-IO ways in which `deserializeAndValidate` can fail.
+-- @since 1.3.0
+data DeserializeErr
+  = JSONParseFailure String
+  | ASGValidationFail CovenantError
+  deriving stock (
+  -- @since 1.3.0
+    Show,
+  -- @since 1.3.0
+    Eq
+  )
+
+-- | Given a file path to a serialized ASG, decode the ASG.
+-- @since 1.3.0
 deserializeAndValidate ::
   FilePath ->
-  IO ASG
+  ExceptT DeserializeErr IO ASG
 deserializeAndValidate path = do
   rawCU <- readJSON @CompilationUnit path
   case validateCompilationUnit rawCU of
-    Left err' -> throwIO . userError $ "Failed to validate ASG. Reason:\n" <> show err'
+    Left err' -> throwError . ASGValidationFail $ err'
     Right asg -> pure asg
 
+-- | Like 'deserializeAndValidate' but runs directly in IO. Convenience helper to avoid superfluous
+-- imports in the tests. You probably want to use the other one.
+--
+deserializeAndValidate_ :: FilePath -> IO ASG
+deserializeAndValidate_ path  = runExceptT (deserializeAndValidate path)  >>= either (throwIO . userError . show) pure
+
+
+-- | Represents a Covenant version. At the moment just a tag, but may be used in the future
+--   to enforce compatibility.
+-- @since 1.3.0
 data Version = Version {_major :: Int, _minor :: Int}
   deriving stock (Show, Eq, Ord)
 
@@ -415,8 +465,8 @@ encodeTyName :: TyName -> Encoding
 encodeTyName (TyName tn) = case T.stripPrefix "#" tn of
   Nothing -> pairs ("tyName" .= tn)
   Just rootTypeName -> case rootTypeName of
-    "#Natural" -> text "NaturalBF"
-    "#Negative" -> text "NegativeBF"
+    "Natural" -> text "NaturalBF"
+    "Negative" -> text "NegativeBF"
     other -> pairs ("baseFunctorOf" .= other)
 
 -- | The type name must conform with the type naming rules, i.e. it must
@@ -1421,7 +1471,10 @@ decodeByteStringHex = withText "ByteString (Hex Encoded)" $ \txt -> case Hex.dec
   Nothing -> fail $ "Failed to decode hex bytestring: " <> show txt
   Just bs -> pure bs
 
--- Misc helper (TODO: Probably should be somewhere else?)
+-- | The safe version of 'unsafeMkDatatypeInfos'. Given a collection of datatypes,
+-- convert to DatatypeInfo by generating base functor and BB components, then
+-- add the prim base functor datatype infos.
+-- @since 1.3.0
 mkDatatypeInfos ::
   [DataDeclaration AbstractTy] ->
   Either String (Map TyName (DatatypeInfo AbstractTy))
@@ -1441,8 +1494,8 @@ mkDatatypeInfos decls = do
 writeJSONWith :: forall (a :: Type). FilePath -> a -> (a -> Encoding) -> IO ()
 writeJSONWith path x f = BL.writeFile path (encodingToLazyByteString . f $ x)
 
-readJSON :: forall (a :: Type). (FromJSON a) => FilePath -> IO a
+readJSON :: forall (a :: Type). (FromJSON a) => FilePath -> ExceptT DeserializeErr IO a
 readJSON path =
-  eitherDecodeFileStrict @a path >>= \case
-    Left err' -> throwIO . userError $ err'
+  liftIO (eitherDecodeFileStrict @a path) >>= \case
+    Left err' -> throwError . JSONParseFailure  $ err'
     Right res -> pure res
