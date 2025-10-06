@@ -6,7 +6,7 @@ module Main (main) where
 import Control.Applicative ((<|>))
 import Control.Monad (guard, void)
 import Covenant.ASG
-  ( ASG,
+  ( ASGInternal,
     ASGBuilder,
     ASGNode (ACompNode, AValNode, AnError),
     CompNodeInfo
@@ -830,12 +830,12 @@ withCompilationFailure comp cb = case runASGBuilder M.empty comp of
   Left err' -> cb err'
   Right asg -> failWithCounterExample ("Unexpected success: " <> show asg)
 
-withCompilationSuccess :: ASGBuilder Id -> (ASG -> Property) -> Property
+withCompilationSuccess :: ASGBuilder Id -> (ASGInternal -> Property) -> Property
 withCompilationSuccess comp cb = case runASGBuilder M.empty comp of
   Left err' -> failWithCounterExample ("Unexpected failure: " <> show err')
   Right asg -> cb asg
 
-withToplevelCompNode :: ASG -> (CompT AbstractTy -> CompNodeInfo -> Property) -> Property
+withToplevelCompNode :: ASGInternal -> (CompT AbstractTy -> CompNodeInfo -> Property) -> Property
 withToplevelCompNode asg cb = case topLevelNode asg of
   ACompNode t info -> cb t info
   node -> failWithCounterExample ("Unexpected toplevel node: " <> show node)
@@ -851,7 +851,7 @@ failUnexpectedValNodeInfo :: ValNodeInfo -> Property
 failUnexpectedValNodeInfo info =
   failWithCounterExample ("Unexpected ValNodeInfo: " <> show info)
 
-withCompilationSuccessUnit :: ASGBuilder Id -> (ASG -> IO ()) -> IO ()
+withCompilationSuccessUnit :: ASGBuilder Id -> (ASGInternal -> IO ()) -> IO ()
 withCompilationSuccessUnit comp cb = case runASGBuilder defaultDatatypes comp of
   Left err' -> assertFailure $ "Did not compile: " <> show err'
   Right asg -> cb asg
@@ -861,7 +861,7 @@ withCompilationFailureUnit comp cb = case runASGBuilder defaultDatatypes comp of
   Left err' -> cb err'
   Right asg -> assertFailure $ "Unexpected compilation success: " <> show asg
 
-matchesType :: CompT AbstractTy -> ASG -> IO ()
+matchesType :: CompT AbstractTy -> ASGInternal -> IO ()
 matchesType expectedTy asg = case topLevelNode asg of
   ACompNode actualTy _ -> assertEqual "" expectedTy actualTy
   u@(AValNode _ _) -> assertFailure $ "Got a value node: " <> show u
