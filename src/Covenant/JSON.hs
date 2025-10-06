@@ -45,8 +45,8 @@ import Control.Monad.IO.Class (MonadIO (liftIO))
 import Control.Monad.Reader (local)
 import Control.Monad.Trans.Except (ExceptT, runExceptT)
 import Covenant.ASG
-  ( ASGInternal (ASG),
-    ASGBuilder,
+  ( ASGBuilder,
+    ASGInternal (ASG),
     ASGNode,
     Arg,
     CompNodeInfo,

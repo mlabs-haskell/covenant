@@ -4,8 +4,8 @@ module Main (main) where
 
 import Control.Monad (void)
 import Covenant.ASG
-  ( ASGInternal,
-    ASGBuilder,
+  ( ASGBuilder,
+    ASGInternal,
     CovenantError,
     Id,
     Ref (AnArg, AnId),
