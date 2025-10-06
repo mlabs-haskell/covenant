@@ -45,8 +45,8 @@ import Control.Monad.IO.Class (MonadIO (liftIO))
 import Control.Monad.Reader (local)
 import Control.Monad.Trans.Except (ExceptT, runExceptT)
 import Covenant.ASG
-  ( ASGBuilder,
-    ASGInternal (ASG),
+  ( ASG (ASG),
+    ASGBuilder,
     ASGNode,
     Arg,
     CompNodeInfo,
@@ -330,7 +330,7 @@ data DeserializeErr
 -- @since 1.3.0
 deserializeAndValidate ::
   FilePath ->
-  ExceptT DeserializeErr IO ASGInternal
+  ExceptT DeserializeErr IO ASG
 deserializeAndValidate path = do
   rawCU <- readJSON @CompilationUnit path
   case validateCompilationUnit rawCU of
@@ -339,7 +339,7 @@ deserializeAndValidate path = do
 
 -- | Like 'deserializeAndValidate' but runs directly in IO. Convenience helper to avoid superfluous
 -- imports in the tests. You probably want to use the other one.
-deserializeAndValidate_ :: FilePath -> IO ASGInternal
+deserializeAndValidate_ :: FilePath -> IO ASG
 deserializeAndValidate_ path = runExceptT (deserializeAndValidate path) >>= either (throwIO . userError . show) pure
 
 -- | Represents a Covenant version. At the moment just a tag, but may be used in the future
@@ -357,7 +357,7 @@ data CompilationUnit
   deriving stock (Show, Eq)
 
 -- NOTE: We run w/ an empty map because the declarations get inserted after they are kindchecked
-validateCompilationUnit :: CompilationUnit -> Either CovenantError ASGInternal
+validateCompilationUnit :: CompilationUnit -> Either CovenantError ASG
 validateCompilationUnit = runASGBuilder M.empty . validateCompilationUnit'
 
 validateCompilationUnit' :: CompilationUnit -> ASGBuilder ()

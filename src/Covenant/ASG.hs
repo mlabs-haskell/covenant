@@ -20,7 +20,7 @@ module Covenant.ASG
   ( -- * The ASG itself
 
     -- ** Types
-    ASGInternal (ASG),
+    ASG (ASG),
 
     -- ** Functions
     topLevelId,
@@ -301,7 +301,7 @@ import Optics.Core
 -- | A fully-assembled Covenant ASG.
 --
 -- @since 1.0.0
-newtype ASGInternal = ASGInternal (Id, Map Id ASGNode)
+newtype ASG = ASGInternal (Id, Map Id ASGNode)
   deriving stock
     ( -- | @since 1.0.0
       Eq,
@@ -311,7 +311,7 @@ newtype ASGInternal = ASGInternal (Id, Map Id ASGNode)
 
 {-# COMPLETE ASG #-}
 
-pattern ASG :: Map Id ASGNode -> ASGInternal
+pattern ASG :: Map Id ASGNode -> ASG
 pattern ASG m <- ASGInternal (_, m)
 
 -- Note (Koz, 24/04/25): The `topLevelNode` and `nodeAt` functions use `fromJust`,
@@ -327,13 +327,13 @@ pattern ASG m <- ASGInternal (_, m)
 -- | Retrieves the top-level 'Id' of an ASG.
 --
 -- @since 1.3.0
-topLevelId :: ASGInternal -> Id
+topLevelId :: ASG -> Id
 topLevelId (ASGInternal (i, _)) = i
 
 -- | Retrieves the top-level node of an ASG.
 --
 -- @since 1.0.0
-topLevelNode :: ASGInternal -> ASGNode
+topLevelNode :: ASG -> ASGNode
 topLevelNode asg@(ASGInternal (rootId, _)) = nodeAt rootId asg
 
 -- | Given an 'Id' and an ASG, produces the node corresponding to that 'Id'.
@@ -346,7 +346,7 @@ topLevelNode asg@(ASGInternal (rootId, _)) = nodeAt rootId asg
 -- results, and at worst will crash. You have been warned.
 --
 -- @since 1.0.0
-nodeAt :: Id -> ASGInternal -> ASGNode
+nodeAt :: Id -> ASG -> ASGNode
 nodeAt i (ASG mappings) = fromJust . Map.lookup i $ mappings
 
 -- | The environment used when \'building up\' an 'ASG'. This type is exposed
@@ -558,7 +558,7 @@ runASGBuilder ::
   forall (a :: Type).
   Map TyName (DatatypeInfo AbstractTy) ->
   ASGBuilder a ->
-  Either CovenantError ASGInternal
+  Either CovenantError ASG
 runASGBuilder tyDict (ASGBuilder comp) =
   case runIdentity . runHashConsT . runExceptT . runReaderT comp $ ASGEnv (ScopeInfo Vector.empty) tyDict of
     (result, bm) -> case result of

@@ -6,8 +6,8 @@ module Main (main) where
 import Control.Applicative ((<|>))
 import Control.Monad (guard, void)
 import Covenant.ASG
-  ( ASGBuilder,
-    ASGInternal,
+  ( ASG,
+    ASGBuilder,
     ASGNode (ACompNode, AValNode, AnError),
     CompNodeInfo
       ( Builtin1,
@@ -800,15 +800,14 @@ unifyOpaque = runIntroFormTest "unifyOpaque" unifyOpaqueTy $ do
   thonk <- lazyLam unifyOpaqueCompTy $ do
     let nothingHandlerTy = Comp0 $ ReturnT (BuiltinFlat IntegerT)
         justHandlerTy = Comp0 $ dtype "Foo" [] :--:> ReturnT (BuiltinFlat IntegerT)
-    nothingHandler <- lazyLam nothingHandlerTy $ (AnId <$> lit (AnInteger 0))
-    justHandler <- lazyLam justHandlerTy $ (AnId <$> lit (AnInteger 1))
+    nothingHandler <- lazyLam nothingHandlerTy (AnId <$> lit (AnInteger 0))
+    justHandler <- lazyLam justHandlerTy (AnId <$> lit (AnInteger 1))
     scrutinee <- AnArg <$> arg Z ix0
     AnId <$> match scrutinee (AnId <$> Vector.fromList [justHandler, nothingHandler])
   typeIdTest thonk
   where
     unifyOpaqueCompTy :: CompT AbstractTy
     unifyOpaqueCompTy = Comp0 $ dtype "Maybe" [dtype "Foo" []] :--:> ReturnT (BuiltinFlat IntegerT)
-
     unifyOpaqueTy :: ValT AbstractTy
     unifyOpaqueTy = ThunkT unifyOpaqueCompTy
 
@@ -830,12 +829,12 @@ withCompilationFailure comp cb = case runASGBuilder M.empty comp of
   Left err' -> cb err'
   Right asg -> failWithCounterExample ("Unexpected success: " <> show asg)
 
-withCompilationSuccess :: ASGBuilder Id -> (ASGInternal -> Property) -> Property
+withCompilationSuccess :: ASGBuilder Id -> (ASG -> Property) -> Property
 withCompilationSuccess comp cb = case runASGBuilder M.empty comp of
   Left err' -> failWithCounterExample ("Unexpected failure: " <> show err')
   Right asg -> cb asg
 
-withToplevelCompNode :: ASGInternal -> (CompT AbstractTy -> CompNodeInfo -> Property) -> Property
+withToplevelCompNode :: ASG -> (CompT AbstractTy -> CompNodeInfo -> Property) -> Property
 withToplevelCompNode asg cb = case topLevelNode asg of
   ACompNode t info -> cb t info
   node -> failWithCounterExample ("Unexpected toplevel node: " <> show node)
@@ -851,7 +850,7 @@ failUnexpectedValNodeInfo :: ValNodeInfo -> Property
 failUnexpectedValNodeInfo info =
   failWithCounterExample ("Unexpected ValNodeInfo: " <> show info)
 
-withCompilationSuccessUnit :: ASGBuilder Id -> (ASGInternal -> IO ()) -> IO ()
+withCompilationSuccessUnit :: ASGBuilder Id -> (ASG -> IO ()) -> IO ()
 withCompilationSuccessUnit comp cb = case runASGBuilder defaultDatatypes comp of
   Left err' -> assertFailure $ "Did not compile: " <> show err'
   Right asg -> cb asg
@@ -861,7 +860,7 @@ withCompilationFailureUnit comp cb = case runASGBuilder defaultDatatypes comp of
   Left err' -> cb err'
   Right asg -> assertFailure $ "Unexpected compilation success: " <> show asg
 
-matchesType :: CompT AbstractTy -> ASGInternal -> IO ()
+matchesType :: CompT AbstractTy -> ASG -> IO ()
 matchesType expectedTy asg = case topLevelNode asg of
   ACompNode actualTy _ -> assertEqual "" expectedTy actualTy
   u@(AValNode _ _) -> assertFailure $ "Got a value node: " <> show u
