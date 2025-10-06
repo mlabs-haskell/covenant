@@ -6,8 +6,8 @@ module Main (main) where
 import Control.Applicative ((<|>))
 import Control.Monad (guard, void)
 import Covenant.ASG
-  ( ASGInternal,
-    ASGBuilder,
+  ( ASGBuilder,
+    ASGInternal,
     ASGNode (ACompNode, AValNode, AnError),
     CompNodeInfo
       ( Builtin1,
