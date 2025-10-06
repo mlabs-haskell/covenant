@@ -800,15 +800,14 @@ unifyOpaque = runIntroFormTest "unifyOpaque" unifyOpaqueTy $ do
   thonk <- lazyLam unifyOpaqueCompTy $ do
     let nothingHandlerTy = Comp0 $ ReturnT (BuiltinFlat IntegerT)
         justHandlerTy = Comp0 $ dtype "Foo" [] :--:> ReturnT (BuiltinFlat IntegerT)
-    nothingHandler <- lazyLam nothingHandlerTy $ (AnId <$> lit (AnInteger 0))
-    justHandler <- lazyLam justHandlerTy $ (AnId <$> lit (AnInteger 1))
+    nothingHandler <- lazyLam nothingHandlerTy (AnId <$> lit (AnInteger 0))
+    justHandler <- lazyLam justHandlerTy (AnId <$> lit (AnInteger 1))
     scrutinee <- AnArg <$> arg Z ix0
     AnId <$> match scrutinee (AnId <$> Vector.fromList [justHandler, nothingHandler])
   typeIdTest thonk
   where
     unifyOpaqueCompTy :: CompT AbstractTy
     unifyOpaqueCompTy = Comp0 $ dtype "Maybe" [dtype "Foo" []] :--:> ReturnT (BuiltinFlat IntegerT)
-
     unifyOpaqueTy :: ValT AbstractTy
     unifyOpaqueTy = ThunkT unifyOpaqueCompTy
 

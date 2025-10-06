@@ -11,6 +11,7 @@ module Covenant.Internal.Term
     ASGNode (..),
     typeASGNode,
     ASGNodeType (..),
+    BoundTyVar (..),
   )
 where
 
@@ -33,7 +34,10 @@ import Covenant.Prim (OneArgFunc, SixArgFunc, ThreeArgFunc, TwoArgFunc)
 import Covenant.Type (ConstructorName, PlutusDataConstructor, Renamed)
 import Data.Kind (Type)
 import Data.Set qualified as Set
+import Data.Text (Text)
 import Data.Vector (Vector)
+import Data.Void (Void)
+import Data.Wedge (Wedge)
 import Data.Word (Word64)
 
 -- | An error that can arise during the construction of an ASG by programmatic
@@ -266,12 +270,15 @@ data CovenantTypeError
     --   itself does not exist. It does not seem important to distinguish between the two failure cases.
     -- @since 1.3.0
     BaseFunctorDoesNotExistFor TyName
-  | -- 'app' was called with a number of instantiation arguments that does not match the number of
+  | -- | 'app' was called with a number of instantiation arguments that does not match the number of
     -- type variables bound in Count the CompT of the function to which arguments are being applied.
     -- The first Int is the  number of bound tyvars in the function type, the second is the number of
     -- instantiations supplied.
     -- @since 1.3.0
     WrongNumInstantiationsInApp (CompT Renamed) Int Int
+  | -- | A miscellaneous error, needed to catch various things that can go wrong during datatype preparation and
+    -- deserialization
+    OtherError Text
   deriving stock
     ( -- | @since 1.0.0
       Eq,
@@ -385,7 +392,8 @@ data CompNodeInfo
 -- @since 1.0.0
 data ValNodeInfo
   = LitInternal AConstant
-  | AppInternal Id (Vector Ref)
+  | -- | @since 1.3.0
+    AppInternal Id (Vector Ref) (Vector (Wedge BoundTyVar (ValT Void)))
   | ThunkInternal Id
   | -- | @since 1.1.0
     CataInternal Ref Ref
@@ -451,4 +459,18 @@ data ASGNodeType
       Ord,
       -- | @since 1.0.0
       Show
+    )
+
+-- NOTE: Had to move this here
+
+-- | Wrapper around an `Arg` that we know represents an in-scope type variable.
+-- @since 1.2.0
+data BoundTyVar = BoundTyVar DeBruijn (Index "tyvar")
+  deriving stock
+    ( -- @since 1.2.0
+      Show,
+      -- @since 1.2.0
+      Eq,
+      -- @since 1.2.0
+      Ord
     )

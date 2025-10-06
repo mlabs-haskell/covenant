@@ -20,7 +20,7 @@ module Covenant.ASG
   ( -- * The ASG itself
 
     -- ** Types
-    ASG,
+    ASG (ASG),
 
     -- ** Functions
     topLevelId,
@@ -143,6 +143,7 @@ import Covenant.Internal.Term
   ( ASGNode (ACompNode, AValNode, AnError),
     ASGNodeType (CompNodeType, ErrorNodeType, ValNodeType),
     Arg (Arg),
+    BoundTyVar (BoundTyVar),
     CompNodeInfo
       ( Builtin1Internal,
         Builtin2Internal,
@@ -300,13 +301,18 @@ import Optics.Core
 -- | A fully-assembled Covenant ASG.
 --
 -- @since 1.0.0
-newtype ASG = ASG (Id, Map Id ASGNode)
+newtype ASG = ASGInternal (Id, Map Id ASGNode)
   deriving stock
     ( -- | @since 1.0.0
       Eq,
       -- | @since 1.0.0
       Show
     )
+
+{-# COMPLETE ASG #-}
+
+pattern ASG :: Map Id ASGNode -> ASG
+pattern ASG m <- ASGInternal (_, m)
 
 -- Note (Koz, 24/04/25): The `topLevelNode` and `nodeAt` functions use `fromJust`,
 -- because we can guarantee it's impossible to miss. For an end user, the only
@@ -322,13 +328,13 @@ newtype ASG = ASG (Id, Map Id ASGNode)
 --
 -- @since 1.3.0
 topLevelId :: ASG -> Id
-topLevelId (ASG (i, _)) = i
+topLevelId (ASGInternal (i, _)) = i
 
 -- | Retrieves the top-level node of an ASG.
 --
 -- @since 1.0.0
 topLevelNode :: ASG -> ASGNode
-topLevelNode asg@(ASG (rootId, _)) = nodeAt rootId asg
+topLevelNode asg@(ASGInternal (rootId, _)) = nodeAt rootId asg
 
 -- | Given an 'Id' and an ASG, produces the node corresponding to that 'Id'.
 --
@@ -341,7 +347,7 @@ topLevelNode asg@(ASG (rootId, _)) = nodeAt rootId asg
 --
 -- @since 1.0.0
 nodeAt :: Id -> ASG -> ASGNode
-nodeAt i (ASG (_, mappings)) = fromJust . Map.lookup i $ mappings
+nodeAt i (ASG mappings) = fromJust . Map.lookup i $ mappings
 
 -- | The environment used when \'building up\' an 'ASG'. This type is exposed
 -- only for testing, or debugging, and should /not/ be used in general by those
@@ -453,8 +459,8 @@ pattern Lit c <- LitInternal c
 -- 'Vector' field).
 --
 -- @since 1.0.0
-pattern App :: Id -> Vector Ref -> ValNodeInfo
-pattern App f args <- AppInternal f args
+pattern App :: Id -> Vector Ref -> Vector (Wedge BoundTyVar (ValT Void)) -> ValNodeInfo
+pattern App f args instTys <- AppInternal f args instTys
 
 -- | Wrap a computation into a value (essentially delaying it).
 --
@@ -563,7 +569,7 @@ runASGBuilder tyDict (ASGBuilder comp) =
           let (i, rootNode') = Bimap.findMax bm
           case rootNode' of
             AnError -> Left TopLevelError
-            ACompNode _ _ -> pure . ASG $ (i, Bimap.toMap bm)
+            ACompNode _ _ -> pure . ASGInternal $ (i, Bimap.toMap bm)
             AValNode t info -> Left . TopLevelValue bm t $ info
 
 -- | Given a scope and a positional argument index, construct that argument.
@@ -754,7 +760,7 @@ app fId argRefs instTys = do
             result <- either (throwError . UnificationError) pure $ checkApp tyDict instantiatedFT (Vector.toList renamedArgs)
             restored <- undoRenameM result
             checkEncodingWithInfo tyDict restored
-            refTo . AValNode restored . AppInternal fId $ argRefs
+            refTo . AValNode restored $ AppInternal fId argRefs instTys
     ValNodeType t -> throwError . ApplyToValType $ t
     ErrorNodeType -> throwError ApplyToError
   where
@@ -1253,18 +1259,6 @@ tryApply algebraT argT =
           Right resultT -> undoRenameM resultT
 
 -- Putting this here to reduce chance of annoying manual merge (will move later)
-
--- | Wrapper around an `Arg` that we know represents an in-scope type variable.
--- @since 1.2.0
-data BoundTyVar = BoundTyVar DeBruijn (Index "tyvar")
-  deriving stock
-    ( -- @since 1.2.0
-      Show,
-      -- @since 1.2.0
-      Eq,
-      -- @since 1.2.0
-      Ord
-    )
 
 -- | Given a DeBruijn index (designating scope) and positional index (designating
 -- which variable in that scope we are interested in), retrieve an in-scope type
