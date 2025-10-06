@@ -20,7 +20,7 @@ module Covenant.ASG
   ( -- * The ASG itself
 
     -- ** Types
-    ASG (ASGInner),
+    ASGInternal (ASG),
 
     -- ** Functions
     topLevelId,
@@ -301,7 +301,7 @@ import Optics.Core
 -- | A fully-assembled Covenant ASG.
 --
 -- @since 1.0.0
-newtype ASG = ASG (Id, Map Id ASGNode)
+newtype ASGInternal = ASGInternal (Id, Map Id ASGNode)
   deriving stock
     ( -- | @since 1.0.0
       Eq,
@@ -309,10 +309,10 @@ newtype ASG = ASG (Id, Map Id ASGNode)
       Show
     )
 
-{-# COMPLETE ASGInner #-}
+{-# COMPLETE ASG #-}
 
-pattern ASGInner :: Map Id ASGNode -> ASG
-pattern ASGInner m <- ASG (_, m)
+pattern ASG :: Map Id ASGNode -> ASGInternal
+pattern ASG m <- ASGInternal (_, m)
 
 -- Note (Koz, 24/04/25): The `topLevelNode` and `nodeAt` functions use `fromJust`,
 -- because we can guarantee it's impossible to miss. For an end user, the only
@@ -327,14 +327,14 @@ pattern ASGInner m <- ASG (_, m)
 -- | Retrieves the top-level 'Id' of an ASG.
 --
 -- @since 1.3.0
-topLevelId :: ASG -> Id
-topLevelId (ASG (i, _)) = i
+topLevelId :: ASGInternal -> Id
+topLevelId (ASGInternal (i, _)) = i
 
 -- | Retrieves the top-level node of an ASG.
 --
 -- @since 1.0.0
-topLevelNode :: ASG -> ASGNode
-topLevelNode asg@(ASG (rootId, _)) = nodeAt rootId asg
+topLevelNode :: ASGInternal -> ASGNode
+topLevelNode asg@(ASGInternal (rootId, _)) = nodeAt rootId asg
 
 -- | Given an 'Id' and an ASG, produces the node corresponding to that 'Id'.
 --
@@ -346,8 +346,8 @@ topLevelNode asg@(ASG (rootId, _)) = nodeAt rootId asg
 -- results, and at worst will crash. You have been warned.
 --
 -- @since 1.0.0
-nodeAt :: Id -> ASG -> ASGNode
-nodeAt i (ASG (_, mappings)) = fromJust . Map.lookup i $ mappings
+nodeAt :: Id -> ASGInternal -> ASGNode
+nodeAt i (ASG mappings) = fromJust . Map.lookup i $ mappings
 
 -- | The environment used when \'building up\' an 'ASG'. This type is exposed
 -- only for testing, or debugging, and should /not/ be used in general by those
@@ -558,7 +558,7 @@ runASGBuilder ::
   forall (a :: Type).
   Map TyName (DatatypeInfo AbstractTy) ->
   ASGBuilder a ->
-  Either CovenantError ASG
+  Either CovenantError ASGInternal
 runASGBuilder tyDict (ASGBuilder comp) =
   case runIdentity . runHashConsT . runExceptT . runReaderT comp $ ASGEnv (ScopeInfo Vector.empty) tyDict of
     (result, bm) -> case result of
@@ -569,7 +569,7 @@ runASGBuilder tyDict (ASGBuilder comp) =
           let (i, rootNode') = Bimap.findMax bm
           case rootNode' of
             AnError -> Left TopLevelError
-            ACompNode _ _ -> pure . ASG $ (i, Bimap.toMap bm)
+            ACompNode _ _ -> pure . ASGInternal $ (i, Bimap.toMap bm)
             AValNode t info -> Left . TopLevelValue bm t $ info
 
 -- | Given a scope and a positional argument index, construct that argument.

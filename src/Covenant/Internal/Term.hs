@@ -392,6 +392,7 @@ data CompNodeInfo
 -- @since 1.0.0
 data ValNodeInfo
   = LitInternal AConstant
+  -- | @since 1.3.0
   | AppInternal Id (Vector Ref) (Vector (Wedge BoundTyVar (ValT Void)))
   | ThunkInternal Id
   | -- | @since 1.1.0

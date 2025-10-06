@@ -40,7 +40,7 @@ import Control.Monad.Action
     runUpdateT,
   )
 import Covenant.ASG
-  ( ASG,
+  ( ASGInternal,
     ASGNode (ACompNode, AValNode, AnError),
     Arg,
     CompNodeInfo (Force, Lam),
@@ -143,7 +143,7 @@ data Tape a b = Tape [a] b [a]
 -- to get here.
 --
 -- @since 1.3.0
-data ZipperState = ZipperState Bool ASG [Tape Ref Id] (Tape Ref Ref)
+data ZipperState = ZipperState Bool ASGInternal [Tape Ref Id] (Tape Ref Ref)
 
 -- | Matches on a working zipper, giving access to a stack of 'Tape's
 -- representing the path taken to get here (tracking sibling positions) and the
@@ -192,7 +192,7 @@ newtype ASGZipper (a :: Type)
 -- @since 1.3.0
 runASGZipper ::
   forall (a :: Type).
-  ASG ->
+  ASGInternal ->
   ASGZipper a ->
   a
 runASGZipper g (ASGZipper comp) =
@@ -269,7 +269,7 @@ resetStep zs@(ZipperState walkedOff g parentLevels currentLevel) =
     then ZipperState False g parentLevels currentLevel
     else zs
 
-getNodeInfo :: ASG -> Tape Ref Ref -> Tape Ref (Either Arg ASGNode)
+getNodeInfo :: ASGInternal -> Tape Ref Ref -> Tape Ref (Either Arg ASGNode)
 getNodeInfo g =
   fmap
     ( \case

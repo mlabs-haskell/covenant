@@ -4,7 +4,7 @@ module Main (main) where
 
 import Control.Monad (void)
 import Covenant.ASG
-  ( ASG,
+  ( ASGInternal,
     ASGBuilder,
     CovenantError,
     Id,
@@ -104,7 +104,7 @@ x #== y = do
   equals <- builtin2 EqualsInteger
   AnId <$> app' equals [x, y]
 
-conformance_body1 :: Either CovenantError ASG
+conformance_body1 :: Either CovenantError ASGInternal
 conformance_body1 =
   runASGBuilder
     (unsafeMkDatatypeInfos conformanceDatatypes1)
@@ -220,7 +220,7 @@ f mabPairIntFoo =
        )
 -}
 
-conformance_body2 :: Either CovenantError ASG
+conformance_body2 :: Either CovenantError ASGInternal
 conformance_body2 =
   runASGBuilder
     (unsafeMkDatatypeInfos conformanceDatatypes2)
