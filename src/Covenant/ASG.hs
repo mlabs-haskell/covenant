@@ -311,6 +311,7 @@ newtype ASG = ASGInternal (Id, Map Id ASGNode)
 
 {-# COMPLETE ASG #-}
 
+-- | @since 1.3.0
 pattern ASG :: Map Id ASGNode -> ASG
 pattern ASG m <- ASGInternal (_, m)
 
@@ -455,11 +456,21 @@ pattern Lam r <- LamInternal r
 pattern Lit :: AConstant -> ValNodeInfo
 pattern Lit c <- LitInternal c
 
--- | An application of a computation (the 'Id' field) to some arguments (the
--- 'Vector' field).
+-- | An application of a computation (the 'Id' field) to some arguments. The
+-- first 'Vector' argument contains the term arguments, while the second 'Vector'
+-- argument contains the type arguments, as one of:
 --
--- @since 1.0.0
-pattern App :: Id -> Vector Ref -> Vector (Wedge BoundTyVar (ValT Void)) -> ValNodeInfo
+-- * 'Data.Wedge.Nowhere', meaning \'inferred\';
+-- * 'Data.Wedge.Here', meaning \'a bound type variable from a parent scope\';
+-- or
+-- * 'Data.Wedge.There', meaning \'a concrete type\'.
+--
+-- @since 1.3.0
+pattern App ::
+  Id ->
+  Vector Ref ->
+  Vector (Wedge BoundTyVar (ValT Void)) ->
+  ValNodeInfo
 pattern App f args instTys <- AppInternal f args instTys
 
 -- | Wrap a computation into a value (essentially delaying it).
@@ -728,9 +739,9 @@ err = refTo AnError
 -- We use the 'Wedge' data type to designate type arguments, as it can represent
 -- the three possibilities we need:
 --
--- * \'Infer this argument\', specified as 'Nowhere'.
--- * \'Use this type variable in our scope\', specified as 'Here'.
--- * \'Use this concrete type\', specified as 'There'.
+-- * \'Infer this argument\', specified as 'Data.Wedge.Nowhere'.
+-- * \'Use this type variable in our scope\', specified as 'Data.Wedge.Here'.
+-- * \'Use this concrete type\', specified as 'Data.Wedge.There'.
 --
 -- @since 1.2.0
 app ::
@@ -812,7 +823,7 @@ app fId argRefs instTys = do
 -- case.
 --
 -- We resolve this problem by returning a thunk. In the case of our example,
--- @Nothing@ would produce @<forall a . !Maybe a>@.
+-- @Nothing@ would produce @\<forall a . !Maybe a\>@.
 --
 -- @since 1.2.0
 dataConstructor ::
@@ -1338,7 +1349,7 @@ liftUnifyM act = do
 --
 -- Consider @Left 3@. In this case, the field only determines the first type
 -- argument to the @Either@ data type, and if we used 'dataConstructor', we
--- would be left with a thunk of type @<forall a . !Either Integer a>@. Using
+-- would be left with a thunk of type @\<forall a . !Either Integer a\>@. Using
 -- 'ctor', we can immediately specify what @a@ should be, and unwrap the thunk.
 --
 -- @since 1.2.0
@@ -1356,6 +1367,7 @@ ctor tn cn args instTys = do
   app dataForced mempty instTys
 
 -- | 'ctor' without the instantiation arguments, which are left up to inference.
+--
 -- @since 1.3.0
 ctor' ::
   forall (m :: Type -> Type).
@@ -1369,8 +1381,9 @@ ctor' tn cn args = do
   dataForced <- force (AnId dataThunk)
   app' dataForced mempty
 
--- | A variant of `app` which does not take a vector of type instantiation arguments and
---   attempts to infer all type variables.
+-- | A variant of `app` which does not take a 'Vector' of type instantiation
+-- arguments and instead will try to infer all type arguments.
+--
 -- @since 1.3.0
 app' ::
   forall (m :: Type -> Type).
@@ -1420,20 +1433,20 @@ baseFunctorOf (TyName tn) = do
     Nothing -> throwError $ BaseFunctorDoesNotExistFor (TyName tn)
     Just {} -> pure bfTn
 
--- Hardcoded constants for Integer base functors.
--- Integer is the only type that has TWO base functors and so
--- its base functor cannot be determined from its type alone.
-
--- | The name of the Natural base functor for Integer.
--- Integer is the only type that has TWO base functors and so
--- its base functor cannot be determined from its type name alone.
+-- | The name of the @Natural@ base functor for @Integer@.
+--
+-- This is required because @Integer@ is the only type with two base functors,
+-- and thus, its base functor cannot be determined from the type name alone.
+--
 -- @since 1.3.0
 naturalBF :: TyName
 naturalBF = TyName "#Natural"
 
--- | The name of the Negative base functor for Integer
--- Integer is the only type that has TWO base functors and so
--- its base functor cannot be determined from its type name alone.
+-- | The name of the @Negative@ base functor for @Integer@.
+--
+-- This is required because @Integer@ is the only type with two base functors,
+-- and thus, its base functor cannot be determined from the type name alone.
+--
 -- @since 1.3.0
 negativeBF :: TyName
 negativeBF = TyName "#Negative"
