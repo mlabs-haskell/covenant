@@ -131,7 +131,7 @@ import Covenant.Internal.Rename
   )
 import Covenant.Internal.Strategy
   ( DataEncoding (PlutusData, SOP),
-    PlutusDataConstructor (PlutusI, PlutusB),
+    PlutusDataConstructor (PlutusB, PlutusI),
     PlutusDataStrategy (ConstrData),
   )
 import Covenant.Internal.Term (ASGNodeType (CompNodeType, ValNodeType), typeId)

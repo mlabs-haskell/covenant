@@ -80,7 +80,7 @@ import Covenant.Test
   )
 import Covenant.Type
   ( AbstractTy,
-    BuiltinFlatT (IntegerT, UnitT, ByteStringT),
+    BuiltinFlatT (ByteStringT, IntegerT, UnitT),
     CompT (Comp0, Comp1, Comp2, CompN),
     CompTBody (ArgsAndResult, ReturnT, (:--:>)),
     ValT (BuiltinFlat, Datatype, ThunkT),
@@ -822,11 +822,12 @@ matchOpaque = runIntroFormTest "matchOpaque" matchOpaqueTy $ do
     scrutinee <- AnArg <$> arg Z ix0
     AnId <$> match scrutinee (AnId <$> Vector.fromList [iHandler, bHandler])
   typeIdTest thonk
- where
-   matchOpaqueCompTy :: CompT AbstractTy
-   matchOpaqueCompTy = Comp0 $ dtype "Foo" [] :--:> ReturnT (BuiltinFlat IntegerT)
-   matchOpaqueTy :: ValT AbstractTy
-   matchOpaqueTy = ThunkT matchOpaqueCompTy
+  where
+    matchOpaqueCompTy :: CompT AbstractTy
+    matchOpaqueCompTy = Comp0 $ dtype "Foo" [] :--:> ReturnT (BuiltinFlat IntegerT)
+    matchOpaqueTy :: ValT AbstractTy
+    matchOpaqueTy = ThunkT matchOpaqueCompTy
+
 -- Helpers
 
 runIntroFormTest :: String -> ValT AbstractTy -> DebugASGBuilder (ValT AbstractTy) -> TestTree
