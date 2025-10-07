@@ -80,7 +80,8 @@ import Data.Set (Set)
 import Data.Set qualified as Set
 import Data.Vector qualified as V
 import Data.Vector.NonEmpty qualified as NEV
-import Optics.Core (A_Lens, LabelOptic (labelOptic), folded, lens, preview, review, toListOf, view, (%), _2)
+import Optics.Core (A_Lens, LabelOptic (labelOptic),
+                    folded, lens, preview, review, toListOf, view, (%), _2)
 import Optics.Indexed.Core (A_Fold)
 
 -- | All possible errors that could arise when constructing a Boehm-Berrarducci
