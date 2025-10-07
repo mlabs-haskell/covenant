@@ -134,8 +134,8 @@ propTooManyArgs = forAllShrink gen shr $ \excessArgs ->
     withRenamedVals mempty excessArgs $ \renamedExcessArgs ->
       case renamedExcessArgs of
         [] -> discard -- should be impossible
-        _ : extraArgs ->
-          let expected = Left . ExcessArgs renamedIdT . Vector.fromList . fmap Just $ extraArgs
+        arg : extraArgs ->
+          let expected = Left . ExcessArgs renamedIdT . Vector.fromList . fmap Just $ (arg:extraArgs)
               actual = checkApp M.empty renamedIdT (fmap Just renamedExcessArgs)
            in expected === actual
   where

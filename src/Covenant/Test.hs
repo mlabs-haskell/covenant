@@ -158,7 +158,7 @@ import Covenant.Internal.Unification (checkApp)
 import Covenant.Type
   ( CompT (Comp0, CompN),
     CompTBody (ArgsAndResult),
-    tyvar,
+    tyvar, PlutusDataConstructor (PlutusB),
   )
 import Covenant.Util (prettyStr)
 import Data.Coerce (coerce)
@@ -962,7 +962,7 @@ conformance_Void :: DataDeclaration AbstractTy
 conformance_Void = mkDecl $ Decl "Void" count0 [] SOP
 
 conformance_OpaqueFoo :: DataDeclaration AbstractTy
-conformance_OpaqueFoo = OpaqueData "Foo" (Set.fromList [PlutusI])
+conformance_OpaqueFoo = OpaqueData "Foo" (Set.fromList [PlutusI, PlutusB])
 
 conformance_Maybe_SOP :: DataDeclaration AbstractTy
 conformance_Maybe_SOP =

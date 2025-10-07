@@ -114,6 +114,7 @@ import Test.QuickCheck
 import Test.Tasty (TestTree, adjustOption, defaultMain, testGroup)
 import Test.Tasty.HUnit (Assertion, assertEqual, assertFailure, testCase)
 import Test.Tasty.QuickCheck (QuickCheckTests, testProperty)
+import Covenant.Type (BuiltinFlatT(ByteStringT))
 
 main :: IO ()
 main =
@@ -164,7 +165,8 @@ main =
         ],
       testGroup
         "Opaque"
-        [unifyOpaque]
+        [unifyOpaque],
+      testGroup "matchOpaque" [matchOpaque]
     ]
   where
     moreTests :: QuickCheckTests -> QuickCheckTests
@@ -811,6 +813,24 @@ unifyOpaque = runIntroFormTest "unifyOpaque" unifyOpaqueTy $ do
 
     unifyOpaqueTy :: ValT AbstractTy
     unifyOpaqueTy = ThunkT unifyOpaqueCompTy
+
+
+matchOpaque :: TestTree
+matchOpaque = runIntroFormTest "matchOpaque" matchOpaqueTy $ do
+  thonk <- lazyLam matchOpaqueCompTy $ do
+    let iHandlerTy = Comp0 $ BuiltinFlat IntegerT :--:> ReturnT (BuiltinFlat IntegerT)
+        bHandlerTy = Comp0 $ BuiltinFlat ByteStringT :--:> ReturnT (BuiltinFlat IntegerT)
+    iHandler <- lazyLam iHandlerTy $ AnId <$> lit (AnInteger 0)
+    bHandler <- lazyLam bHandlerTy $ AnId <$> lit (AnInteger 1)
+    scrutinee <- AnArg <$> arg Z ix0
+    AnId <$> match scrutinee (AnId <$> Vector.fromList [iHandler, bHandler])
+  typeIdTest thonk
+ where
+   matchOpaqueCompTy :: CompT AbstractTy
+   matchOpaqueCompTy = Comp0 $ dtype "Foo" [] :--:> ReturnT (BuiltinFlat IntegerT)
+
+   matchOpaqueTy :: ValT AbstractTy
+   matchOpaqueTy = ThunkT matchOpaqueCompTy
 
 -- Helpers
 
