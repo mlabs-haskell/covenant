@@ -207,12 +207,13 @@ arity (CompT _ (CompTBody xs)) = NonEmpty.length xs - 1
 -- | The name of a data type. This refers specifically to non-\'flat\' types
 -- either provided by the ledger, or defined by the user.
 --
--- User-defined TyNames must follow a set of naming rules, which will be checked. Specifically,
--- a TyName must begin with a capital letter and consist only of alphanumeric characters and
+-- User-defined 'TyName's must follow a set of naming rules, which will be checked. Specifically,
+-- a 'TyName' must begin with a capital letter and consist only of alphanumeric characters and
 -- underscores.
 --
--- Compiler generated TyNames are not bound by these conventions, and generated names for
--- base functors in particular use the naming convention of prefixing '#' to the parent type.
+-- Compiler-generated 'TyName's are not bound by these conventions, and generated names for
+-- base functors in particular use the naming convention of prefixing @#@ to the parent type.
+--
 -- @since 1.1.0
 newtype TyName = TyName Text
   deriving
