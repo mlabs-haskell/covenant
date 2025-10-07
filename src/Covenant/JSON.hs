@@ -2,7 +2,7 @@
 {-# LANGUAGE RankNTypes #-}
 
 -- |
--- Module: Covenant.ASG
+-- Module: Covenant.JSON
 -- Copyright: (C) MLabs 2025
 -- License: Apache 2.0
 -- Maintainer: koz@mlabs.city, sean@mlabs.city
@@ -12,24 +12,28 @@
 -- = Note on Sum Type Encoding:
 --
 -- Unless otherwise noted, a Haskell sum type like:
---    @data Foo = Bar | Baz Int@
--- Is encoded to JSON using {tag: <CTOR NAME>, fields: [<Arg1>, <Arg2>, <ArgN>]}
 --
--- This is the form used for all Haskell sum types which do NOT have `LabelOptic` instances. For those with
--- field names given by those instances, the `fields` part of the encoded sum is not an array of
--- arguments, but an object with names that correspond to the label optics. (The comments for each
--- function make clear which types are encoded in which way.)
+--    @data Foo = Bar | Baz Int@
+--
+-- Is encoded to JSON using @{tag: \<CTOR NAME\>, fields: [\<Arg1\>, \<Arg2\>, \<ArgN\>]}@
+--
+-- This is used for all Haskell sum types which do /not/ have 'LabelOptic'
+-- instnaces. For those with field names given by such instances, the @fields@
+-- part of the encoded sum is not an array of arguments, but instead a JSON
+-- object, with fields whose names correspond to the label optics. Comments make
+-- it clear which types are encoded in which way.
+--
 -- @since 1.3.0
 module Covenant.JSON
-  ( Version (..),
-    compileAndSerialize,
-    deserializeAndValidate,
-    -- Helper, probably useful somewhere else too
-    mkDatatypeInfos,
-    -- Error types
+  ( -- * Serialization
+    Version (..),
     SerializeErr (..),
+    mkDatatypeInfos,
+    compileAndSerialize,
+
+    -- * Deserialization
     DeserializeErr (..),
-    -- Convenience for tests
+    deserializeAndValidate,
     deserializeAndValidate_,
   )
 where
@@ -282,11 +286,15 @@ import GHC.TypeLits (KnownSymbol, Symbol)
 import Optics.Core (preview, review, set, view)
 import Text.Hex qualified as Hex
 
--- | The non-file-IO ways in which `compileAndSerialize` can fail.
+-- | The errors that can arise from 'compileAndSerialize' not stemming from
+-- 'IO'.
+--
 -- @since 1.3.0
 data SerializeErr
-  = DatatypeConversionFailure String
-  | ASGCompilationFailure CovenantError
+  = -- | A datatype was specified in a way that isn't valid.
+    DatatypeConversionFailure String
+  | -- | The supplied ASG failed to compile.
+    ASGCompilationFailure CovenantError
   deriving stock
     ( -- @since 1.3.0
       Show,
@@ -294,9 +302,10 @@ data SerializeErr
       Eq
     )
 
--- | Given an output path, a set of data declarations, an ASGBuilder, and a version tag
--- compiles the builder and writes the serialized output (bundled with the datatypes)
--- to the designated path
+-- | Given a 'FilePath' to write output to, a collection of data declarations,
+-- an 'ASGBuilder' and a version tag, compile the ASG, then write it to the
+-- given file path in its JSON serialized form, together with the data types.
+--
 -- @since 1.3.0
 compileAndSerialize ::
   forall (a :: Type).
@@ -314,11 +323,16 @@ compileAndSerialize path decls asgBuilder version = do
         let cu = CompilationUnit (Vector.fromList decls) asg version
         liftIO $ writeJSONWith path cu encodeCompilationUnit
 
--- | The non-file-IO ways in which `deserializeAndValidate` can fail.
+-- | The errors that can arise from 'deserializeAndValidate' not stemming from
+-- 'IO'.
+--
 -- @since 1.3.0
 data DeserializeErr
-  = JSONParseFailure String
-  | ASGValidationFail CovenantError
+  = -- | The serial form's JSON was not valid. This means that the given file
+    -- cannot be an ASG.
+    JSONParseFailure String
+  | -- | The deserialized JSON corresponds to an ASG, but not a valid one.
+    ASGValidationFail CovenantError
   deriving stock
     ( -- @since 1.3.0
       Show,
@@ -326,7 +340,8 @@ data DeserializeErr
       Eq
     )
 
--- | Given a file path to a serialized ASG, decode the ASG.
+-- | Given a 'FilePath' to a serialized ASG, decode it if possible.
+--
 -- @since 1.3.0
 deserializeAndValidate ::
   FilePath ->
@@ -337,16 +352,32 @@ deserializeAndValidate path = do
     Left err' -> throwError . ASGValidationFail $ err'
     Right asg -> pure asg
 
--- | Like 'deserializeAndValidate' but runs directly in IO. Convenience helper to avoid superfluous
--- imports in the tests. You probably want to use the other one.
+-- | Like 'deserializeAndValidate' but runs directly in 'IO'.
+--
+-- = Note
+--
+-- This is mostly designed for use in tests, as it has no ability to \'trap\'
+-- validation or deserialization errors. You most likely want
+-- 'deserializeAndValidate'.
+--
+-- @since 1.3.0
 deserializeAndValidate_ :: FilePath -> IO ASG
-deserializeAndValidate_ path = runExceptT (deserializeAndValidate path) >>= either (throwIO . userError . show) pure
+deserializeAndValidate_ path =
+  runExceptT (deserializeAndValidate path) >>= either (throwIO . userError . show) pure
 
--- | Represents a Covenant version. At the moment just a tag, but may be used in the future
---   to enforce compatibility.
+-- | Represents a Covenant version. This is currently just a tag, but may be
+-- used in the future to enforce compatibility.
+--
 -- @since 1.3.0
 data Version = Version {_major :: Int, _minor :: Int}
-  deriving stock (Show, Eq, Ord)
+  deriving stock
+    ( -- | @since 1.3.0
+      Show,
+      -- | @since 1.3.0
+      Eq,
+      -- | @since 1.3.0
+      Ord
+    )
 
 data CompilationUnit
   = CompilationUnit
@@ -1467,9 +1498,10 @@ decodeByteStringHex = withText "ByteString (Hex Encoded)" $ \txt -> case Hex.dec
   Nothing -> fail $ "Failed to decode hex bytestring: " <> show txt
   Just bs -> pure bs
 
--- | The safe version of 'unsafeMkDatatypeInfos'. Given a collection of datatypes,
--- convert to DatatypeInfo by generating base functor and BB components, then
--- add the prim base functor datatype infos.
+-- | Given a collection of datatype declarations, convert them to
+-- 'DatatypeInfo's by generating their base functor and Boehm-Berrarducci
+-- encodings. Then add to these all the base functors for the built-in types.
+--
 -- @since 1.3.0
 mkDatatypeInfos ::
   [DataDeclaration AbstractTy] ->
