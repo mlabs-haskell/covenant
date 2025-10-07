@@ -72,6 +72,7 @@ data KindCheckError
   | MutualRecursionDetected (Set TyName)
   | InvalidStrategy TyName
   | EncodingMismatch (EncodingArgErr AbstractTy)
+  | OpaqueWithNoConstructors TyName
   deriving stock (Show, Eq)
 
 newtype KindCheckContext a = KindCheckContext (Map TyName (DataDeclaration a))
@@ -118,7 +119,9 @@ checkDataDecls :: Map TyName (DataDeclaration AbstractTy) -> Either KindCheckErr
 checkDataDecls decls = runKindCheckM decls $ traverse_ checkDataDecl (M.elems decls)
 
 checkDataDecl :: DataDeclaration AbstractTy -> KindCheckM AbstractTy ()
-checkDataDecl OpaqueData {} = pure ()
+checkDataDecl (OpaqueData tn ctors)
+  | null ctors = throwError $ OpaqueWithNoConstructors tn
+  | otherwise = pure ()
 checkDataDecl decl@(DataDeclaration tn _ ctors _) = do
   unless (checkStrategy decl) $ throwError (InvalidStrategy tn)
   cycleCheck' mempty decl

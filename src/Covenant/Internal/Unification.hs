@@ -156,7 +156,7 @@ checkApp' f@(CompT _ (CompTBody xs)) ys = do
   when (numArgsActual < numArgsExpected) $
     throwError $
       InsufficientArgs numArgsActual f ys
-  when (numArgsExpected > numArgsActual) $
+  when (numArgsActual > numArgsExpected) $
     throwError $
       ExcessArgs f (Vector.fromList ys)
   go curr (Vector.toList rest) ys
