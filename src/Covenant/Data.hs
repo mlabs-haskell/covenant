@@ -48,7 +48,8 @@ import Control.Monad.Trans.Except (ExceptT, runExceptT)
 import Covenant.DeBruijn (DeBruijn (S, Z), asInt)
 import Covenant.Index (Count, Index, count0, intCount, intIndex, ix0)
 import Covenant.Internal.PrettyPrint (ScopeBoundary (ScopeBoundary))
-import Covenant.Internal.Strategy (DataEncoding (SOP), PlutusDataConstructor (PlutusB, PlutusConstr, PlutusI, PlutusList, PlutusMap))
+import Covenant.Internal.Strategy (DataEncoding (SOP),
+                                   PlutusDataConstructor (PlutusB, PlutusConstr, PlutusI, PlutusList, PlutusMap))
 import Covenant.Internal.Type
   ( AbstractTy (BoundAt),
     BuiltinFlatT (ByteStringT, IntegerT),
