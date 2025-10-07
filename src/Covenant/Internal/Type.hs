@@ -207,6 +207,13 @@ arity (CompT _ (CompTBody xs)) = NonEmpty.length xs - 1
 -- | The name of a data type. This refers specifically to non-\'flat\' types
 -- either provided by the ledger, or defined by the user.
 --
+-- User-defined 'TyName's must follow a set of naming rules, which will be checked. Specifically,
+-- a 'TyName' must begin with a capital letter and consist only of alphanumeric characters and
+-- underscores.
+--
+-- Compiler-generated 'TyName's are not bound by these conventions, and generated names for
+-- base functors in particular use the naming convention of prefixing @#@ to the parent type.
+--
 -- @since 1.1.0
 newtype TyName = TyName Text
   deriving
@@ -451,30 +458,30 @@ checkStrategy = \case
         _ -> False
 
 naturalBaseFunctor :: DataDeclaration AbstractTy
-naturalBaseFunctor = DataDeclaration "Natural_F" count1 constrs SOP
+naturalBaseFunctor = DataDeclaration "#Natural" count1 constrs SOP
   where
     constrs :: Vector (Constructor AbstractTy)
     constrs =
-      [ Constructor "ZeroNat_F" [],
-        Constructor "SuccNat_F" [Abstraction . BoundAt Z $ ix0]
+      [ Constructor "#ZeroNat" [],
+        Constructor "#SuccNat" [Abstraction . BoundAt Z $ ix0]
       ]
 
 negativeBaseFunctor :: DataDeclaration AbstractTy
-negativeBaseFunctor = DataDeclaration "Negative_F" count1 constrs SOP
+negativeBaseFunctor = DataDeclaration "#Negative" count1 constrs SOP
   where
     constrs :: Vector (Constructor AbstractTy)
     constrs =
-      [ Constructor "ZeroNeg_F" [],
-        Constructor "PredNeg_F" [Abstraction . BoundAt Z $ ix0]
+      [ Constructor "#ZeroNeg" [],
+        Constructor "#PredNeg" [Abstraction . BoundAt Z $ ix0]
       ]
 
 byteStringBaseFunctor :: DataDeclaration AbstractTy
-byteStringBaseFunctor = DataDeclaration "ByteString_F" count1 constrs SOP
+byteStringBaseFunctor = DataDeclaration "#ByteString" count1 constrs SOP
   where
     constrs :: Vector (Constructor AbstractTy)
     constrs =
-      [ Constructor "EmptyByteString_F" [],
-        Constructor "ConsByteString_F" [BuiltinFlat IntegerT, Abstraction . BoundAt Z $ ix0]
+      [ Constructor "#EmptyByteString" [],
+        Constructor "#ConsByteString" [BuiltinFlat IntegerT, Abstraction . BoundAt Z $ ix0]
       ]
 
 -- Helpers

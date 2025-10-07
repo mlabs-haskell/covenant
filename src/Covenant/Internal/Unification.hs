@@ -1,5 +1,4 @@
 {-# LANGUAGE CPP #-}
-{-# LANGUAGE MultiWayIf #-}
 
 module Covenant.Internal.Unification
   ( TypeAppError (..),
@@ -11,6 +10,7 @@ module Covenant.Internal.Unification
     substitute,
     fixUp,
     reconcile,
+    lookupDatatypeInfo,
   )
 where
 
@@ -21,7 +21,7 @@ import Data.Foldable (foldl')
 #endif
 import Control.Monad.Except (MonadError, catchError, throwError)
 import Control.Monad.Reader (MonadReader, ReaderT (runReaderT), ask)
-import Covenant.Data (DatatypeInfo, mkDatatypeInfo)
+import Covenant.Data (DatatypeInfo)
 import Covenant.Index (Index, intCount, intIndex)
 import Covenant.Internal.Rename (RenameError, renameDatatypeInfo)
 import Covenant.Internal.Type
@@ -29,12 +29,10 @@ import Covenant.Internal.Type
     BuiltinFlatT,
     CompT (CompT),
     CompTBody (CompTBody),
+    DataDeclaration (OpaqueData),
     Renamed (Rigid, Unifiable, Wildcard),
-    TyName (TyName),
+    TyName,
     ValT (Abstraction, BuiltinFlat, Datatype, ThunkT),
-    byteStringBaseFunctor,
-    naturalBaseFunctor,
-    negativeBaseFunctor,
   )
 import Data.Kind (Type)
 import Data.Map (Map)
@@ -44,7 +42,6 @@ import Data.Maybe (fromJust, mapMaybe)
 import Data.Set (Set)
 import Data.Set qualified as Set
 import Data.Text (Text)
-import Data.Text qualified as Text
 import Data.Vector (Vector)
 import Data.Vector qualified as Vector
 import Data.Vector.NonEmpty (NonEmptyVector)
@@ -114,48 +111,27 @@ runUnifyM tyDict (UnifyM act) = runReaderT act tyDict
 lookupDatatypeInfo ::
   TyName ->
   UnifyM (DatatypeInfo Renamed)
-lookupDatatypeInfo tn@(TyName rawTyName) =
+lookupDatatypeInfo tn =
   ask >>= \tyDict -> case preview (ix tn) tyDict of
-    Nothing -> checkForBaseFunctor tyDict
+    Nothing -> throwError . NoDatatypeInfo $ tn
     Just dti -> renamedToUnify . renameDatatypeInfo $ dti
   where
-    checkForBaseFunctor :: Map TyName (DatatypeInfo AbstractTy) -> UnifyM (DatatypeInfo Renamed)
-    checkForBaseFunctor tyDict = case Text.stripSuffix "_F" rawTyName of
-      Nothing -> throwError . NoDatatypeInfo $ tn
-      Just rawTyNameStub ->
-        if
-          -- Note (Koz, 12/08/2025): None of these specific cases should _ever_
-          -- fail. Thus, `fromRight` is safe here.
-          | rawTyNameStub == "Natural" ->
-              renamedToUnify . renameDatatypeInfo . fromRight . mkDatatypeInfo $ naturalBaseFunctor
-          | rawTyNameStub == "Negative" ->
-              renamedToUnify . renameDatatypeInfo . fromRight . mkDatatypeInfo $ negativeBaseFunctor
-          | rawTyNameStub == "ByteString" ->
-              renamedToUnify . renameDatatypeInfo . fromRight . mkDatatypeInfo $ byteStringBaseFunctor
-          -- We have something that _looks_ like a base functor, but not a
-          -- special builtin case. We thus need to ask the environment for the
-          -- recursive type it stands for, if it exists.
-          | otherwise -> do
-              let standinTyName = TyName rawTyNameStub
-              case preview (ix standinTyName) tyDict of
-                -- Now we have _truly_ missed.
-                Nothing -> throwError . NoDatatypeInfo $ tn
-                Just dti -> case view #baseFunctor dti of
-                  Nothing -> throwError . NoDatatypeInfo $ tn
-                  -- Since this is generated, it can't fail to rename
-                  Just (bfDd, _) -> renamedToUnify . renameDatatypeInfo . fromRight . mkDatatypeInfo $ bfDd
     renamedToUnify :: Either RenameError (DatatypeInfo Renamed) -> UnifyM (DatatypeInfo Renamed)
     renamedToUnify = either (throwError . DatatypeInfoRenameFailed tn) pure
-    fromRight :: forall a b. (Show a) => Either a b -> b
-    fromRight = \case
-      Left err -> error . show $ err
-      Right x -> x
 
 lookupBBForm :: TyName -> UnifyM (ValT Renamed)
 lookupBBForm tn =
   lookupDatatypeInfo tn >>= \dti -> case view #bbForm dti of
     Nothing -> throwError $ NoBBForm tn
     Just bbForm -> pure bbForm
+
+-- Opaque types do not (and cannot) have a BB form, which breaks unification machinery that assumes all inhabiated types
+-- have such a form. We need to branch on the "Opacity" of a type in `expectDatatype` and this lets us do that
+isOpaqueType :: TyName -> UnifyM Bool
+isOpaqueType tn =
+  lookupDatatypeInfo tn >>= \dti -> case view #originalDecl dti of
+    OpaqueData {} -> pure True
+    _ -> pure False
 
 -- | Given information about in-scope datatypes, a computation type, and a list
 -- of arguments (some of which may be errors), try to construct the type of the
@@ -365,18 +341,32 @@ unify expected actual =
     -- the BB form using the arguments to the actual datatype.
     -- For example, the BB form of `Maybe` is: forall a r. r -> (a -> r) -> r
     -- which, if we concretify while attempting to unify with `Maybe Int`, becomes: `forall r. r -> (Int -> r) -> r`
+    --
+    -- Opaque datatypes are a special exception and are treated analogously to Builtins: They unify only with themselves,
+    -- unifiables, or wildcards.
     expectDatatype tn args = do
-      bbForm <- lookupBBForm tn
-      bbFormConcreteE <- concretify bbForm args
-      case actual of
-        Abstraction (Rigid _ _) -> unificationError
-        Abstraction _ -> noSubUnify
-        Datatype tn' args'
-          | tn' /= tn -> unificationError
-          | otherwise -> do
-              bbFormConcreteA <- concretify bbForm args'
-              unify bbFormConcreteE bbFormConcreteA
-        _ -> unificationError
+      isOpaqueType tn >>= \case
+        False -> do
+          bbForm <- lookupBBForm tn
+          bbFormConcreteE <- concretify bbForm args
+          case actual of
+            Abstraction (Rigid _ _) -> unificationError
+            Abstraction _ -> noSubUnify
+            Datatype tn' args'
+              | tn' /= tn -> unificationError
+              | otherwise -> do
+                  bbFormConcreteA <- concretify bbForm args'
+                  unify bbFormConcreteE bbFormConcreteA
+            _ -> unificationError
+        True -> case actual of
+          Abstraction Rigid {} -> unificationError
+          Abstraction _ -> noSubUnify
+          -- Opaque datatypes cannot be parameterized, so we only need to check the TyName
+          Datatype tn' _args ->
+            if tn == tn'
+              then noSubUnify
+              else unificationError
+          _ -> unificationError
     concretify :: ValT Renamed -> Vector (ValT Renamed) -> UnifyM (ValT Renamed)
     concretify (ThunkT (CompT count (CompTBody fn))) args = fixUp $ ThunkT (CompT count (CompTBody newFn))
       where
