@@ -46,11 +46,15 @@ import Control.Monad.Except (MonadError (throwError))
 import Control.Monad.Reader (MonadReader (ask, local), MonadTrans (lift), Reader, runReader)
 import Control.Monad.Trans.Except (ExceptT, runExceptT)
 import Covenant.DeBruijn (DeBruijn (S, Z), asInt)
-import Covenant.Index (Count, Index, count0, intCount, intIndex)
+import Covenant.Index (Count, Index, count0, intCount, intIndex, ix0)
 import Covenant.Internal.PrettyPrint (ScopeBoundary (ScopeBoundary))
-import Covenant.Internal.Strategy (DataEncoding (SOP))
+import Covenant.Internal.Strategy
+  ( DataEncoding (SOP),
+    PlutusDataConstructor (PlutusB, PlutusConstr, PlutusI, PlutusList, PlutusMap),
+  )
 import Covenant.Internal.Type
   ( AbstractTy (BoundAt),
+    BuiltinFlatT (ByteStringT, IntegerT),
     CompT (CompT),
     CompTBody (CompTBody),
     Constructor (Constructor),
@@ -62,6 +66,11 @@ import Covenant.Internal.Type
     naturalBaseFunctor,
     negativeBaseFunctor,
   )
+import Covenant.Type
+  ( CompT (Comp0, Comp1),
+    CompTBody (ReturnT, (:--:>)),
+    tyvar,
+  )
 import Data.Bitraversable (bisequence)
 import Data.Kind (Type)
 import Data.Map.Strict (Map)
@@ -71,7 +80,18 @@ import Data.Set (Set)
 import Data.Set qualified as Set
 import Data.Vector qualified as V
 import Data.Vector.NonEmpty qualified as NEV
-import Optics.Core (A_Lens, LabelOptic (labelOptic), folded, lens, preview, review, toListOf, view, (%), _2)
+import Optics.Core
+  ( A_Lens,
+    LabelOptic (labelOptic),
+    folded,
+    lens,
+    preview,
+    review,
+    toListOf,
+    view,
+    (%),
+    _2,
+  )
 import Optics.Indexed.Core (A_Fold)
 
 -- | All possible errors that could arise when constructing a Boehm-Berrarducci
@@ -408,7 +428,34 @@ incAbstractionDB = mapValT $ \case
 
 -- Only returns `Nothing` if there are no Constructors or the type is Opaque
 mkBBF' :: DataDeclaration AbstractTy -> ExceptT BBFError Maybe (ValT AbstractTy)
-mkBBF' OpaqueData {} = lift Nothing
+mkBBF' (OpaqueData _ ctorsSet) = do
+  let bbfFunArgs = map mkOpaqueFn (Set.toList ctorsSet)
+  case NEV.fromList bbfFunArgs of
+    Nothing -> error "No ctors for opaque. If this happens it means we didn't run the kind checker."
+    Just fn -> lift . Just . ThunkT . Comp1 . CompTBody $ NEV.snoc fn (tyvar Z ix0)
+  where
+    -- `r` as it appears in the thunks
+    r :: ValT AbstractTy
+    r = Abstraction (BoundAt (S Z) ix0)
+    helper :: ValT AbstractTy -> ValT AbstractTy
+    helper arg = ThunkT . Comp0 $ arg :--:> ReturnT r
+    pList :: V.Vector (ValT AbstractTy) -> ValT AbstractTy
+    pList = Datatype "List"
+    pData :: ValT AbstractTy
+    pData = Datatype "Data" mempty
+    pPair :: ValT AbstractTy -> ValT AbstractTy -> ValT AbstractTy
+    pPair a b = Datatype "Pair" $ V.fromList [a, b]
+    mkOpaqueFn :: PlutusDataConstructor -> ValT AbstractTy
+    mkOpaqueFn = \case
+      PlutusI -> helper $ BuiltinFlat IntegerT
+      PlutusB -> helper $ BuiltinFlat ByteStringT
+      PlutusConstr ->
+        ThunkT . Comp0 $
+          BuiltinFlat IntegerT
+            :--:> pList (V.fromList [pData])
+            :--:> ReturnT r
+      PlutusList -> helper (pList (V.singleton pData))
+      PlutusMap -> helper (pList (V.singleton (pPair pData pData)))
 mkBBF' (DataDeclaration tn numVars ctors _)
   | V.null ctors = lift Nothing
   | otherwise = do

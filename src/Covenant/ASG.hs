@@ -1065,6 +1065,24 @@ cata rAlg rVal =
 -- All handlers must be thunks, and must all return the same (concrete) result.
 -- Polymorphic \'handlers\' (that is, thunks whose computation binds type
 -- variables of its own) will fail to compile.
+-- NOTE: Opaque the handlers for an opaque type must follow the order:
+--  [ PlutusI,
+--    PlutusB,
+--    PlutusConstr,
+--    PlutusMap,
+--    PlutusList
+--  ]
+--
+--  Where types not included in the provided constructors to the Opaque declaration are omitted.
+--
+--  Furthermore, the handlers for opaque constructors operate on the unwrapped arguments to
+--  their respective PlutusData constructor. That is, for some result type 'r', the handlers for a
+--  an opaque type which uses all the constructors should have the types:
+--    PlutusI :: Integer -> r
+--    PlutusB :: ByteString -> r
+--    PlutusConstr :: Integer -> [Data] -> r
+--    PlutusMap :: [(Integer,Data)] -> r
+--    PlutusList :: [Data] -> r
 --
 -- @since 1.2.0
 match ::

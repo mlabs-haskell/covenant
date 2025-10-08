@@ -131,7 +131,7 @@ import Covenant.Internal.Rename
   )
 import Covenant.Internal.Strategy
   ( DataEncoding (PlutusData, SOP),
-    PlutusDataConstructor (PlutusI),
+    PlutusDataConstructor (PlutusB, PlutusI),
     PlutusDataStrategy (ConstrData),
   )
 import Covenant.Internal.Term (ASGNodeType (CompNodeType, ValNodeType), typeId)
@@ -962,7 +962,7 @@ conformance_Void :: DataDeclaration AbstractTy
 conformance_Void = mkDecl $ Decl "Void" count0 [] SOP
 
 conformance_OpaqueFoo :: DataDeclaration AbstractTy
-conformance_OpaqueFoo = OpaqueData "Foo" (Set.fromList [PlutusI])
+conformance_OpaqueFoo = OpaqueData "Foo" (Set.fromList [PlutusI, PlutusB])
 
 conformance_Maybe_SOP :: DataDeclaration AbstractTy
 conformance_Maybe_SOP =
