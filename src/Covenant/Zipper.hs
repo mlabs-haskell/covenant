@@ -152,7 +152,7 @@ data ZipperState = ZipperState Bool ASG [Tape Ref Id] (Tape Ref Ref)
 -- Parent positions use 'Id' for the focus, as 'Arg's cannot have descendants.
 --
 -- @since 1.3.0
-pattern WorkingZipper :: [Tape Ref Id] -> Tape Ref (Either Arg ASGNode) -> ZipperState
+pattern WorkingZipper :: [Tape Ref Id] -> Tape Ref (Either Arg (Id, ASGNode)) -> ZipperState
 pattern WorkingZipper parents curr <- ZipperState False g parents (getNodeInfo g -> curr)
 
 -- | Matches on a zipper in a broken state.
@@ -269,10 +269,10 @@ resetStep zs@(ZipperState walkedOff g parentLevels currentLevel) =
     then ZipperState False g parentLevels currentLevel
     else zs
 
-getNodeInfo :: ASG -> Tape Ref Ref -> Tape Ref (Either Arg ASGNode)
+getNodeInfo :: ASG -> Tape Ref Ref -> Tape Ref (Either Arg (Id, ASGNode))
 getNodeInfo g =
   fmap
     ( \case
-        AnId i -> Right . nodeAt i $ g
+        AnId i -> Right (i, nodeAt i g)
         AnArg arg -> Left arg
     )
