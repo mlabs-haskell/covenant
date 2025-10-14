@@ -154,10 +154,9 @@ import Covenant.Prim
         UnListData,
         UnMapData
       ),
-    SixArgFunc (CaseData, ChooseData),
+    SixArgFunc (ChooseData),
     ThreeArgFunc
       ( AndByteString,
-        CaseList,
         ChooseList,
         ExpModInteger,
         IfThenElse,
@@ -1271,7 +1270,6 @@ decodeThreeArgFunc =
       "VerifySchnorrSecp256k1Signature" :=> constM VerifySchnorrSecp256k1Signature,
       "IfThenElse" :=> constM IfThenElse,
       "ChooseList" :=> constM ChooseList,
-      "CaseList" :=> constM CaseList,
       "IntegerToByteString" :=> constM IntegerToByteString,
       "AndByteString" :=> constM AndByteString,
       "OrByteString" :=> constM OrByteString,
@@ -1295,8 +1293,7 @@ encodeSixArgFunc = encodeEnum
 decodeSixArgFunc :: Value -> Parser SixArgFunc
 decodeSixArgFunc =
   caseOnTag
-    [ "ChooseData" :=> constM ChooseData,
-      "CaseData" :=> constM CaseData
+    [ "ChooseData" :=> constM ChooseData
     ]
 
 {- ValT

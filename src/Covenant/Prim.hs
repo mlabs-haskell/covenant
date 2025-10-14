@@ -20,13 +20,13 @@ module Covenant.Prim
   )
 where
 
-import Covenant.DeBruijn (DeBruijn (S, Z))
+import Covenant.DeBruijn (DeBruijn (Z))
 import Covenant.Index (ix0, ix1)
 import Covenant.Type
   ( AbstractTy,
     CompT (Comp0, Comp1, Comp2),
     CompTBody (ReturnT, (:--:>)),
-    ValT (ThunkT),
+    ValT,
     boolT,
     byteStringT,
     dataType1T,
@@ -366,8 +366,6 @@ data ThreeArgFunc
   | IfThenElse
   | -- | @since 1.1.0
     ChooseList
-  | -- | @since 1.1.0
-    CaseList
   | IntegerToByteString
   | AndByteString
   | OrByteString
@@ -395,7 +393,6 @@ instance Arbitrary ThreeArgFunc where
         VerifySchnorrSecp256k1Signature,
         IfThenElse,
         ChooseList,
-        CaseList,
         IntegerToByteString,
         AndByteString,
         OrByteString,
@@ -414,12 +411,6 @@ typeThreeArgFunc = \case
   VerifySchnorrSecp256k1Signature -> signatureT
   IfThenElse -> Comp1 $ boolT :--:> aT :--:> aT :--:> ReturnT aT
   ChooseList -> Comp2 $ listT aT :--:> bT :--:> bT :--:> ReturnT bT
-  CaseList ->
-    Comp2 $
-      bT
-        :--:> ThunkT (Comp0 $ aTOuter :--:> listT aTOuter :--:> ReturnT bTOuter)
-        :--:> listT aT
-        :--:> ReturnT bT
   IntegerToByteString ->
     Comp0 $
       boolT :--:> integerT :--:> integerT :--:> ReturnT byteStringT
@@ -454,9 +445,7 @@ typeThreeArgFunc = \case
 -- | All six-argument primitives provided by Plutus.
 --
 -- @since 1.1.0
-data SixArgFunc
-  = ChooseData
-  | CaseData
+data SixArgFunc = ChooseData
   deriving stock
     ( -- | @since 1.0.0
       Eq,
@@ -471,7 +460,7 @@ data SixArgFunc
 -- @since 1.1.0
 instance Arbitrary SixArgFunc where
   {-# INLINEABLE arbitrary #-}
-  arbitrary = elements [ChooseData, CaseData]
+  arbitrary = pure ChooseData
 
 -- | Produce the type of a six-argument primop.
 --
@@ -486,15 +475,6 @@ typeSixArgFunc = \case
         :--:> aT
         :--:> aT
         :--:> aT
-        :--:> ReturnT aT
-  CaseData ->
-    Comp1 $
-      ThunkT (Comp0 $ integerT :--:> listT dataT :--:> ReturnT aTOuter)
-        :--:> ThunkT (Comp0 $ listT (pairT dataT dataT) :--:> ReturnT aTOuter)
-        :--:> ThunkT (Comp0 $ listT dataT :--:> ReturnT aTOuter)
-        :--:> ThunkT (Comp0 $ integerT :--:> ReturnT aTOuter)
-        :--:> ThunkT (Comp0 $ byteStringT :--:> ReturnT aTOuter)
-        :--:> dataT
         :--:> ReturnT aT
 
 -- Helpers
@@ -511,11 +491,5 @@ pairT = dataType2T "Pair"
 aT :: ValT AbstractTy
 aT = tyvar Z ix0
 
-aTOuter :: ValT AbstractTy
-aTOuter = tyvar (S Z) ix0
-
 bT :: ValT AbstractTy
 bT = tyvar Z ix1
-
-bTOuter :: ValT AbstractTy
-bTOuter = tyvar (S Z) ix1

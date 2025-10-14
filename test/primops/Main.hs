@@ -21,8 +21,8 @@ import Covenant.Prim
         UnListData,
         UnMapData
       ),
-    SixArgFunc (CaseData, ChooseData),
-    ThreeArgFunc (CaseList, ChooseList),
+    SixArgFunc (ChooseData),
+    ThreeArgFunc (ChooseList),
     TwoArgFunc (ConstrData, EqualsData, MkCons, MkPairData),
     typeOneArgFunc,
     typeSixArgFunc,
@@ -37,15 +37,13 @@ import Covenant.Test
   )
 import Covenant.Type
   ( AbstractTy (BoundAt),
-    CompT (Comp0),
+    CompT,
     Renamed (Unifiable),
-    ValT (Datatype, ThunkT),
+    ValT (Datatype),
     arity,
     boolT,
     byteStringT,
     integerT,
-    pattern ReturnT,
-    pattern (:--:>),
   )
 import Data.Functor.Classes (liftEq)
 import Data.Functor.Identity (Identity (Identity))
@@ -111,13 +109,11 @@ main =
             ],
           testGroup
             "Three arguments"
-            [ testCase "ChooseList" unitChooseList,
-              testCase "CaseList" unitCaseList
+            [ testCase "ChooseList" unitChooseList
             ],
           testGroup
             "Six arguments"
-            [ testCase "ChooseData" unitChooseData,
-              testCase "CaseData" unitCaseData
+            [ testCase "ChooseData" unitChooseData
             ]
         ]
     ]
@@ -248,30 +244,10 @@ unitChooseList = withRenamedComp (typeThreeArgFunc ChooseList) $ \renamedFunT ->
    in withRenamedVals [listT, byteStringT, byteStringT] $
         tryAndApply byteStringT renamedFunT
 
-unitCaseList :: IO ()
-unitCaseList = withRenamedComp (typeThreeArgFunc CaseList) $ \renamedFunT ->
-  let listT = Datatype "List" . Vector.singleton $ integerT
-      thunkT = ThunkT $ Comp0 $ integerT :--:> listT :--:> ReturnT byteStringT
-   in withRenamedVals [byteStringT, thunkT, listT] $
-        tryAndApply byteStringT renamedFunT
-
 unitChooseData :: IO ()
 unitChooseData = withRenamedComp (typeSixArgFunc ChooseData) $ \renamedFunT ->
   withRenamedVals [dataT, integerT, integerT, integerT, integerT, integerT] $
     tryAndApply integerT renamedFunT
-
-unitCaseData :: IO ()
-unitCaseData = withRenamedComp (typeSixArgFunc CaseData) $ \renamedFunT ->
-  let listDataT = Datatype "List" . Vector.singleton $ dataT
-      pairDataT = Datatype "Pair" . Vector.fromList $ [dataT, dataT]
-      listPairDataT = Datatype "List" . Vector.singleton $ pairDataT
-      constrThunkT = ThunkT $ Comp0 $ integerT :--:> listDataT :--:> ReturnT integerT
-      mapThunkT = ThunkT $ Comp0 $ listPairDataT :--:> ReturnT integerT
-      listThunkT = ThunkT $ Comp0 $ listDataT :--:> ReturnT integerT
-      integerThunkT = ThunkT $ Comp0 $ integerT :--:> ReturnT integerT
-      byteStringThunkT = ThunkT $ Comp0 $ byteStringT :--:> ReturnT integerT
-   in withRenamedVals [constrThunkT, mapThunkT, listThunkT, integerThunkT, byteStringThunkT, dataT] $
-        tryAndApply integerT renamedFunT
 
 -- Helpers
 
