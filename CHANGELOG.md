@@ -17,6 +17,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 * `ValNodeInfo`'s pattern for `App` now exposes type applications as well
 * JSON serialization and deserialization support for `ASG`s with type
   declarations
+* Removed `CaseData` and `CaseList`, as Plutus Core no longer supports them
 
 ## 1.2.0 -- 2025-08-27
 
