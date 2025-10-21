@@ -1,8 +1,9 @@
+{-# LANGUAGE PatternSynonyms #-}
 module Covenant.Internal.Term
   ( CovenantTypeError (..),
-    Id (..),
+    Id (Id, UnId, UnsafeId),
     typeId,
-    Arg (..),
+    Arg (Arg, UnArg, UnsafeArg),
     typeArg,
     Ref (..),
     typeRef,
@@ -312,6 +313,19 @@ newtype Id = Id Word64
       Show
     )
 
+-- | This is the *safe* read-only pattern
+pattern UnId :: Word64 -> Id
+pattern UnId w <- Id w
+
+-- | This is the *unsafe* pattern.
+-- This should ONLY ever be used for tests and you should
+-- NEVER use this to construct Ids manually.
+pattern UnsafeId :: Word64 -> Id
+pattern UnsafeId w = Id w
+
+{-# COMPLETE UnId #-}
+{-# COMPLETE UnsafeId #-}
+
 -- Get the type of an `Id`, or fail.
 typeId ::
   forall (m :: Type -> Type).
@@ -337,6 +351,20 @@ data Arg = Arg DeBruijn (Index "arg") (ValT AbstractTy)
       Show
     )
 
+-- | This is the 'safe' pattern which can be used anywhere to
+-- deconstruct an arg
+pattern UnArg :: DeBruijn -> Index "arg" -> Arg
+pattern UnArg db i <- Arg db i _
+
+-- | This is the *unsafe* pattern, which should NEVER
+-- be used to manually construct 'Arg's in an AST, and should
+-- ONLY ever be used for tests.
+pattern UnsafeArg :: DeBruijn -> Index "arg" -> ValT AbstractTy -> Arg
+pattern UnsafeArg db i t = Arg db i t
+
+{-# COMPLETE UnArg #-}
+{-# COMPLETE UnsafeArg #-}
+
 -- Helper to get the type of an argument.
 typeArg :: Arg -> ValT AbstractTy
 typeArg (Arg _ _ t) = t
@@ -361,6 +389,8 @@ data Ref
       -- | @since 1.0.0
       Show
     )
+
+
 
 -- Helper for getting a type for any reference.
 typeRef ::

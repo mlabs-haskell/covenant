@@ -30,9 +30,9 @@ module Covenant.ASG
     -- * ASG components
 
     -- ** Types
-    Id (..),
+    Id (UnId),
     Ref (..),
-    Arg (..),
+    Arg (UnArg),
     CompNodeInfo
       ( Builtin1,
         Builtin2,
@@ -142,7 +142,7 @@ import Covenant.Internal.Rename
 import Covenant.Internal.Term
   ( ASGNode (ACompNode, AValNode, AnError),
     ASGNodeType (CompNodeType, ErrorNodeType, ValNodeType),
-    Arg (Arg),
+    Arg (UnArg, Arg),
     BoundTyVar (BoundTyVar),
     CompNodeInfo
       ( Builtin1Internal,
@@ -204,7 +204,7 @@ import Covenant.Internal.Term
         WrongNumInstantiationsInApp,
         WrongReturnType
       ),
-    Id (Id),
+    Id (UnId),
     Ref (AnArg, AnId),
     ValNodeInfo (AppInternal, CataInternal, DataConstructorInternal, LitInternal, MatchInternal, ThunkInternal),
     typeASGNode,
