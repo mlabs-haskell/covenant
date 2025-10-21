@@ -142,7 +142,7 @@ import Covenant.Internal.Rename
 import Covenant.Internal.Term
   ( ASGNode (ACompNode, AValNode, AnError),
     ASGNodeType (CompNodeType, ErrorNodeType, ValNodeType),
-    Arg (UnArg, Arg),
+    Arg (Arg, UnArg),
     BoundTyVar (BoundTyVar),
     CompNodeInfo
       ( Builtin1Internal,

@@ -1,4 +1,5 @@
 {-# LANGUAGE PatternSynonyms #-}
+
 module Covenant.Internal.Term
   ( CovenantTypeError (..),
     Id (Id, UnId, UnsafeId),
@@ -324,6 +325,7 @@ pattern UnsafeId :: Word64 -> Id
 pattern UnsafeId w = Id w
 
 {-# COMPLETE UnId #-}
+
 {-# COMPLETE UnsafeId #-}
 
 -- Get the type of an `Id`, or fail.
@@ -363,6 +365,7 @@ pattern UnsafeArg :: DeBruijn -> Index "arg" -> ValT AbstractTy -> Arg
 pattern UnsafeArg db i t = Arg db i t
 
 {-# COMPLETE UnArg #-}
+
 {-# COMPLETE UnsafeArg #-}
 
 -- Helper to get the type of an argument.
@@ -389,8 +392,6 @@ data Ref
       -- | @since 1.0.0
       Show
     )
-
-
 
 -- Helper for getting a type for any reference.
 typeRef ::
