@@ -8,6 +8,8 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 * Expose unsafe constructors `UnsafeMkId` and `UnsafeMkArg` for `Id` and `Arg`
   respectively from `Covenant.Test`
+* Add read-only synonyms `Id` and `Arg` for the two data types with the same
+  name in `Covenant.ASG`
 
 ## 1.3.0 -- 2025-10-07
 

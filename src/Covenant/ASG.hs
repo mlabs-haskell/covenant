@@ -30,9 +30,9 @@ module Covenant.ASG
     -- * ASG components
 
     -- ** Types
-    Id,
+    Id (Id),
     Ref (..),
-    Arg,
+    Arg (Arg),
     CompNodeInfo
       ( Builtin1,
         Builtin2,
@@ -204,7 +204,7 @@ import Covenant.Internal.Term
         WrongNumInstantiationsInApp,
         WrongReturnType
       ),
-    Id,
+    Id (UnsafeMkId),
     Ref (AnArg, AnId),
     ValNodeInfo (AppInternal, CataInternal, DataConstructorInternal, LitInternal, MatchInternal, ThunkInternal),
     typeASGNode,
@@ -280,7 +280,7 @@ import Data.Vector qualified as Vector
 import Data.Vector.NonEmpty qualified as NonEmpty
 import Data.Void (Void, vacuous)
 import Data.Wedge (Wedge (Nowhere), wedge)
-import Data.Word (Word32)
+import Data.Word (Word32, Word64)
 import Optics.Core
   ( A_Lens,
     LabelOptic (labelOptic),
@@ -297,6 +297,18 @@ import Optics.Core
     _1,
     _2,
   )
+
+-- | A read-only pattern for exposing the internals of an 'Id'.
+--
+-- @since 1.3.1
+pattern Id :: Word64 -> Id
+pattern Id w <- UnsafeMkId w
+
+-- | A read-only pattern for exposing the internals of an 'Arg'.
+--
+-- @since 1.3.1
+pattern Arg :: DeBruijn -> Index "arg" -> ValT AbstractTy -> Arg
+pattern Arg db i t <- UnsafeMkArg db i t
 
 -- | A fully-assembled Covenant ASG.
 --
