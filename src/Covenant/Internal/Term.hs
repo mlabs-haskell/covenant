@@ -1,8 +1,8 @@
 module Covenant.Internal.Term
   ( CovenantTypeError (..),
-    Id (..),
+    Id (UnsafeMkId),
     typeId,
-    Arg (..),
+    Arg (UnsafeMkArg),
     typeArg,
     Ref (..),
     typeRef,
@@ -293,7 +293,17 @@ data CovenantTypeError
 -- | A unique identifier for a node in a Covenant program.
 --
 -- @since 1.0.0
-newtype Id = Id Word64
+newtype Id
+  = -- | = Important note
+    --
+    -- Using this constructor is /not safe/. Do not do this unless you know
+    -- /exactly/ what you are doing. We expose this constructor, in a limited way,
+    -- to allow for certain kinds of testing, and /absolutely nothing else ever/.
+    -- Attempts to use this in ways it was not designed to /will/ break, this
+    -- interface is /not/ stable, and relying on it is /not/ a good plan.
+    --
+    -- @since 1.3.1
+    UnsafeMkId Word64
   deriving
     ( -- | @since 1.0.0
       Eq,
@@ -327,7 +337,17 @@ typeId i = do
 -- | An argument passed to a function in a Covenant program.
 --
 -- @since 1.0.0
-data Arg = Arg DeBruijn (Index "arg") (ValT AbstractTy)
+data Arg
+  = -- | = Important note
+    --
+    -- Using this constructor is /not safe/. Do not do this unless you know
+    -- /exactly/ what you are doing. We expose this constructor, in a limited way,
+    -- to allow for certain kinds of testing, and /absolutely nothing else ever/.
+    -- Attempts to use this in ways it was not designed to /will/ break, this
+    -- interface is /not/ stable, and relying on it is /not/ a good plan.
+    --
+    -- @since 1.3.1
+    UnsafeMkArg DeBruijn (Index "arg") (ValT AbstractTy)
   deriving stock
     ( -- | @since 1.0.0
       Eq,
@@ -339,7 +359,7 @@ data Arg = Arg DeBruijn (Index "arg") (ValT AbstractTy)
 
 -- Helper to get the type of an argument.
 typeArg :: Arg -> ValT AbstractTy
-typeArg (Arg _ _ t) = t
+typeArg (UnsafeMkArg _ _ t) = t
 
 -- | A general reference in a Covenant program.
 --

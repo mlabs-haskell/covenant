@@ -30,9 +30,9 @@ module Covenant.ASG
     -- * ASG components
 
     -- ** Types
-    Id,
+    Id (Id),
     Ref (..),
-    Arg,
+    Arg (Arg),
     CompNodeInfo
       ( Builtin1,
         Builtin2,
@@ -142,7 +142,7 @@ import Covenant.Internal.Rename
 import Covenant.Internal.Term
   ( ASGNode (ACompNode, AValNode, AnError),
     ASGNodeType (CompNodeType, ErrorNodeType, ValNodeType),
-    Arg (Arg),
+    Arg (UnsafeMkArg),
     BoundTyVar (BoundTyVar),
     CompNodeInfo
       ( Builtin1Internal,
@@ -204,7 +204,7 @@ import Covenant.Internal.Term
         WrongNumInstantiationsInApp,
         WrongReturnType
       ),
-    Id,
+    Id (UnsafeMkId),
     Ref (AnArg, AnId),
     ValNodeInfo (AppInternal, CataInternal, DataConstructorInternal, LitInternal, MatchInternal, ThunkInternal),
     typeASGNode,
@@ -280,7 +280,7 @@ import Data.Vector qualified as Vector
 import Data.Vector.NonEmpty qualified as NonEmpty
 import Data.Void (Void, vacuous)
 import Data.Wedge (Wedge (Nowhere), wedge)
-import Data.Word (Word32)
+import Data.Word (Word32, Word64)
 import Optics.Core
   ( A_Lens,
     LabelOptic (labelOptic),
@@ -297,6 +297,18 @@ import Optics.Core
     _1,
     _2,
   )
+
+-- | A read-only pattern for exposing the internals of an 'Id'.
+--
+-- @since 1.3.1
+pattern Id :: Word64 -> Id
+pattern Id w <- UnsafeMkId w
+
+-- | A read-only pattern for exposing the internals of an 'Arg'.
+--
+-- @since 1.3.1
+pattern Arg :: DeBruijn -> Index "arg" -> ValT AbstractTy -> Arg
+pattern Arg db i t <- UnsafeMkArg db i t
 
 -- | A fully-assembled Covenant ASG.
 --
@@ -600,7 +612,7 @@ arg scope index = do
   lookedUp <- asks (preview (#scopeInfo % #argumentInfo % ix scopeAsInt % _2 % ix indexAsInt))
   case lookedUp of
     Nothing -> throwError . NoSuchArgument scope $ index
-    Just t -> pure . Arg scope index $ t
+    Just t -> pure . UnsafeMkArg scope index $ t
 
 -- | Construct a node corresponding to the given Plutus primop.
 --
@@ -693,7 +705,7 @@ lam expectedT@(CompT cnt (CompTBody xs)) bodyComp = do
       cntW = view wordCount cnt
   bodyRef <- local (over (#scopeInfo % #argumentInfo) (Vector.cons (cntW, args))) bodyComp
   case bodyRef of
-    AnArg (Arg _ _ argTy) -> do
+    AnArg (UnsafeMkArg _ _ argTy) -> do
       if argTy == resultT
         then refTo . ACompNode expectedT . LamInternal $ bodyRef
         else throwError . WrongReturnType resultT $ argTy

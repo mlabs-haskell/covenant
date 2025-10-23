@@ -1,6 +1,8 @@
 {-# LANGUAGE CPP #-}
 {-# LANGUAGE PolyKinds #-}
 
+{- HLINT ignore "Use camelCase" -}
+
 -- |
 -- Module: Covenant.Test
 -- Copyright: (C) MLabs 2025
@@ -66,6 +68,8 @@ module Covenant.Test
     DebugASGBuilder (..),
     debugASGBuilder,
     typeIdTest,
+    Arg (UnsafeMkArg),
+    Id (UnsafeMkId),
   )
 where
 
@@ -134,7 +138,12 @@ import Covenant.Internal.Strategy
     PlutusDataConstructor (PlutusB, PlutusI),
     PlutusDataStrategy (ConstrData),
   )
-import Covenant.Internal.Term (ASGNodeType (CompNodeType, ValNodeType), typeId)
+import Covenant.Internal.Term
+  ( ASGNodeType (CompNodeType, ValNodeType),
+    Arg (UnsafeMkArg),
+    Id (UnsafeMkId),
+    typeId,
+  )
 import Covenant.Internal.Type
   ( AbstractTy (BoundAt),
     BuiltinFlatT

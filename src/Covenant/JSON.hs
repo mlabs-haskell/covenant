@@ -88,7 +88,7 @@ import Covenant.Internal.Strategy
   )
 import Covenant.Internal.Term
   ( ASGNode (ACompNode, AValNode, AnError),
-    Arg (Arg),
+    Arg (UnsafeMkArg),
     BoundTyVar (BoundTyVar),
     CompNodeInfo
       ( Builtin1Internal,
@@ -99,7 +99,7 @@ import Covenant.Internal.Term
         LamInternal
       ),
     CovenantTypeError (OtherError),
-    Id (Id),
+    Id (UnsafeMkId),
     Ref (AnArg, AnId),
     ValNodeInfo
       ( AppInternal,
@@ -747,11 +747,11 @@ decodeDataDeclarationAbstractTy =
 
 -- | @since 1.3.0
 encodeId :: Id -> Encoding
-encodeId (Id n) = toEncoding n
+encodeId (UnsafeMkId n) = toEncoding n
 
 -- | @since 1.3.0
 decodeId :: Value -> Parser Id
-decodeId = fmap Id . parseJSON
+decodeId = fmap UnsafeMkId . parseJSON
 
 {- Ref encodes as a typical sum type without named fields:
 
@@ -784,7 +784,7 @@ decodeRef =
 
 -- | @since 1.3.0
 encodeArg :: Arg -> Encoding
-encodeArg (Arg db ix ty) =
+encodeArg (UnsafeMkArg db ix ty) =
   let dbEnc = encodeDeBruijn db
       ixEnc = encodeIndex ix
       tyEnc = encodeValTAbstractTy ty
@@ -799,7 +799,7 @@ decodeArg = withObject "Arg" $ \obj -> do
   argDB <- withField "argDeBruijn" decodeDeBruijn obj
   argIX <- withField "argIndex" decodeIndex obj
   argTy <- withField "argType" decodeValTAbstractTy obj
-  pure $ Arg argDB argIX argTy
+  pure $ UnsafeMkArg argDB argIX argTy
 
 {- AConstant
 
