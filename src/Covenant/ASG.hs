@@ -30,9 +30,9 @@ module Covenant.ASG
     -- * ASG components
 
     -- ** Types
-    Id (UnId),
+    Id,
     Ref (..),
-    Arg (UnArg),
+    Arg,
     CompNodeInfo
       ( Builtin1,
         Builtin2,
@@ -142,7 +142,7 @@ import Covenant.Internal.Rename
 import Covenant.Internal.Term
   ( ASGNode (ACompNode, AValNode, AnError),
     ASGNodeType (CompNodeType, ErrorNodeType, ValNodeType),
-    Arg (Arg, UnArg),
+    Arg (UnsafeMkArg),
     BoundTyVar (BoundTyVar),
     CompNodeInfo
       ( Builtin1Internal,
@@ -204,7 +204,7 @@ import Covenant.Internal.Term
         WrongNumInstantiationsInApp,
         WrongReturnType
       ),
-    Id (UnId),
+    Id,
     Ref (AnArg, AnId),
     ValNodeInfo (AppInternal, CataInternal, DataConstructorInternal, LitInternal, MatchInternal, ThunkInternal),
     typeASGNode,
@@ -600,7 +600,7 @@ arg scope index = do
   lookedUp <- asks (preview (#scopeInfo % #argumentInfo % ix scopeAsInt % _2 % ix indexAsInt))
   case lookedUp of
     Nothing -> throwError . NoSuchArgument scope $ index
-    Just t -> pure . Arg scope index $ t
+    Just t -> pure . UnsafeMkArg scope index $ t
 
 -- | Construct a node corresponding to the given Plutus primop.
 --
@@ -693,7 +693,7 @@ lam expectedT@(CompT cnt (CompTBody xs)) bodyComp = do
       cntW = view wordCount cnt
   bodyRef <- local (over (#scopeInfo % #argumentInfo) (Vector.cons (cntW, args))) bodyComp
   case bodyRef of
-    AnArg (Arg _ _ argTy) -> do
+    AnArg (UnsafeMkArg _ _ argTy) -> do
       if argTy == resultT
         then refTo . ACompNode expectedT . LamInternal $ bodyRef
         else throwError . WrongReturnType resultT $ argTy

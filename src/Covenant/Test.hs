@@ -68,8 +68,8 @@ module Covenant.Test
     DebugASGBuilder (..),
     debugASGBuilder,
     typeIdTest,
-    Arg (UnsafeArg),
-    Id (UnsafeId),
+    Arg (UnsafeMkArg),
+    Id (UnsafeMkId),
   )
 where
 
@@ -138,7 +138,12 @@ import Covenant.Internal.Strategy
     PlutusDataConstructor (PlutusB, PlutusI),
     PlutusDataStrategy (ConstrData),
   )
-import Covenant.Internal.Term (ASGNodeType (CompNodeType, ValNodeType), Arg (UnsafeArg), Id (UnsafeId), typeId)
+import Covenant.Internal.Term
+  ( ASGNodeType (CompNodeType, ValNodeType),
+    Arg (UnsafeMkArg),
+    Id (UnsafeMkId),
+    typeId,
+  )
 import Covenant.Internal.Type
   ( AbstractTy (BoundAt),
     BuiltinFlatT

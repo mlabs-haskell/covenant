@@ -1,10 +1,8 @@
-{-# LANGUAGE PatternSynonyms #-}
-
 module Covenant.Internal.Term
   ( CovenantTypeError (..),
-    Id (Id, UnId, UnsafeId),
+    Id (UnsafeMkId),
     typeId,
-    Arg (Arg, UnArg, UnsafeArg),
+    Arg (UnsafeMkArg),
     typeArg,
     Ref (..),
     typeRef,
@@ -295,7 +293,17 @@ data CovenantTypeError
 -- | A unique identifier for a node in a Covenant program.
 --
 -- @since 1.0.0
-newtype Id = Id Word64
+newtype Id
+  = -- | = Important note
+    --
+    -- Using this constructor is /not safe/. Do not do this unless you know
+    -- /exactly/ what you are doing. We expose this constructor, in a limited way,
+    -- to allow for certain kinds of testing, and /absolutely nothing else ever/.
+    -- Attempts to use this in ways it was not designed to /will/ break, this
+    -- interface is /not/ stable, and relying on it is /not/ a good plan.
+    --
+    -- @since 1.3.1
+    UnsafeMkId Word64
   deriving
     ( -- | @since 1.0.0
       Eq,
@@ -314,20 +322,6 @@ newtype Id = Id Word64
       Show
     )
 
--- | This is the *safe* read-only pattern
-pattern UnId :: Word64 -> Id
-pattern UnId w <- Id w
-
--- | This is the *unsafe* pattern.
--- This should ONLY ever be used for tests and you should
--- NEVER use this to construct Ids manually.
-pattern UnsafeId :: Word64 -> Id
-pattern UnsafeId w = Id w
-
-{-# COMPLETE UnId #-}
-
-{-# COMPLETE UnsafeId #-}
-
 -- Get the type of an `Id`, or fail.
 typeId ::
   forall (m :: Type -> Type).
@@ -343,7 +337,17 @@ typeId i = do
 -- | An argument passed to a function in a Covenant program.
 --
 -- @since 1.0.0
-data Arg = Arg DeBruijn (Index "arg") (ValT AbstractTy)
+data Arg
+  = -- | = Important note
+    --
+    -- Using this constructor is /not safe/. Do not do this unless you know
+    -- /exactly/ what you are doing. We expose this constructor, in a limited way,
+    -- to allow for certain kinds of testing, and /absolutely nothing else ever/.
+    -- Attempts to use this in ways it was not designed to /will/ break, this
+    -- interface is /not/ stable, and relying on it is /not/ a good plan.
+    --
+    -- @since 1.3.1
+    UnsafeMkArg DeBruijn (Index "arg") (ValT AbstractTy)
   deriving stock
     ( -- | @since 1.0.0
       Eq,
@@ -353,24 +357,9 @@ data Arg = Arg DeBruijn (Index "arg") (ValT AbstractTy)
       Show
     )
 
--- | This is the 'safe' pattern which can be used anywhere to
--- deconstruct an arg
-pattern UnArg :: DeBruijn -> Index "arg" -> Arg
-pattern UnArg db i <- Arg db i _
-
--- | This is the *unsafe* pattern, which should NEVER
--- be used to manually construct 'Arg's in an AST, and should
--- ONLY ever be used for tests.
-pattern UnsafeArg :: DeBruijn -> Index "arg" -> ValT AbstractTy -> Arg
-pattern UnsafeArg db i t = Arg db i t
-
-{-# COMPLETE UnArg #-}
-
-{-# COMPLETE UnsafeArg #-}
-
 -- Helper to get the type of an argument.
 typeArg :: Arg -> ValT AbstractTy
-typeArg (Arg _ _ t) = t
+typeArg (UnsafeMkArg _ _ t) = t
 
 -- | A general reference in a Covenant program.
 --
