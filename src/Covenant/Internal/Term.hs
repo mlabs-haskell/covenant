@@ -139,10 +139,10 @@ data CovenantTypeError
     --
     -- @since 1.2.0
     CataAlgebraWrongArity Int
-  | -- | The first argument to a catamorphism wasn't an algebra.
+  | -- | The type argument to a catamorphism wasn't an algebra.
     --
-    -- @since 1.1.0
-    CataNotAnAlgebra ASGNodeType
+    -- @since 1.4.0
+    CataNotAnAlgebra (CompT AbstractTy)
   | -- | The second argument to a catamorphism wasn't a value type.
     --
     -- @since 1.1.0
@@ -174,6 +174,11 @@ data CovenantTypeError
     --
     -- @since 1.1.0
     CataUnsuitable (CompT AbstractTy) (ValT AbstractTy)
+  | -- | Either the number of handlers was wrong (too many or too few), or
+    -- some of the handlers were not thunks.
+    --
+    -- @since 1.4.0
+    CataWrongHandlers (Vector Ref)
   | -- | Someone attempted to construct a tyvar using a DB index or argument position
     --   which refers to a scope (or argument) that does not exist.
     --
@@ -420,7 +425,7 @@ data ValNodeInfo
     AppInternal Id (Vector Ref) (Vector (Wedge BoundTyVar (ValT Void)))
   | ThunkInternal Id
   | -- | @since 1.1.0
-    CataInternal Ref Ref
+    CataInternal (Vector Ref) Ref
   | -- | @since 1.2.0
     DataConstructorInternal TyName ConstructorName (Vector Ref)
   | -- | @since 1.2.0

@@ -104,7 +104,7 @@ where
 import Data.Foldable (foldl')
 #endif
 
-import Control.Monad (foldM, join, unless, zipWithM)
+import Control.Monad (foldM, join, unless, zipWithM, (>=>))
 import Control.Monad.Except
   ( ExceptT,
     MonadError (throwError),
@@ -124,7 +124,7 @@ import Control.Monad.Reader
 import Covenant.Constant (AConstant, typeConstant)
 import Covenant.Data (DatatypeInfo, mkDatatypeInfo, primBaseFunctorInfos)
 import Covenant.DeBruijn (DeBruijn (S, Z), asInt)
-import Covenant.Index (Count, Index, count0, intCount, intIndex, wordCount)
+import Covenant.Index (Count, Index, count0, intCount, intIndex, ix0, wordCount)
 import Covenant.Internal.KindCheck (EncodingArgErr (EncodingArgMismatch), checkEncodingArgs)
 import Covenant.Internal.Ledger (ledgerTypes)
 import Covenant.Internal.Rename
@@ -166,6 +166,7 @@ import Covenant.Internal.Term
         CataNotAnAlgebra,
         CataUnsuitable,
         CataWrongBuiltinType,
+        CataWrongHandlers,
         CataWrongValT,
         ConstructorDoesNotExistForType,
         DatatypeInfoRenameError,
@@ -253,8 +254,8 @@ import Covenant.Prim
     typeTwoArgFunc,
   )
 import Covenant.Type
-  ( CompT (Comp0),
-    CompTBody (ReturnT),
+  ( CompT (Comp0, Comp1),
+    CompTBody (ReturnT, (:--:>)),
     Constructor,
     ConstructorName,
     DataDeclaration (OpaqueData),
@@ -262,8 +263,10 @@ import Covenant.Type
     Renamed (Unifiable),
     TyName (TyName),
     ValT (Abstraction),
+    integerT,
     tyvar,
   )
+import Covenant.Util (pattern ConsV, pattern NilV)
 import Data.Bimap (Bimap)
 import Data.Bimap qualified as Bimap
 import Data.Coerce (coerce)
@@ -491,11 +494,13 @@ pattern App f args instTys <- AppInternal f args instTys
 pattern Thunk :: Id -> ValNodeInfo
 pattern Thunk i <- ThunkInternal i
 
--- | \'Tear down\' a self-recursive value with an algebra.
+-- | \'Tear down\' a self-recursive value with an algebra. The first argument is
+-- a list of \'handlers\' for the base functor, represented similar to 'Match'
+-- handlers, while the second is the structure to be torn down.
 --
--- @since 1.0.0
-pattern Cata :: Ref -> Ref -> ValNodeInfo
-pattern Cata algebraRef valRef <- CataInternal algebraRef valRef
+-- @since 1.4.0
+pattern Cata :: Vector Ref -> Ref -> ValNodeInfo
+pattern Cata handlerRefs valRef <- CataInternal handlerRefs valRef
 
 -- | Inject (zero or more) fields into a data constructor
 --
@@ -999,6 +1004,120 @@ thunk i = do
     ValNodeType t -> throwError . ThunkValType $ t
     ErrorNodeType -> throwError ThunkError
 
+cata ::
+  forall (m :: Type -> Type).
+  (MonadHashCons Id ASGNode m, MonadError CovenantTypeError m, MonadReader ASGEnv m) =>
+  CompT AbstractTy ->
+  Vector Ref ->
+  Ref ->
+  m Id
+cata algT handlers rVal = do
+  (algInputT, algResultT) <- disassembleAlgType
+  typeRef rVal >>= \case
+    ValNodeType valT -> case valT of
+      BuiltinFlat ByteStringT -> verifyBSCata algResultT
+      BuiltinFlat IntegerT -> case algInputT of
+        Datatype "#Negative" _ -> verifyIntegerCata algResultT
+        Datatype "#Natural" _ -> verifyIntegerCata algResultT
+        _ -> throwError . CataNotAnAlgebra $ algT
+      Datatype tyName tyVars -> verifyDatatypeCata algInputT algResultT tyName tyVars
+      _ -> throwError . CataWrongValT $ valT
+    t -> throwError . CataApplyToNonValT $ t
+  where
+    bsBBT :: CompT AbstractTy
+    bsBBT =
+      Comp1 $
+        ThunkT (Comp0 $ ReturnT $ tyvar (S Z) ix0)
+          :--:> ThunkT (Comp0 $ integerT :--:> tyvar (S Z) ix0 :--:> ReturnT (tyvar (S Z) ix0))
+          :--:> ReturnT (tyvar Z ix0)
+    -- Since the `Natural#` and `Negative#` base functors are identical, we only
+    -- make one and re-use it.
+    integerBBT :: CompT AbstractTy
+    integerBBT =
+      Comp1 $
+        ThunkT (Comp0 $ ReturnT $ tyvar (S Z) ix0)
+          :--:> ThunkT (Comp0 $ tyvar (S Z) ix0 :--:> ReturnT (tyvar (S Z) ix0))
+          :--:> ReturnT (tyvar Z ix0)
+    disassembleAlgType :: m (ValT AbstractTy, ValT AbstractTy)
+    disassembleAlgType = case algT of
+      Comp0 (CompTBody nev) -> do
+        unless (NonEmpty.length nev == 2) (throwError . CataNotAnAlgebra $ algT)
+        pure (nev NonEmpty.! 0, nev NonEmpty.! 1)
+      _ -> throwError . CataNonRigidAlgebra $ algT
+    verifyBSCata :: ValT AbstractTy -> m Id
+    verifyBSCata algOutputT = do
+      handlers' <- traverse typeRef handlers
+      case handlers' of
+        ConsV (ValNodeType nilCaseT@(ThunkT _)) (ConsV (ValNodeType consCaseT@(ThunkT _)) NilV) -> do
+          scopeInfo <- askScope
+          tyDict <- asks (view #datatypeInfo)
+          case runRenameM scopeInfo . renameCompT $ bsBBT of
+            Left err -> throwError . RenameFunctionFailed bsBBT $ err
+            Right renamedBBT -> case runRenameM scopeInfo . renameValT $ nilCaseT of
+              Left err -> throwError . RenameArgumentFailed nilCaseT $ err
+              Right renamedNilT -> case runRenameM scopeInfo . renameValT $ consCaseT of
+                Left err -> throwError . RenameArgumentFailed consCaseT $ err
+                Right renamedConsT -> case checkApp tyDict renamedBBT [Just renamedNilT, Just renamedConsT] of
+                  Left err -> _
+                  Right result -> do
+                    restored <- undoRenameM result
+                    if restored == algOutputT
+                      then refTo . AValNode restored . CataInternal handlers $ rVal
+                      else throwError _
+        _ -> throwError . CataWrongHandlers $ handlers
+    verifyIntegerCata :: ValT AbstractTy -> m Id
+    verifyIntegerCata algOutputT = do
+      handlers' <- traverse typeRef handlers
+      case handlers' of
+        ConsV (ValNodeType zeroCase@(ThunkT _)) (ConsV (ValNodeType nextCase@(ThunkT _)) NilV) -> do
+          scopeInfo <- askScope
+          tyDict <- asks (view #datatypeInfo)
+          case runRenameM scopeInfo . renameCompT $ integerBBT of
+            Left err -> throwError . RenameFunctionFailed integerBBT $ err
+            Right renamedBBIT -> case runRenameM scopeInfo . renameValT $ zeroCase of
+              Left err -> throwError . RenameArgumentFailed zeroCase $ err
+              Right renamedZeroCase -> case runRenameM scopeInfo . renameValT $ nextCase of
+                Left err -> throwError . RenameArgumentFailed nextCase $ err
+                Right renamedNextCase -> case checkApp tyDict renamedBBIT [Just renamedZeroCase, Just renamedNextCase] of
+                  Left err -> _
+                  Right result -> do
+                    restored <- undoRenameM result
+                    if restored == algOutputT
+                      then refTo . AValNode restored . CataInternal handlers $ rVal
+                      else throwError _
+        _ -> throwError . CataWrongHandlers $ handlers
+    verifyDatatypeCata :: ValT AbstractTy -> ValT AbstractTy -> TyName -> Vector (ValT AbstractTy) -> m Id
+    verifyDatatypeCata algInputT algOutputT tyName tyVars = do
+      datatypes <- asks (view #datatypeInfo)
+      case Map.lookup tyName datatypes of
+        Nothing -> throwError . CataNoSuchType $ tyName
+        Just datatypeInfo -> case view #baseFunctor datatypeInfo of
+          Nothing -> throwError . CataNoBaseFunctorForType $ tyName
+          -- Note (Koz, 27/10/05): Since we have confirmed (just above) that a
+          -- base functor exists for the type to be torn down, it /must/ have
+          -- a Boehm-Berrarducci form, as the only types which don't are
+          -- `Void` (up to isomorphism). Thus, `fromJust` here is safe.
+          Just _ -> case fromJust . view #bbForm $ datatypeInfo of
+            ThunkT bbT -> do
+              let bbArity = arity bbT
+              unless (bbArity == Vector.length handlers) (throwError . CataWrongHandlers $ handlers)
+              handlers' <- traverse (typeRef >=> \case (ValNodeType t@(ThunkT _)) -> pure t; _ -> throwError . CataWrongHandlers $ handlers) handlers
+              scopeInfo <- askScope
+              tyDict <- asks (view #datatypeInfo)
+              case runRenameM scopeInfo . renameCompT $ bbT of
+                Left err -> throwError . RenameFunctionFailed bbT $ err
+                Right renamedBBT -> case traverse (runRenameM scopeInfo . renameValT) handlers' of
+                  Left err -> _
+                  Right renamedArgs -> case checkApp tyDict renamedBBT (fmap Just . Vector.toList $ renamedArgs) of
+                    Left err -> _
+                    Right result -> do
+                      restored <- undoRenameM result
+                      if restored == algOutputT
+                        then refTo . AValNode restored . CataInternal handlers $ rVal
+                        else throwError _
+            _ -> error "cata: A Boehm-Berrarducci type was found that isn't a thunk."
+
+{-
 -- | Given a 'Ref' to an algebra (that is, something taking a base functor and
 -- producing some result), and a 'Ref' to a value associated with that base
 -- functor, build a catamorphism to tear it down. This can fail for a range of
@@ -1069,6 +1188,7 @@ cata rAlg rVal =
           _ -> throwError . CataNonRigidAlgebra $ algT
         t -> throwError . CataNotAnAlgebra $ t
     t -> throwError . CataApplyToNonValT $ t
+-}
 
 -- | Perform a pattern match. The first argument is the value to be matched on,
 -- and the second argument is a 'Vector' of \'handlers\' for each possible
@@ -1077,24 +1197,33 @@ cata rAlg rVal =
 -- All handlers must be thunks, and must all return the same (concrete) result.
 -- Polymorphic \'handlers\' (that is, thunks whose computation binds type
 -- variables of its own) will fail to compile.
--- NOTE: Opaque the handlers for an opaque type must follow the order:
+--
+-- = Note
+--
+-- Opaque the handlers for an opaque type must follow the order:
+--
+--  @
 --  [ PlutusI,
 --    PlutusB,
 --    PlutusConstr,
 --    PlutusMap,
 --    PlutusList
 --  ]
+--  @
 --
---  Where types not included in the provided constructors to the Opaque declaration are omitted.
+--  Where types not included in the provided constructors to the opaque declaration are omitted.
 --
 --  Furthermore, the handlers for opaque constructors operate on the unwrapped arguments to
---  their respective PlutusData constructor. That is, for some result type 'r', the handlers for a
+--  their respective PlutusData constructor. That is, for some result type @r@, the handlers for a
 --  an opaque type which uses all the constructors should have the types:
+--
+--  @
 --    PlutusI :: Integer -> r
 --    PlutusB :: ByteString -> r
 --    PlutusConstr :: Integer -> [Data] -> r
 --    PlutusMap :: [(Integer,Data)] -> r
 --    PlutusList :: [Data] -> r
+--  @
 --
 -- @since 1.2.0
 match ::
