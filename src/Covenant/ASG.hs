@@ -495,12 +495,13 @@ pattern Thunk :: Id -> ValNodeInfo
 pattern Thunk i <- ThunkInternal i
 
 -- | \'Tear down\' a self-recursive value with an algebra. The first argument is
+-- the signature of the algebra used; the second argument is
 -- a list of \'handlers\' for the base functor, represented similar to 'Match'
--- handlers, while the second is the structure to be torn down.
+-- handlers, while the third is the type of thing to be torn down.
 --
 -- @since 1.4.0
-pattern Cata :: Vector Ref -> Ref -> ValNodeInfo
-pattern Cata handlerRefs valRef <- CataInternal handlerRefs valRef
+pattern Cata :: CompT AbstractTy -> Vector Ref -> Ref -> ValNodeInfo
+pattern Cata algT handlerRefs valRef <- CataInternal algT handlerRefs valRef
 
 -- | Inject (zero or more) fields into a data constructor
 --
@@ -1015,12 +1016,25 @@ cata algT handlers rVal = do
   (algInputT, algResultT) <- disassembleAlgType
   typeRef rVal >>= \case
     ValNodeType valT -> case valT of
-      BuiltinFlat ByteStringT -> verifyBSCata algResultT
+      BuiltinFlat ByteStringT -> case algInputT of
+        Datatype "#ByteString" _ -> verifyBSCata algResultT
+        _ -> throwError . CataNotAnAlgebra $ algT
       BuiltinFlat IntegerT -> case algInputT of
         Datatype "#Negative" _ -> verifyIntegerCata algResultT
         Datatype "#Natural" _ -> verifyIntegerCata algResultT
         _ -> throwError . CataNotAnAlgebra $ algT
-      Datatype tyName tyVars -> verifyDatatypeCata algInputT algResultT tyName tyVars
+      Datatype tyName tyVars -> case algInputT of
+        Datatype bfName _ -> do
+          datatypes <- asks (view #datatypeInfo)
+          case Map.lookup tyName datatypes of
+            Nothing -> throwError . CataNoSuchType $ tyName
+            Just datatypeInfo -> case view #baseFunctor datatypeInfo of
+              Just (_, Datatype actualBfName _) ->
+                if bfName == actualBfName
+                  then verifyDatatypeCata algResultT tyName tyVars
+                  else _
+              _ -> throwError . CataNoBaseFunctorForType $ tyName
+        _ -> throwError . CataNotAnAlgebra $ algT
       _ -> throwError . CataWrongValT $ valT
     t -> throwError . CataApplyToNonValT $ t
   where
@@ -1062,7 +1076,7 @@ cata algT handlers rVal = do
                   Right result -> do
                     restored <- undoRenameM result
                     if restored == algOutputT
-                      then refTo . AValNode restored . CataInternal handlers $ rVal
+                      then refTo . AValNode restored . CataInternal algT handlers $ rVal
                       else throwError _
         _ -> throwError . CataWrongHandlers $ handlers
     verifyIntegerCata :: ValT AbstractTy -> m Id
@@ -1083,11 +1097,11 @@ cata algT handlers rVal = do
                   Right result -> do
                     restored <- undoRenameM result
                     if restored == algOutputT
-                      then refTo . AValNode restored . CataInternal handlers $ rVal
+                      then refTo . AValNode restored . CataInternal algT handlers $ rVal
                       else throwError _
         _ -> throwError . CataWrongHandlers $ handlers
-    verifyDatatypeCata :: ValT AbstractTy -> ValT AbstractTy -> TyName -> Vector (ValT AbstractTy) -> m Id
-    verifyDatatypeCata algInputT algOutputT tyName tyVars = do
+    verifyDatatypeCata :: ValT AbstractTy -> TyName -> Vector (ValT AbstractTy) -> m Id
+    verifyDatatypeCata algOutputT tyName tyVars = do
       datatypes <- asks (view #datatypeInfo)
       case Map.lookup tyName datatypes of
         Nothing -> throwError . CataNoSuchType $ tyName
@@ -1113,7 +1127,7 @@ cata algT handlers rVal = do
                     Right result -> do
                       restored <- undoRenameM result
                       if restored == algOutputT
-                        then refTo . AValNode restored . CataInternal handlers $ rVal
+                        then refTo . AValNode restored . CataInternal algT handlers $ rVal
                         else throwError _
             _ -> error "cata: A Boehm-Berrarducci type was found that isn't a thunk."
 

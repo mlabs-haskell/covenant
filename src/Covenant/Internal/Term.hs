@@ -425,7 +425,7 @@ data ValNodeInfo
     AppInternal Id (Vector Ref) (Vector (Wedge BoundTyVar (ValT Void)))
   | ThunkInternal Id
   | -- | @since 1.1.0
-    CataInternal (Vector Ref) Ref
+    CataInternal (CompT AbstractTy) (Vector Ref) Ref
   | -- | @since 1.2.0
     DataConstructorInternal TyName ConstructorName (Vector Ref)
   | -- | @since 1.2.0
