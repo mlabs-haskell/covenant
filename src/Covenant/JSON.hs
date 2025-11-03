@@ -409,7 +409,7 @@ validateCompilationUnit' (CompilationUnit datatypes asg _) = do
         LitInternal aConstant -> checkNode "Lit" (lit aConstant)
         AppInternal fId argRefs instTys -> checkNode "App" (app fId argRefs instTys)
         ThunkInternal i -> checkNode "Thunk" (thunk i)
-        CataInternal r1 r2 -> checkNode "Cata" (cata r1 r2)
+        CataInternal t r1 r2 -> checkNode "Cata" (cata t r1 r2)
         DataConstructorInternal tn cn args -> checkNode "DataConstructor" (dataConstructor tn cn args)
         MatchInternal scrut matcharms -> checkNode "Match" (match scrut matcharms)
       AnError -> checkNode "errorNode" err
@@ -858,7 +858,7 @@ encodeValNodeInfo = \case
         list encodeInstTy . toList $ instTys
       ]
   ThunkInternal f -> taggedFields "Thunk" [encodeId f]
-  CataInternal r1 r2 -> taggedFields "Cata" [encodeRef r1, encodeRef r2]
+  CataInternal t handlers r2 -> taggedFields "Cata" [encodeCompT encodeAbstractTy t, list encodeRef . toList $ handlers, encodeRef r2]
   DataConstructorInternal tn cn args ->
     taggedFields
       "DataConstructor"
@@ -885,9 +885,10 @@ decodeValNodeInfo =
       "Cata"
         :=> withFields
         $ \fieldsArr -> do
-          r1 <- withIndex 0 decodeRef fieldsArr
-          r2 <- withIndex 1 decodeRef fieldsArr
-          pure $ CataInternal r1 r2,
+          t <- withIndex 0 (decodeCompT decodeAbstractTy) fieldsArr
+          handlers <- withIndex 1 (withArray "Cata arms" (traverse decodeRef)) fieldsArr
+          r2 <- withIndex 2 decodeRef fieldsArr
+          pure $ CataInternal t handlers r2,
       "DataConstructor"
         :=> withFields
         $ \fieldsArr -> do

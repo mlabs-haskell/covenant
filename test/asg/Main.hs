@@ -40,6 +40,7 @@ import Covenant.ASG
     app,
     app',
     arg,
+    baseFunctorOf,
     boundTyVar,
     builtin1,
     builtin2,
@@ -56,6 +57,8 @@ import Covenant.ASG
     lazyLam,
     lit,
     match,
+    naturalBF,
+    negativeBF,
     runASGBuilder,
     thunk,
     topLevelNode,
@@ -65,7 +68,7 @@ import Covenant.Constant
     typeConstant,
   )
 import Covenant.DeBruijn (DeBruijn (S, Z))
-import Covenant.Index (Index, intIndex, ix0, ix1)
+import Covenant.Index (Index, intIndex, ix0, ix1, ix2)
 import Covenant.Prim
   ( typeOneArgFunc,
     typeThreeArgFunc,
@@ -203,166 +206,239 @@ unitThunkError = do
     Left (TypeError _ ThunkError) -> pure ()
     _ -> assertFailure $ "Unexpected result: " <> show result
 
--- Construct a function of type `<#Natural Bool -> !Bool> -> Integer -> !Bool`, whose
--- body performs a cata over its second argument using its first argument. This
--- should compile, and type as expected.
+-- Construct a function of type `<!Bool> -> <Bool -> !Bool> -> Integer ->
+-- !Bool`, whose body performs a cata over its third argument using the first
+-- and second argument as handlers. The stated algebra type is `Natural Bool ->
+-- !Bool`, where `Natural` refers to the natural-number base functor of
+-- `Integer`. This should compile and type as expected.
 unitCataNaturalF :: IO ()
 unitCataNaturalF = do
-  let thunkTy = ThunkT $ Comp0 $ Datatype "#Natural" [boolT] :--:> ReturnT boolT
-  let ty = Comp0 $ thunkTy :--:> integerT :--:> ReturnT boolT
-  let comp = lam ty $ do
-        alg <- arg Z ix0
-        x <- arg Z ix1
-        result <- cata (AnArg alg) (AnArg x)
-        pure . AnId $ result
-  withCompilationSuccessUnit comp $ matchesType ty
+  let algTy = Comp0 $ Datatype naturalBF [boolT] :--:> ReturnT boolT
+  let resultTy =
+        Comp0 $
+          ThunkT (Comp0 . ReturnT $ boolT)
+            :--:> ThunkT (Comp0 $ boolT :--:> ReturnT boolT)
+            :--:> integerT
+            :--:> ReturnT boolT
+  let comp = lam resultTy $ do
+        armZ <- arg Z ix0
+        armS <- arg Z ix1
+        x <- arg Z ix2
+        AnId <$> cata algTy (Vector.fromList . fmap AnArg $ [armZ, armS]) (AnArg x)
+  withCompilationSuccessUnit comp (matchesType resultTy)
 
--- Construct a function of type `<#Negative Bool -> !Bool> -> Integer -> !Bool`, whose
--- body performs a cata over its second argument using its first argument. This
--- should compile, and type as expected.
+-- Construct a function of type `<!Bool> -> <Bool -> !Bool> -> Integer ->
+-- !Bool`, whose body performs a cata over its third argument using the first
+-- and second argument as handlers. The stated algebra type is `Negative Bool -> !Bool`,
+-- where `Negative` refers to the negative-number base functor of `Integer`.
+-- This should compile and type as expected.
 unitCataNegativeF :: IO ()
 unitCataNegativeF = do
-  let thunkTy = ThunkT $ Comp0 $ Datatype "#Negative" [boolT] :--:> ReturnT boolT
-  let ty = Comp0 $ thunkTy :--:> integerT :--:> ReturnT boolT
-  let comp = lam ty $ do
-        alg <- arg Z ix0
-        x <- arg Z ix1
-        result <- cata (AnArg alg) (AnArg x)
-        pure . AnId $ result
-  withCompilationSuccessUnit comp $ matchesType ty
+  let algTy = Comp0 $ Datatype negativeBF [boolT] :--:> ReturnT boolT
+  let resultTy =
+        Comp0 $
+          ThunkT (Comp0 . ReturnT $ boolT)
+            :--:> ThunkT (Comp0 $ boolT :--:> ReturnT boolT)
+            :--:> integerT
+            :--:> ReturnT boolT
+  let comp = lam resultTy $ do
+        armZ <- arg Z ix0
+        armS <- arg Z ix1
+        x <- arg Z ix2
+        AnId <$> cata algTy (Vector.fromList . fmap AnArg $ [armZ, armS]) (AnArg x)
+  withCompilationSuccessUnit comp (matchesType resultTy)
 
--- Construct a function of type `<#ByteString Integer -> !Integer> -> ByteString
--- -> !Bool`, whose body performs a cata over its second argument using its
--- first argument. This should compile, and type as expected.
+-- Construct a function of type `<!Bool> -> <Integer -> Bool -> !Bool>
+-- -> ByteString -> !Bool>, whose body performs a cata over its third argument
+-- using the first and second argument as handlers. The stated algebra type is
+-- `ByteString# Bool -> !Bool`, where `ByteString#` refers to the base functor
+-- of `ByteString`. This should compile and type as expected.
 unitCataByteStringF :: IO ()
 unitCataByteStringF = do
-  let thunkTy = ThunkT $ Comp0 $ Datatype "#ByteString" [integerT] :--:> ReturnT integerT
-  let ty = Comp0 $ thunkTy :--:> byteStringT :--:> ReturnT integerT
-  let comp = lam ty $ do
-        alg <- arg Z ix0
-        x <- arg Z ix1
-        result <- cata (AnArg alg) (AnArg x)
-        pure . AnId $ result
-  withCompilationSuccessUnit comp $ matchesType ty
+  let algTy = do
+        bfName <- baseFunctorOf "ByteString"
+        pure . Comp0 $ Datatype bfName [boolT] :--:> ReturnT boolT
+  let resultTy =
+        Comp0 $
+          ThunkT (Comp0 . ReturnT $ boolT)
+            :--:> ThunkT (Comp0 $ integerT :--:> boolT :--:> ReturnT boolT)
+            :--:> byteStringT
+            :--:> ReturnT boolT
+  let comp = lam resultTy $ do
+        t <- algTy
+        armNil <- arg Z ix0
+        armCons <- arg Z ix1
+        x <- arg Z ix2
+        AnId <$> cata t (Vector.fromList . fmap AnArg $ [armNil, armCons]) (AnArg x)
+  withCompilationSuccessUnit comp (matchesType resultTy)
 
--- Construct a function of type `forall a . <#Maybe a Integer -> !Integer> -> Maybe
--- a -> !Integer`, whose body performs a cata over its second argument
--- using its first argument. This should fail to compile, indicating that
--- `Maybe` doesn't have a base functor.
+-- Construct a function of type `forall a . <!Integer> -> <a -> !Integer> ->
+-- Maybe a -> !Integer`, whose body performs a cata over its third argument
+-- using the first and second argument as handlers. The stated algebra type is
+-- `Maybe# a Integer -> !Integer`, with `a` rigid. This should fail to compile,
+-- indicating that `Maybe` lacks a base functor.
 unitCataMaybeF :: IO ()
 unitCataMaybeF = do
-  let thunkTy = ThunkT $ Comp0 $ Datatype "#Maybe" [tyvar (S Z) ix0, integerT] :--:> ReturnT integerT
-  let ty = Comp1 $ thunkTy :--:> Datatype "Maybe" [tyvar Z ix0] :--:> ReturnT integerT
-  let comp = lam ty $ do
-        alg <- arg Z ix0
-        x <- arg Z ix1
-        result <- cata (AnArg alg) (AnArg x)
-        pure . AnId $ result
+  let algTy = do
+        bfName <- baseFunctorOf "Maybe"
+        pure . Comp0 $ Datatype bfName [tyvar (S Z) ix0, integerT] :--:> ReturnT integerT
+  let resultTy =
+        Comp1 $
+          ThunkT (Comp0 $ ReturnT integerT)
+            :--:> ThunkT (Comp0 $ tyvar (S Z) ix0 :--:> ReturnT integerT)
+            :--:> Datatype "Maybe" [tyvar Z ix0]
+            :--:> ReturnT integerT
+  let comp = lam resultTy $ do
+        t <- algTy
+        armNothing <- arg Z ix0
+        armJust <- arg Z ix1
+        x <- arg Z ix2
+        AnId <$> cata t (Vector.fromList . fmap AnArg $ [armNothing, armJust]) (AnArg x)
   withCompilationFailureUnit comp $ \case
     TypeError _ (CataNoBaseFunctorForType tyName) -> assertEqual "" "Maybe" tyName
     err' -> assertFailure $ "Failed with unexpected type of error: " <> show err'
 
--- Construct a function of type `<forall a . ListF a (Maybe a) -> !Maybe a> -> List
--- Integer -> !Maybe Integer`, whose body performs a cata over its second
--- argument using its first argument. This should fail to compile due to a
--- non-rigid algebra.
+-- Construct a function of type forall a . <!Maybe a> -> <a -> Maybe a ->
+-- !(Maybe a)> ->
+-- List Integer -> !(Maybe Integer)`, whose body performs a cata over its third
+-- argument using the first and second argument as handlers. The stated algebra
+-- type is `forall b. List# b (Maybe b) -> !(Maybe b)`. This should fail to
+-- compile due to a non-rigid algebra.
 unitCataNonRigidF :: IO ()
 unitCataNonRigidF = do
-  let nonRigidCompT = Comp1 $ Datatype "#List" [tyvar Z ix0, Datatype "Maybe" [tyvar Z ix0]] :--:> ReturnT (Datatype "Maybe" [tyvar Z ix0])
-  let thunkTy = ThunkT nonRigidCompT
-  let ty = Comp0 $ thunkTy :--:> Datatype "List" [integerT] :--:> ReturnT (Datatype "Maybe" [integerT])
-  let comp = lam ty $ do
-        alg <- arg Z ix0
-        x <- arg Z ix1
-        result <- cata (AnArg alg) (AnArg x)
-        pure . AnId $ result
-  withCompilationFailureUnit comp $ \case
-    TypeError _ (CataNonRigidAlgebra t) -> assertEqual "" nonRigidCompT t
-    err' -> assertFailure $ "Failed with unexpected type of error: " <> show err'
-
--- Construct a function of type `<#List Integer Bool -> !Bool> -> List Integer
--- -> !Bool`, whose body performs a cata over its second argument using its
--- first argument. This should compile, and type as expected.
-unitCataListInteger :: IO ()
-unitCataListInteger = do
-  let thunkTy = ThunkT $ Comp0 $ Datatype "#List" [integerT, boolT] :--:> ReturnT boolT
-  let ty = Comp0 $ thunkTy :--:> Datatype "List" [integerT] :--:> ReturnT boolT
-  let comp = lam ty $ do
-        alg <- arg Z ix0
-        x <- arg Z ix1
-        result <- cata (AnArg alg) (AnArg x)
-        pure . AnId $ result
-  withCompilationSuccessUnit comp $ matchesType ty
-
--- Construct a function of type `forall a . <#List Integer a -> !a> -> List
--- Integer -> !a`, whose body performs a cata over its second argument using its
--- first argument. This should compile, and type as expected.
-unitCataListIntegerRigid :: IO ()
-unitCataListIntegerRigid = do
-  let thunkTy = ThunkT $ Comp0 $ Datatype "#List" [integerT, tyvar (S Z) ix0] :--:> ReturnT (tyvar (S Z) ix0)
-  let ty = Comp1 $ thunkTy :--:> Datatype "List" [integerT] :--:> ReturnT (tyvar Z ix0)
-  let comp = lam ty $ do
-        alg <- arg Z ix0
-        x <- arg Z ix1
-        result <- cata (AnArg alg) (AnArg x)
-        pure . AnId $ result
-  withCompilationSuccessUnit comp $ matchesType ty
-
--- Construct a function of type `forall a . <#List a Integer -> !Integer> -> List
--- a -> !Integer`, whose body performs a cata over its second argument using its
--- first argument. This should compile, and type as expected.
-unitCataListRigid :: IO ()
-unitCataListRigid = do
-  let thunkTy = ThunkT $ Comp0 $ Datatype "#List" [tyvar (S Z) ix0, integerT] :--:> ReturnT integerT
-  let ty = Comp1 $ thunkTy :--:> Datatype "List" [tyvar Z ix0] :--:> ReturnT integerT
-  let comp = lam ty $ do
-        alg <- arg Z ix0
-        x <- arg Z ix1
-        result <- cata (AnArg alg) (AnArg x)
-        pure . AnId $ result
-  withCompilationSuccessUnit comp $ matchesType ty
-
--- Construct a function of type `forall a . <#List a (Maybe a) -> !Maybe a> ->
--- List a -> !Maybe a`, whose body performs a cata over its second argument
--- using its first argument. This should compile, and type as expected.
-unitCataListMaybeRigid :: IO ()
-unitCataListMaybeRigid = do
-  let thunkTy =
-        ThunkT $
-          Comp0 $
-            Datatype "#List" [tyvar (S Z) ix0, Datatype "Maybe" [tyvar (S Z) ix0]]
-              :--:> ReturnT (Datatype "Maybe" [tyvar (S Z) ix0])
-  let ty =
+  let algTy = do
+        listBfName <- baseFunctorOf "List"
+        pure . Comp1 $ Datatype listBfName [tyvar Z ix0, Datatype "Maybe" [tyvar Z ix0]] :--:> ReturnT (Datatype "Maybe" [tyvar Z ix0])
+  let resultTy =
         Comp1 $
-          thunkTy
+          ThunkT (Comp0 $ ReturnT $ Datatype "Maybe" [tyvar (S Z) ix0])
+            :--:> ThunkT (Comp0 $ tyvar (S Z) ix0 :--:> Datatype "Maybe" [tyvar (S Z) ix0] :--:> ReturnT (Datatype "Maybe" [tyvar (S Z) ix0]))
             :--:> Datatype "List" [tyvar Z ix0]
             :--:> ReturnT (Datatype "Maybe" [tyvar Z ix0])
-  let comp = lam ty $ do
-        alg <- arg Z ix0
-        x <- arg Z ix1
-        result <- cata (AnArg alg) (AnArg x)
-        pure . AnId $ result
-  withCompilationSuccessUnit comp $ matchesType ty
+  let comp = lam resultTy $ do
+        t <- algTy
+        armNil <- arg Z ix0
+        armCons <- arg Z ix1
+        x <- arg Z ix2
+        AnId <$> cata t (Vector.fromList . fmap AnArg $ [armNil, armCons]) (AnArg x)
+  withCompilationFailureUnit comp $ \case
+    TypeError _ (CataNonRigidAlgebra t) -> assertEqual "" resultTy t
+    err' -> assertFailure $ "Failed with unexpected type of error: " <> show err'
 
--- Construct a function of type `forall a b . <#List a (Maybe b) -> !Maybe b> ->
--- a -> !Maybe b`. In its body, we construct a singleton list, then eliminate it
--- using a cata with the first argument as the algebra. THis should compile and
--- type as expected.
+-- Construct a function of type `<!Bool> -> <Integer -> Bool -> !Bool> -> List
+-- Integer -> !Bool`, whose body performs a cata over its third argument using
+-- the first and second argument as handlers. The stated algebra type is `List#
+-- Integer Bool -> !Bool`. This should compile and type as expected.
+unitCataListInteger :: IO ()
+unitCataListInteger = do
+  let algTy = do
+        listBfName <- baseFunctorOf "List"
+        pure . Comp0 $ Datatype listBfName [integerT, boolT] :--:> ReturnT boolT
+  let resultTy =
+        Comp0 $
+          ThunkT (Comp0 $ ReturnT boolT)
+            :--:> ThunkT (Comp0 $ integerT :--:> boolT :--:> ReturnT boolT)
+            :--:> Datatype "List" [integerT]
+            :--:> ReturnT boolT
+  let comp = lam resultTy $ do
+        t <- algTy
+        armNil <- arg Z ix0
+        armCons <- arg Z ix1
+        x <- arg Z ix2
+        AnId <$> cata t (Vector.fromList . fmap AnArg $ [armNil, armCons]) (AnArg x)
+  withCompilationSuccessUnit comp (matchesType resultTy)
+
+-- Construct a function of type `forall a . <!a> -> <!Integer -> a -> !a> ->
+-- List Integer -> !a>, whose body performs a cata over its third argument using
+-- the first and second argument as handlers. The stated algebra type is `List#
+-- Integer a -> !a`, with `a` rigid. This should compile and type as expected.
+unitCataListIntegerRigid :: IO ()
+unitCataListIntegerRigid = do
+  let algTy = do
+        listBfName <- baseFunctorOf "List"
+        pure . Comp0 $ Datatype listBfName [integerT, tyvar (S Z) ix0] :--:> ReturnT (tyvar (S Z) ix0)
+  let resultTy =
+        Comp1 $
+          ThunkT (Comp0 $ ReturnT (tyvar (S Z) ix0))
+            :--:> ThunkT (Comp0 $ integerT :--:> tyvar (S Z) ix0 :--:> ReturnT (tyvar (S Z) ix0))
+            :--:> Datatype "List" [integerT]
+            :--:> ReturnT (tyvar Z ix0)
+  let comp = lam resultTy $ do
+        t <- algTy
+        armNil <- arg Z ix0
+        armCons <- arg Z ix1
+        x <- arg Z ix2
+        AnId <$> cata t (Vector.fromList . fmap AnArg $ [armNil, armCons]) (AnArg x)
+  withCompilationSuccessUnit comp (matchesType resultTy)
+
+-- Construct a function of type `forall a . <!Integer> -> <a -> Integer ->
+-- !Integer> -> List a -> !Integer`, whose body performs a cata over its third
+-- argument using the first and second argument as handlers. The stated algebra
+-- type is `List# a Integer -> !Integer`, holding `a` rigid. This should compile
+-- and type as expected.
+unitCataListRigid :: IO ()
+unitCataListRigid = do
+  let algTy = do
+        listBfName <- baseFunctorOf "List"
+        pure . Comp0 $ Datatype listBfName [tyvar (S Z) ix0, integerT] :--:> ReturnT integerT
+  let resultTy =
+        Comp1 $
+          ThunkT (Comp0 $ ReturnT integerT)
+            :--:> ThunkT (Comp0 $ tyvar (S Z) ix0 :--:> integerT :--:> ReturnT (tyvar (S Z) ix0))
+            :--:> Datatype "List" [tyvar Z ix0]
+            :--:> ReturnT integerT
+  let comp = lam resultTy $ do
+        t <- algTy
+        armNil <- arg Z ix0
+        armCons <- arg Z ix1
+        x <- arg Z ix2
+        AnId <$> cata t (Vector.fromList . fmap AnArg $ [armNil, armCons]) (AnArg x)
+  withCompilationSuccessUnit comp (matchesType resultTy)
+
+-- Construct a function of type `forall a . <!(Maybe a)> -> <a -> Maybe a ->
+-- !(Maybe a)> -> List a -> !(Maybe a)`, whose body performs a cata over its
+-- third argument using the first and second argument as handlers. The stated
+-- algebra type is `List# a (Maybe a) -> !(Maybe a)`, keeping `a` rigid. This
+-- should compile and type as expected.
+unitCataListMaybeRigid :: IO ()
+unitCataListMaybeRigid = do
+  let algTy = do
+        listBfName <- baseFunctorOf "List"
+        pure . Comp0 $ Datatype listBfName [tyvar (S Z) ix0, Datatype "Maybe" [tyvar (S Z) ix0]] :--:> ReturnT (Datatype "Maybe" [tyvar (S Z) ix0])
+  let resultTy =
+        Comp1 $
+          ThunkT (Comp0 $ ReturnT (Datatype "Maybe" [tyvar (S Z) ix0]))
+            :--:> ThunkT (Comp0 $ tyvar (S Z) ix0 :--:> Datatype "Maybe" [tyvar (S Z) ix0] :--:> ReturnT (Datatype "Maybe" [tyvar (S Z) ix0]))
+            :--:> Datatype "List" [tyvar Z ix0]
+            :--:> ReturnT (Datatype "Maybe" [tyvar Z ix0])
+  let comp = lam resultTy $ do
+        t <- algTy
+        armNil <- arg Z ix0
+        armCons <- arg Z ix1
+        x <- arg Z ix2
+        AnId <$> cata t (Vector.fromList . fmap AnArg $ [armNil, armCons]) (AnArg x)
+  withCompilationSuccessUnit comp (matchesType resultTy)
+
+-- Construct a function of type `forall a b . <!(Maybe b)> -> <a -> Maybe b ->
+-- !(Maybe b)> -> a -> !(Maybe b)`. In its body, we construct a singleton list
+-- using the third argument, then eliminate it using a cata with the first and
+-- second argument as handlers. The stated type of the algebra is `List# a
+-- (Maybe b) -> !(Maybe b)`, keeping `a, b` rigid. This should compile and type
+-- as expected.
 unitCataIntroThenEliminate :: IO ()
 unitCataIntroThenEliminate = do
-  let thunkTy =
-        ThunkT $
-          Comp0 $
-            Datatype "#List" [tyvar (S Z) ix0, Datatype "Maybe" [tyvar (S Z) ix1]]
-              :--:> ReturnT (Datatype "Maybe" [tyvar (S Z) ix1])
-  let ty =
+  let algTy = do
+        listBfName <- baseFunctorOf "List"
+        pure . Comp0 $ Datatype listBfName [tyvar (S Z) ix0, Datatype "Maybe" [tyvar (S Z) ix1]] :--:> ReturnT (Datatype "Maybe" [tyvar (S Z) ix1])
+  let resultTy =
         Comp2 $
-          thunkTy
+          ThunkT (Comp0 $ ReturnT (Datatype "Maybe" [tyvar (S Z) ix1]))
+            :--:> ThunkT (Comp0 $ tyvar (S Z) ix0 :--:> Datatype "Maybe" [tyvar (S Z) ix1] :--:> ReturnT (Datatype "Maybe" [tyvar (S Z) ix1]))
             :--:> tyvar Z ix0
             :--:> ReturnT (Datatype "Maybe" [tyvar Z ix1])
-  let comp = lam ty $ do
-        alg <- arg Z ix0
-        x <- arg Z ix1
+  let comp = lam resultTy $ do
+        t <- algTy
+        x <- arg Z ix2
         nilThunk <- dataConstructor "List" "Nil" []
         nilForced <- force (AnId nilThunk)
         aT <- boundTyVar Z ix0
@@ -370,9 +446,10 @@ unitCataIntroThenEliminate = do
         singleThunk <- dataConstructor "List" "Cons" [AnArg x, AnId nilApplied]
         singleForced <- force (AnId singleThunk)
         singleApplied <- app' singleForced []
-        result <- cata (AnArg alg) (AnId singleApplied)
-        pure . AnId $ result
-  withCompilationSuccessUnit comp $ matchesType ty
+        armNil <- arg Z ix0
+        armCons <- arg Z ix1
+        AnId <$> cata t (Vector.fromList . fmap AnArg $ [armNil, armCons]) (AnId singleApplied)
+  withCompilationSuccessUnit comp (matchesType resultTy)
 
 -- Properties
 
