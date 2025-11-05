@@ -11,6 +11,7 @@ import Covenant.ASG
     Ref (AnArg, AnId),
     app',
     arg,
+    baseFunctorOf,
     builtin2,
     cata,
     ctor,
@@ -40,7 +41,7 @@ import Covenant.Type
     BuiltinFlatT (BoolT, IntegerT, StringT),
     CompT (Comp0, Comp1),
     CompTBody (ReturnT, (:--:>)),
-    ValT (BuiltinFlat),
+    ValT (BuiltinFlat, Datatype),
     tyvar,
   )
 import Data.Either (isRight)
@@ -155,6 +156,17 @@ conformance_body1_builder = lam topLevelTy body
 
     sumList :: Ref -> ASGBuilder Id
     sumList listToSum = do
+      listF <- baseFunctorOf "List"
+      let cataTy = Comp0 $ Datatype listF [intT, intT] :--:> ReturnT intT
+      nilHandler <- lazyLam (Comp0 $ ReturnT intT) (AnId <$> lit (AnInteger 0))
+      consHandler <- lazyLam (Comp0 $ intT :--:> intT :--:> ReturnT intT) $ do
+        x <- AnArg <$> arg Z ix0
+        y <- AnArg <$> arg Z ix1
+        x #+ y
+      cata cataTy [AnId nilHandler, AnId consHandler] listToSum
+    {-
+    sumList :: Ref -> ASGBuilder Id
+    sumList listToSum = do
       sumListF' <- AnId <$> sumListF
       cata sumListF' listToSum
 
@@ -170,6 +182,7 @@ conformance_body1_builder = lam topLevelTy body
       where
         listFIntT :: ValT AbstractTy
         listFIntT = dtype "#List" [intT, intT]
+    -}
 
     intT :: ValT AbstractTy
     intT = BuiltinFlat IntegerT
