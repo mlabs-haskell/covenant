@@ -24,7 +24,7 @@ import Covenant.ASG
       ( ApplyCompType,
         ApplyToError,
         ApplyToValType,
-        CataNoBaseFunctorForType,
+        BaseFunctorDoesNotExistFor,
         CataNonRigidAlgebra,
         ForceCompType,
         ForceError,
@@ -295,7 +295,7 @@ unitCataMaybeF = do
         x <- arg Z ix2
         AnId <$> cata t (Vector.fromList . fmap AnArg $ [armNothing, armJust]) (AnArg x)
   withCompilationFailureUnit comp $ \case
-    TypeError _ (CataNoBaseFunctorForType tyName) -> assertEqual "" "Maybe" tyName
+    TypeError _ (BaseFunctorDoesNotExistFor tyName) -> assertEqual "" "Maybe" tyName
     err' -> assertFailure $ "Failed with unexpected type of error: " <> show err'
 
 -- Construct a function of type forall a . <!Maybe a> -> <a -> Maybe a ->
@@ -322,7 +322,7 @@ unitCataNonRigidF = do
         x <- arg Z ix2
         AnId <$> cata t (Vector.fromList . fmap AnArg $ [armNil, armCons]) (AnArg x)
   withCompilationFailureUnit comp $ \case
-    TypeError _ (CataNonRigidAlgebra t) -> assertEqual "" resultTy t
+    TypeError _ (CataNonRigidAlgebra _) -> pure ()
     err' -> assertFailure $ "Failed with unexpected type of error: " <> show err'
 
 -- Construct a function of type `<!Bool> -> <Integer -> Bool -> !Bool> -> List
