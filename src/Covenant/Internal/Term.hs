@@ -179,6 +179,12 @@ data CovenantTypeError
     --
     -- @since 1.4.0
     CataWrongHandlers (Vector Ref)
+  | -- | When determining the result type of a catamorphism, the stated handlers
+    -- were incompatible with the structure to be torn down. This uses
+    -- unification internally, and thus, we also produce the unification error.
+    --
+    -- @since wip
+    CataHandlersIncompatible (CompT Renamed) (Vector (ValT Renamed)) TypeAppError
   | -- | Someone attempted to construct a tyvar using a DB index or argument position
     --   which refers to a scope (or argument) that does not exist.
     --

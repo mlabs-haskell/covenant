@@ -160,6 +160,7 @@ import Covenant.Internal.Term
         BrokenIdReference,
         CataAlgebraWrongArity,
         CataApplyToNonValT,
+        CataHandlersIncompatible,
         CataNoBaseFunctorForType,
         CataNoSuchType,
         CataNonRigidAlgebra,
@@ -267,6 +268,7 @@ import Covenant.Type
     tyvar,
   )
 import Covenant.Util (pattern ConsV, pattern NilV)
+import Data.Bifunctor (first)
 import Data.Bimap (Bimap)
 import Data.Bimap qualified as Bimap
 import Data.Coerce (coerce)
@@ -1028,8 +1030,8 @@ cata algT handlers rVal = do
           case Map.lookup tyName datatypes of
             Nothing -> throwError . CataNoSuchType $ tyName
             Just datatypeInfo -> case view #baseFunctor datatypeInfo of
-              Just (_, Datatype actualBfName _) ->
-                if bfName == actualBfName
+              Just (bfDecl, _) ->
+                if bfName == view #datatypeName bfDecl
                   then verifyDatatypeCata valT algResultT tyName
                   else throwError . CataUnsuitable algT $ valT
               _ -> throwError . CataNoBaseFunctorForType $ tyName
@@ -1118,15 +1120,26 @@ cata algT handlers rVal = do
               scopeInfo <- askScope
               case runRenameM scopeInfo . renameCompT $ bbT of
                 Left err' -> throwError . RenameFunctionFailed bbT $ err'
-                Right renamedBBT -> case traverse (runRenameM scopeInfo . renameValT) handlers' of
-                  Left _ -> throwError . CataUnsuitable algT $ valT
+                Right renamedBBT -> case traverse (\h -> first (RenameArgumentFailed h) . runRenameM scopeInfo . renameValT $ h) handlers' of
+                  Left err' -> throwError err'
                   Right renamedArgs -> case checkApp tyDict renamedBBT (fmap Just . Vector.toList $ renamedArgs) of
-                    Left _ -> throwError . CataUnsuitable algT $ valT
+                    Left err' -> throwError . CataHandlersIncompatible renamedBBT renamedArgs $ err'
                     Right result -> do
                       restored <- undoRenameM result
                       if restored == algOutputT
                         then refTo . AValNode restored . CataInternal algT handlers $ rVal
                         else throwError . CataUnsuitable algT $ valT
+            {-
+            Right renamedBBT -> case traverse (runRenameM scopeInfo . renameValT) handlers' of
+              Left err' -> throwError . RenameArgumentFailed _ $ err'
+              Right renamedArgs -> case checkApp tyDict renamedBBT (fmap Just . Vector.toList $ renamedArgs) of
+                Left err' -> throwError . _ algT valT $ err'
+                Right result -> do
+                  restored <- undoRenameM result
+                  if restored == algOutputT
+                    then refTo . AValNode restored . CataInternal algT handlers $ rVal
+                    else throwError . _ algT valT restored $ algOutputT
+            -}
             _ -> error "cata: A Boehm-Berrarducci type was found that isn't a thunk."
 
 {-
