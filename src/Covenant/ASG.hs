@@ -254,7 +254,7 @@ import Covenant.Prim
   )
 import Covenant.Type
   ( CompT (Comp0),
-    CompTBody (ReturnT),
+    CompTBody (ReturnT, ArgsAndResult),
     Constructor,
     ConstructorName,
     DataDeclaration (OpaqueData),
@@ -477,13 +477,15 @@ pattern Lit c <- LitInternal c
 -- or
 -- * 'Data.Wedge.There', meaning \'a concrete type\'.
 --
--- @since 1.3.0
+-- The final CompT is the concretified function type, which is necessary for codegen. 
+-- @since wip
 pattern App ::
   Id ->
   Vector Ref ->
   Vector (Wedge BoundTyVar (ValT Void)) ->
+  CompT AbstractTy ->
   ValNodeInfo
-pattern App f args instTys <- AppInternal f args instTys
+pattern App f args instTys concreteFnTy <- AppInternal f args instTys concreteFnTy
 
 -- | Wrap a computation into a value (essentially delaying it).
 --
@@ -755,7 +757,7 @@ err = refTo AnError
 -- * \'Use this type variable in our scope\', specified as 'Data.Wedge.Here'.
 -- * \'Use this concrete type\', specified as 'Data.Wedge.There'.
 --
--- @since 1.2.0
+-- @since wip
 app ::
   forall (m :: Type -> Type).
   (MonadHashCons Id ASGNode m, MonadError CovenantTypeError m, MonadReader ASGEnv m) =>
@@ -777,16 +779,42 @@ app fId argRefs instTys = do
         if numInstantiations /= numVars
           then throwError $ WrongNumInstantiationsInApp renamedFT numVars numInstantiations
           else do
-            instantiatedFT <- instantiate subs renamedFT
             renamedArgs <- traverse renameArg argRefs
+            concretifiedFT <- concretifyFT renamedFT renamedArgs
+            instantiatedFT <- instantiate subs concretifiedFT 
             tyDict <- asks (view #datatypeInfo)
             result <- either (throwError . UnificationError) pure $ checkApp tyDict instantiatedFT (Vector.toList renamedArgs)
             restored <- undoRenameM result
+            unRenamedFnTy <- undoRenameCompT instantiatedFT
             checkEncodingWithInfo tyDict restored
-            refTo . AValNode restored $ AppInternal fId argRefs instTys
+            refTo . AValNode restored $ AppInternal fId argRefs instTys unRenamedFnTy
     ValNodeType t -> throwError . ApplyToValType $ t
     ErrorNodeType -> throwError ApplyToError
   where
+    renameSubs :: [(Index "tyvar", ValT AbstractTy)] -> m [(Index "tyvar", ValT Renamed)]
+    renameSubs subs =
+      askScope >>= \scope -> case traverse (traverse (runRenameM scope . renameValT)) subs of
+        Left err' -> throwError $ FailedToRenameInstantiation err'
+        Right res -> pure res
+
+    concretifyFT :: CompT Renamed -> Vector (Maybe (ValT Renamed)) -> m (CompT Renamed)
+    concretifyFT fn@(CompT _ body) argValTypes = do
+      argSubs <- getArgSubs body argValTypes
+      instantiate (Map.toList argSubs) fn
+
+    getArgSubs :: CompTBody Renamed -> Vector (Maybe (ValT Renamed)) -> m (Map (Index "tyvar") (ValT Renamed))
+    getArgSubs (ArgsAndResult args _) argValTypes = liftUnifyM
+                                                  . fmap (Vector.foldMap id)
+                                                  $ Vector.zipWithM argSubHelper args argValTypes
+      where
+        argSubHelper :: ValT Renamed -> Maybe (ValT Renamed) -> UnifyM (Map (Index "tyvar") (ValT Renamed))
+        argSubHelper fromFn = \case
+          Nothing -> pure Map.empty
+          Just fromArg -> unify fromFn fromArg
+
+    -- NOTE: The helper function below only concerns instantiations that result from
+    --       explicit type applications (via the third argument to `app`).
+    --
     mkSubstitutions :: Vector (Wedge BoundTyVar (ValT Void)) -> [(Index "tyvar", ValT AbstractTy)]
     mkSubstitutions =
       Vector.ifoldl'
@@ -800,12 +828,6 @@ app fId argRefs instTys = do
         )
         []
 
-    renameSubs :: [(Index "tyvar", ValT AbstractTy)] -> m [(Index "tyvar", ValT Renamed)]
-    renameSubs subs =
-      askScope >>= \scope -> case traverse (traverse (runRenameM scope . renameValT)) subs of
-        Left err' -> throwError $ FailedToRenameInstantiation err'
-        Right res -> pure res
-
     instantiate :: [(Index "tyvar", ValT Renamed)] -> CompT Renamed -> m (CompT Renamed)
     instantiate [] fn = pure fn
     instantiate subs fn = do
@@ -816,6 +838,8 @@ app fId argRefs instTys = do
           throwError . UnificationError . ImpossibleHappened $
             "Impossible happened: Result of tyvar instantiation should be a thunk, but is: "
               <> T.pack (show other)
+
+
 
 -- | Introduce a data constructor.
 --
@@ -1344,6 +1368,17 @@ undoRenameM val = do
   case undoRename scope val of
     Left err' -> throwError $ UndoRenameFailure err'
     Right renamed -> pure renamed
+
+undoRenameCompT ::
+  forall (m :: Type -> Type).
+  (MonadError CovenantTypeError m, MonadReader ASGEnv m) =>
+  CompT Renamed ->
+  m (CompT AbstractTy)
+undoRenameCompT comp = undoRenameM (ThunkT comp) >>= \case
+  ThunkT res -> pure res
+  -- This really should be impossible, not just unlikely.
+  _other -> error "Undoing renaming on a CompT resulting in something other than a thunk, which should be totally impossible"
+
 
 askScope ::
   forall (m :: Type -> Type).
