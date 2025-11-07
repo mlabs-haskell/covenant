@@ -254,7 +254,7 @@ import Covenant.Prim
   )
 import Covenant.Type
   ( CompT (Comp0),
-    CompTBody (ReturnT, ArgsAndResult),
+    CompTBody (ArgsAndResult, ReturnT),
     Constructor,
     ConstructorName,
     DataDeclaration (OpaqueData),
@@ -477,7 +477,7 @@ pattern Lit c <- LitInternal c
 -- or
 -- * 'Data.Wedge.There', meaning \'a concrete type\'.
 --
--- The final CompT is the concretified function type, which is necessary for codegen. 
+-- The final CompT is the concretified function type, which is necessary for codegen.
 -- @since wip
 pattern App ::
   Id ->
@@ -781,7 +781,7 @@ app fId argRefs instTys = do
           else do
             renamedArgs <- traverse renameArg argRefs
             concretifiedFT <- concretifyFT renamedFT renamedArgs
-            instantiatedFT <- instantiate subs concretifiedFT 
+            instantiatedFT <- instantiate subs concretifiedFT
             tyDict <- asks (view #datatypeInfo)
             result <- either (throwError . UnificationError) pure $ checkApp tyDict instantiatedFT (Vector.toList renamedArgs)
             restored <- undoRenameM result
@@ -803,9 +803,10 @@ app fId argRefs instTys = do
       instantiate (Map.toList argSubs) fn
 
     getArgSubs :: CompTBody Renamed -> Vector (Maybe (ValT Renamed)) -> m (Map (Index "tyvar") (ValT Renamed))
-    getArgSubs (ArgsAndResult args _) argValTypes = liftUnifyM
-                                                  . fmap (Vector.foldMap id)
-                                                  $ Vector.zipWithM argSubHelper args argValTypes
+    getArgSubs (ArgsAndResult args _) argValTypes =
+      liftUnifyM
+        . fmap (Vector.foldMap id)
+        $ Vector.zipWithM argSubHelper args argValTypes
       where
         argSubHelper :: ValT Renamed -> Maybe (ValT Renamed) -> UnifyM (Map (Index "tyvar") (ValT Renamed))
         argSubHelper fromFn = \case
@@ -838,8 +839,6 @@ app fId argRefs instTys = do
           throwError . UnificationError . ImpossibleHappened $
             "Impossible happened: Result of tyvar instantiation should be a thunk, but is: "
               <> T.pack (show other)
-
-
 
 -- | Introduce a data constructor.
 --
@@ -1374,11 +1373,11 @@ undoRenameCompT ::
   (MonadError CovenantTypeError m, MonadReader ASGEnv m) =>
   CompT Renamed ->
   m (CompT AbstractTy)
-undoRenameCompT comp = undoRenameM (ThunkT comp) >>= \case
-  ThunkT res -> pure res
-  -- This really should be impossible, not just unlikely.
-  _other -> error "Undoing renaming on a CompT resulting in something other than a thunk, which should be totally impossible"
-
+undoRenameCompT comp =
+  undoRenameM (ThunkT comp) >>= \case
+    ThunkT res -> pure res
+    -- This really should be impossible, not just unlikely.
+    _other -> error "Undoing renaming on a CompT resulting in something other than a thunk, which should be totally impossible"
 
 askScope ::
   forall (m :: Type -> Type).
