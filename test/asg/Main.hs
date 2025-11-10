@@ -359,7 +359,7 @@ unitCataListIntegerRigid = do
         pure . Comp0 $ Datatype listBfName [integerT, tyvar (S Z) ix0] :--:> ReturnT (tyvar (S Z) ix0)
   let resultTy =
         Comp1 $
-          tyvar (S Z) ix0
+          tyvar Z ix0
             :--:> ThunkT (Comp0 $ integerT :--:> tyvar (S Z) ix0 :--:> ReturnT (tyvar (S Z) ix0))
             :--:> Datatype "List" [integerT]
             :--:> ReturnT (tyvar Z ix0)
