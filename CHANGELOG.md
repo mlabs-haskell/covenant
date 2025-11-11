@@ -10,6 +10,9 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   respectively from `Covenant.Test`
 * Add read-only synonyms `Id` and `Arg` for the two data types with the same
   name in `Covenant.ASG`
+* Modify `CovenantTypeError` for new catamorphism related errors
+* Rewrite `cata` to take explicit handlers for the base functor (similar to
+  `match`)
 
 ## 1.3.0 -- 2025-10-07
 

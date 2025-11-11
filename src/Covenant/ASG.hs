@@ -1011,6 +1011,22 @@ thunk i = do
     ValNodeType t -> throwError . ThunkValType $ t
     ErrorNodeType -> throwError ThunkError
 
+-- | Given a computation type for an algebra (the \'stated algebra type\'), as
+-- well as a set of handlers designed to deal with each case of the stated
+-- algebra's base functor, plus a 'Ref' to a value associated with that base
+-- functor, build a catamorphism to tear that value down.
+--
+-- Ensure the following:
+--
+-- * The stated algebra type must be a 'Comp0' taking a base functor and
+--   returning the same type as the last type variable instantiation of that base
+--   functor.
+-- * The handlers must be provided in the same order as the constructors of the
+--   parameter of the stated algebra type. Handlers for \'arms\' with no fields
+--   must be non-thunks, while handlers for \'arms\' with fields must be thunks.
+-- * The third argument must be a value type with a base functor.
+--
+-- @since wip
 cata ::
   forall (m :: Type -> Type).
   (MonadHashCons Id ASGNode m, MonadError CovenantTypeError m, MonadReader ASGEnv m) =>
@@ -1473,6 +1489,8 @@ naturalBF = TyName "#Natural"
 negativeBF :: TyName
 negativeBF = TyName "#Negative"
 
+-- Used as a helper for catamorphisms to classify what we need to do based on
+-- the stated algebra type
 data CataInfo
   = IntegerCata
   | ByteStringCata
@@ -1527,6 +1545,38 @@ getCataInfo t = case t of
             else acc
         _ -> acc
       _ -> acc
+    -- Note (Koz, 11/11/2025): We need this procedure specifically for `cata`. The
+    -- reason for this has to do with how we construct the 'base functor form' of
+    -- the value to be torn down by the catamorphism, in order to use the
+    -- unification machinery to get the type of the final result.
+    --
+    -- To be specific, suppose we have `<#List r (Maybe r) -> !Maybe r>` as our
+    -- stated algebra type, with `r` rigid. Suppose also that the value to be torn
+    -- down is `List r`. If we assume the rigid `r` is bound one scope away, `r`'s
+    -- DeBruijn index will be different for each of these:
+    --
+    -- \* In the stated algebra type, `r`'s index will be `S (S Z)`; but
+    -- \* In the value to be torn down, `r`'s index will be `S Z`.
+    --
+    -- As part of what we do here, we 'collect' the expected result of the
+    -- catamorphism according to the stated algebra type. Then, we use a
+    -- combination of the value to be torn down (or more precisely, its
+    -- Boehm-Berrarducci form), together with the handlers, as arguments to the
+    -- unifier to see what result we get on that basis. In theory, if the expected
+    -- result type and the result of this unification agree, we type check.
+    -- However, this would fail in our case: as the stated algebra type is
+    -- `Comp0 $ Datatype "#List" [tyvar (S (S Z)) ix0, ...`, the expected result
+    -- type would be `Datatype "Maybe" [tyvar (S (S Z) ix0]`. However, this is not
+    -- valid in the scope of the value to be torn down: that same rigid would have
+    -- the DeBruijn index `S Z` in that scope instead. This applies regardless of
+    -- whether the tyvar is part of a datatype or not. This gives us an 'off by
+    -- one' error.
+    --
+    -- As we prohibit non-rigid algebras, this requires us to lower the DeBruijn
+    -- index by one for our process. This is, in fact, _why_ stated algebra
+    -- types must be rigid: if they weren't, this process would become far more
+    -- complicated, as we would now have to be careful to establish _which_
+    -- tyvars need 'stepping down' and which don't!
     stepDown :: ValT AbstractTy -> ValT AbstractTy
     stepDown = \case
       Abstraction (BoundAt db i) -> case db of
