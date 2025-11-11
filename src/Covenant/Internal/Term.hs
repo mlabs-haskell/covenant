@@ -324,18 +324,14 @@ data CovenantTypeError
     -- @since wip
     CataNotAValueType ASGNodeType
   | -- | The expected result type of a catamorphism according to its stated algebra
-    -- type did not rename. If you see this error, this is a bug, so please
-    -- report it!
-    --
-    -- @since wip
-    CataExpectedDidNotRename (CompT AbstractTy) RenameError
-  | -- | The expected result type of a catamorphism according to its stated algebra
     -- was not the same as what we actually got after applying handlers. If you
     -- see this error, it means that one or more of your handlers is not
     -- correct.
     --
+    -- The first field is the type we expected, the second is what we got.
+    --
     -- @since wip
-    CataUnexpectedResultType (ValT Renamed) (ValT Renamed)
+    CataUnexpectedResultType (ValT AbstractTy) (ValT AbstractTy)
   deriving stock
     ( -- | @since 1.0.0
       Eq,

@@ -384,7 +384,7 @@ unitCataListRigid = do
   let resultTy =
         Comp1 $
           integerT
-            :--:> ThunkT (Comp0 $ tyvar (S Z) ix0 :--:> integerT :--:> ReturnT (tyvar (S Z) ix0))
+            :--:> ThunkT (Comp0 $ tyvar (S Z) ix0 :--:> integerT :--:> ReturnT integerT)
             :--:> Datatype "List" [tyvar Z ix0]
             :--:> ReturnT integerT
   let comp = lam resultTy $ do
@@ -407,7 +407,7 @@ unitCataListMaybeRigid = do
         pure . Comp0 $ Datatype listBfName [tyvar (S Z) ix0, Datatype "Maybe" [tyvar (S Z) ix0]] :--:> ReturnT (Datatype "Maybe" [tyvar (S Z) ix0])
   let resultTy =
         Comp1 $
-          Datatype "Maybe" [tyvar (S Z) ix0]
+          Datatype "Maybe" [tyvar Z ix0]
             :--:> ThunkT (Comp0 $ tyvar (S Z) ix0 :--:> Datatype "Maybe" [tyvar (S Z) ix0] :--:> ReturnT (Datatype "Maybe" [tyvar (S Z) ix0]))
             :--:> Datatype "List" [tyvar Z ix0]
             :--:> ReturnT (Datatype "Maybe" [tyvar Z ix0])
@@ -432,7 +432,7 @@ unitCataIntroThenEliminate = do
         pure . Comp0 $ Datatype listBfName [tyvar (S Z) ix0, Datatype "Maybe" [tyvar (S Z) ix1]] :--:> ReturnT (Datatype "Maybe" [tyvar (S Z) ix1])
   let resultTy =
         Comp2 $
-          Datatype "Maybe" [tyvar (S Z) ix1]
+          Datatype "Maybe" [tyvar Z ix1]
             :--:> ThunkT (Comp0 $ tyvar (S Z) ix0 :--:> Datatype "Maybe" [tyvar (S Z) ix1] :--:> ReturnT (Datatype "Maybe" [tyvar (S Z) ix1]))
             :--:> tyvar Z ix0
             :--:> ReturnT (Datatype "Maybe" [tyvar Z ix1])

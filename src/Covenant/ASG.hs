@@ -163,7 +163,6 @@ import Covenant.Internal.Term
         CataCouldNotRenameHandler,
         CataCouldNotRenameSubstitutions,
         CataDidNotUnify,
-        CataExpectedDidNotRename,
         CataFixUpFailedForBB,
         CataHandlerNotAValType,
         CataInvalidStructure,
@@ -221,7 +220,7 @@ import Covenant.Internal.Term
     typeRef,
   )
 import Covenant.Internal.Type
-  ( AbstractTy,
+  ( AbstractTy (BoundAt),
     BuiltinFlatT (ByteStringT, IntegerT),
     CompT (CompT),
     CompTBody (CompTBody),
@@ -1068,16 +1067,12 @@ cata algT handlers rVal =
             Right substitutedBBThunk -> do
               asArgs <- traverse handlerToArg handlers
               case traverse (runRenameM scopeInfo . renameValT) asArgs of
-                Right renamedHandlers -> do
-                  let renamedResultT = runRenameM scopeInfo . renameValT $ resultT
-                  let unified = checkApp tyDict (fromThunk substitutedBBThunk) (fmap Just . Vector.toList $ renamedHandlers)
-                  case (renamedResultT, unified) of
-                    (Right expected, Right actual) -> do
-                      unless (expected == actual) (throwError . CataUnexpectedResultType expected $ actual)
-                      restored <- undoRenameM actual
-                      refTo . AValNode restored . CataInternal algT handlers $ rVal
-                    (Right _, Left err') -> throwError . CataDidNotUnify algT handlers $ err'
-                    (Left err', _) -> throwError . CataExpectedDidNotRename algT $ err'
+                Right renamedHandlers -> case checkApp tyDict (fromThunk substitutedBBThunk) (fmap Just . Vector.toList $ renamedHandlers) of
+                  Right result -> do
+                    restored <- undoRenameM result
+                    unless (restored == resultT) (throwError . CataUnexpectedResultType resultT $ restored)
+                    refTo . AValNode restored . CataInternal algT handlers $ rVal
+                  Left err' -> throwError . CataDidNotUnify algT handlers $ err'
                 Left err' -> throwError . CataCouldNotRenameHandler algT handlers $ err'
             Left err' -> throwError . CataFixUpFailedForBB algT handlers subs renamedBBThunk $ err'
           Left err' -> throwError . CataCouldNotRenameSubstitutions algT handlers (fromThunk bbThunk) subs $ err'
@@ -1096,16 +1091,12 @@ cata algT handlers rVal =
           tyDict <- asks (view #datatypeInfo)
           asArgs <- traverse handlerToArg handlers
           case traverse (runRenameM scopeInfo . renameValT) asArgs of
-            Right renamedHandlers -> do
-              let renamedResultT = runRenameM scopeInfo . renameValT $ resultT
-              let unified = checkApp tyDict renamedBB (fmap Just . Vector.toList $ renamedHandlers)
-              case (renamedResultT, unified) of
-                (Right expected, Right actual) -> do
-                  unless (expected == actual) (throwError . CataUnexpectedResultType expected $ actual)
-                  restored <- undoRenameM actual
-                  refTo . AValNode restored . CataInternal algT handlers $ rVal
-                (Right _, Left err') -> throwError . CataDidNotUnify algT handlers $ err'
-                (Left err', _) -> throwError . CataExpectedDidNotRename algT $ err'
+            Right renamedHandlers -> case checkApp tyDict renamedBB (fmap Just . Vector.toList $ renamedHandlers) of
+              Right result -> do
+                restored <- undoRenameM result
+                unless (restored == resultT) (throwError . CataUnexpectedResultType resultT $ restored)
+                refTo . AValNode restored . CataInternal algT handlers $ rVal
+              Left err' -> throwError . CataDidNotUnify algT handlers $ err'
             Left err' -> throwError . CataCouldNotRenameHandler algT handlers $ err'
         Left err' -> throwError . CataCouldNotRenameBB algT handlers bb $ err'
     handlerToArg :: Ref -> m (ValT AbstractTy)
@@ -1499,7 +1490,7 @@ getCataInfo t = case t of
     let outputT = nev NonEmpty.! 1
     case inputT of
       Datatype bfTyName bfTyVars ->
-        (outputT,) <$> case Vector.unsnoc bfTyVars of
+        (stepDown outputT,) <$> case Vector.unsnoc bfTyVars of
           Just (tyVarInsts, lastT) -> do
             unless (lastT == outputT) (throwError . CataWrongOutputType outputT $ lastT)
             if
@@ -1536,3 +1527,11 @@ getCataInfo t = case t of
             else acc
         _ -> acc
       _ -> acc
+    stepDown :: ValT AbstractTy -> ValT AbstractTy
+    stepDown = \case
+      Abstraction (BoundAt db i) -> case db of
+        -- This is impossible, so we just return it unmodified
+        Z -> Abstraction (BoundAt db i)
+        (S db') -> Abstraction (BoundAt db' i)
+      Datatype tyName tyArgs -> Datatype tyName . fmap stepDown $ tyArgs
+      x -> x
