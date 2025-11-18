@@ -11,6 +11,7 @@ module Covenant.Internal.Unification
     fixUp,
     reconcile,
     lookupDatatypeInfo,
+    concretifyFT
   )
 where
 
@@ -48,6 +49,10 @@ import Data.Vector.NonEmpty (NonEmptyVector)
 import Data.Vector.NonEmpty qualified as NonEmpty
 import Data.Word (Word64)
 import Optics.Core (ix, preview, view)
+import Debug.Trace (traceM)
+import Covenant.Type (CompT(CompN), CompTBody (ArgsAndResult))
+import qualified Data.Map as M
+import Control.Applicative (Alternative((<|>)))
 
 -- | Possible errors resulting from applications of arguments to functions.
 --
@@ -143,13 +148,15 @@ checkApp ::
   CompT Renamed ->
   [Maybe (ValT Renamed)] ->
   Either TypeAppError (ValT Renamed)
-checkApp tyDict f args = runUnifyM tyDict $ checkApp' f args
-
+checkApp tyDict f args = traceCheckApp >> runUnifyM tyDict $ checkApp' f args
+  where
+    traceCheckApp :: forall (m :: Type -> Type). Applicative m => m ()
+    traceCheckApp = traceM $ "\n\nCHECKAPP\n FN: " <> show f <> "\n ARGS: " <> show args 
 checkApp' ::
   CompT Renamed ->
   [Maybe (ValT Renamed)] ->
   UnifyM (ValT Renamed)
-checkApp' f@(CompT _ (CompTBody xs)) ys = do
+checkApp' f@(CompT _ (CompTBody xs)) ys = traceCheckApp >> do
   let (curr, rest) = NonEmpty.uncons xs
       numArgsExpected = NonEmpty.length xs - 1
       numArgsActual = length ys
@@ -161,6 +168,8 @@ checkApp' f@(CompT _ (CompTBody xs)) ys = do
       ExcessArgs f (Vector.fromList ys)
   go curr (Vector.toList rest) ys
   where
+    traceCheckApp :: forall (m :: Type -> Type). Applicative m => m ()
+    traceCheckApp = traceM $ "\n\nCHECKAPP\n FN: " <> show f <> "\n ARGS: " <> show ys 
     go ::
       ValT Renamed ->
       [ValT Renamed] ->
@@ -268,7 +277,7 @@ unify ::
   ValT Renamed ->
   ValT Renamed ->
   UnifyM (Map (Index "tyvar") (ValT Renamed))
-unify expected actual =
+unify expected actual = traceUnify >>
   catchError
     ( case expected of
         Abstraction t1 -> case t1 of
@@ -282,6 +291,11 @@ unify expected actual =
     )
     (promoteUnificationError expected actual)
   where
+    traceUnify :: UnifyM ()
+    traceUnify = do
+      let msg = "\n\nUNIFY\n  Expected: " <> show expected <> "\n Actual: " <> show actual
+      pure () -- traceM msg
+
     unificationError :: forall (a :: Type). UnifyM a
     unificationError = throwError . DoesNotUnify expected $ actual
     noSubUnify :: forall (k :: Type) (a :: Type). UnifyM (Map k a)
@@ -356,7 +370,12 @@ unify expected actual =
               | tn' /= tn -> unificationError
               | otherwise -> do
                   bbFormConcreteA <- concretify bbForm args'
-                  unify bbFormConcreteE bbFormConcreteA
+                  res <- unify bbFormConcreteE bbFormConcreteA
+                  let msg = "\n\nUNIFY DATATYPE BBF:\n  EXPECTED: " <> show bbFormConcreteE
+                            <> "\n  ACTUAL: " <> show bbFormConcreteA
+                            <> "\n  RESULT: " <> show res <> "\n"
+                  traceM msg
+                  pure res 
             _ -> unificationError
         True -> case actual of
           Abstraction Rigid {} -> unificationError
@@ -404,3 +423,62 @@ reconcile =
           _ -> case new of
             Abstraction (Unifiable _) -> pure old
             _ -> throwError $ CouldNotReconcile i old new
+
+
+----- Extra stuff
+
+concretifyFT :: CompT Renamed
+             -> Vector (Maybe (ValT Renamed))
+             -> CompT Renamed
+concretifyFT compT@(CompN cnt (ArgsAndResult fromFn res)) fromArgs =  unfixedResult
+   where
+    -- NOTE/REVIEW: I am not sure if we should fix this up here. I think we shouldn't, b/c we need the unifiables to
+    --              conform with the what the instantiations expect from the explicit type applications, but I
+    --              could very easily be wrong.
+    unfixedResult :: CompT Renamed
+    unfixedResult = CompN cnt (ArgsAndResult subbedArgs subbedRes)
+
+    subbedArgs = (substMany allSubstitutions) <$> fromFn
+    subbedRes  = substMany allSubstitutions res
+
+    substMany :: [(Index "tyvar", ValT Renamed)] -> ValT Renamed -> ValT Renamed
+    substMany subs val = foldl' (\acc (tv,ty) -> substitute tv ty acc) val subs 
+
+    allUnifiables =  Set.toList $ Vector.foldMap collectUnifiables fromFn
+
+    allSubstitutions = M.toList $ getInstantiations allUnifiables (Vector.toList fromFn) (Vector.toList fromArgs)
+
+getInstantiations :: [Index "tyvar"] -> [ValT Renamed] -> [Maybe (ValT Renamed)] -> Map (Index "tyvar") (ValT Renamed)
+getInstantiations [] _ _ =  M.empty
+getInstantiations _ [] _ =  M.empty
+getInstantiations _ _ [] =  M.empty
+getInstantiations vs (fE: fEs) (Nothing : aEs) = getInstantiations vs fEs aEs
+getInstantiations vs@(var : vars) fs@(fE : fEs) as@(aE' : aEs) =
+  -- somewhat subjective but I think doing it w/ fromJust makes the logic easier to follow here 
+  let aE = fromJust aE'
+  in case instantiates (Unifiable var) aE fE of
+        Nothing -> getInstantiations [var] fEs aEs <> getInstantiations vars fs as
+        Just t -> M.insert var t $ getInstantiations vars fs as
+
+instantiates ::
+    Renamed ->
+    ValT Renamed -> -- the "more concrete type", usually the actual argument from 'app'
+    ValT Renamed -> -- the "more polymorphic type', usually from the fn definition
+    Maybe (ValT Renamed)
+instantiates var concrete abstract = case (concrete, abstract) of
+    (x, Abstraction a) -> if var == a then Just x else  Nothing -- N.b. we need to be sure we only run this w/ unifiables as the first arg
+    (ThunkT (CompN _ concreteFn), ThunkT (CompN _ abstractFn)) ->
+        let concreteFn' = Vector.toList $ compTBodyToVec concreteFn
+            abstractFn' = Vector.toList $ compTBodyToVec abstractFn
+         in go concreteFn' abstractFn'
+    (Datatype tnC argsC, Datatype tnA argsA)
+        | tnC == tnA -> go (Vector.toList argsC) (Vector.toList argsA)
+    _ -> Nothing
+  where
+    go :: [ValT Renamed] -> [ValT Renamed] -> Maybe (ValT Renamed)
+    go [] _ =  Nothing
+    go _ [] =  Nothing
+    go (c : cs) (a : as) =  instantiates var c a <|> go cs as
+
+compTBodyToVec :: forall a. CompTBody a -> Vector (ValT a)
+compTBodyToVec (ArgsAndResult args res) = Vector.snoc args res

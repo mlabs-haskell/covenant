@@ -240,7 +240,7 @@ import Covenant.Internal.Unification
     reconcile,
     runUnifyM,
     substitute,
-    unify,
+    unify, concretifyFT,
   )
 import Covenant.Prim
   ( OneArgFunc,
@@ -297,6 +297,7 @@ import Optics.Core
     _1,
     _2,
   )
+import Debug.Trace (traceM)
 
 -- | A read-only pattern for exposing the internals of an 'Id'.
 --
@@ -773,17 +774,23 @@ app fId argRefs instTys = do
   case lookedUp of
     CompNodeType fT -> case runRenameM scopeInfo . renameCompT $ fT of
       Left err' -> throwError . RenameFunctionFailed fT $ err'
-      Right renamedFT@(CompT count _) -> do
+      Right renamedFT@(CompT count fBody) -> do
         let numInstantiations = Vector.length instTys
             numVars = review intCount count
         if numInstantiations /= numVars
           then throwError $ WrongNumInstantiationsInApp renamedFT numVars numInstantiations
           else do
             renamedArgs <- traverse renameArg argRefs
-            concretifiedFT <- concretifyFT renamedFT renamedArgs
+            let concretifiedFT = concretifyFT renamedFT renamedArgs
             instantiatedFT <- instantiate subs concretifiedFT
             tyDict <- asks (view #datatypeInfo)
+            let appTrace = "\n\nAPP\n  FN: " <> show renamedFT
+                           <> "\n  ARGS: " <> show renamedArgs
+                           <> "\n  CONCRETE: " <> show instantiatedFT
+                           <> "\n\n"
+            traceM appTrace
             result <- either (throwError . UnificationError) pure $ checkApp tyDict instantiatedFT (Vector.toList renamedArgs)
+            traceM $ "  RESULT: " <> show result 
             restored <- undoRenameM result
             unRenamedFnTy <- undoRenameCompT instantiatedFT
             checkEncodingWithInfo tyDict restored
@@ -796,22 +803,6 @@ app fId argRefs instTys = do
       askScope >>= \scope -> case traverse (traverse (runRenameM scope . renameValT)) subs of
         Left err' -> throwError $ FailedToRenameInstantiation err'
         Right res -> pure res
-
-    concretifyFT :: CompT Renamed -> Vector (Maybe (ValT Renamed)) -> m (CompT Renamed)
-    concretifyFT fn@(CompT _ body) argValTypes = do
-      argSubs <- getArgSubs body argValTypes
-      instantiate (Map.toList argSubs) fn
-
-    getArgSubs :: CompTBody Renamed -> Vector (Maybe (ValT Renamed)) -> m (Map (Index "tyvar") (ValT Renamed))
-    getArgSubs (ArgsAndResult args _) argValTypes =
-      liftUnifyM
-        . fmap (Vector.foldMap id)
-        $ Vector.zipWithM argSubHelper args argValTypes
-      where
-        argSubHelper :: ValT Renamed -> Maybe (ValT Renamed) -> UnifyM (Map (Index "tyvar") (ValT Renamed))
-        argSubHelper fromFn = \case
-          Nothing -> pure Map.empty
-          Just fromArg -> unify fromFn fromArg
 
     -- NOTE: The helper function below only concerns instantiations that result from
     --       explicit type applications (via the third argument to `app`).

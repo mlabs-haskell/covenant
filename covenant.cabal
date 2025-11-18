@@ -22,17 +22,17 @@ extra-source-files:
 -- Common sections
 common lang
   ghc-options:
-    -Wall
-    -Wcompat
-    -Wredundant-bang-patterns
-    -Wredundant-strictness-flags
-    -Wmissing-deriving-strategies
-    -Woperator-whitespace
-    -Wambiguous-fields
-    -Wmisplaced-pragmas
-    -Wmissing-export-lists
-    -Wmissing-import-lists
-    -Wunused-imports
+    -- -Wall
+    -- -Wcompat
+    -- -Wredundant-bang-patterns
+    -- -Wredundant-strictness-flags
+    -- -Wmissing-deriving-strategies
+    -- -Woperator-whitespace
+    -- -Wambiguous-fields
+    -- -Wmisplaced-pragmas
+    -- -Wmissing-export-lists
+    -- -Wmissing-import-lists
+    -- -Wunused-imports
 
   default-extensions:
     BangPatterns

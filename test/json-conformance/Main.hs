@@ -1,6 +1,6 @@
 {-# LANGUAGE OverloadedLists #-}
 
-module Main (main) where
+module Main  where
 
 import Control.Monad (void)
 import Covenant.ASG
@@ -21,13 +21,13 @@ import Covenant.ASG
     lazyLam,
     lit,
     match,
-    runASGBuilder,
+    runASGBuilder, force, thunk, boundTyVar, builtin3, app,
   )
 import Covenant.Constant
   ( AConstant (AString, AnInteger),
   )
 import Covenant.DeBruijn (DeBruijn (S, Z))
-import Covenant.Index (ix0, ix1)
+import Covenant.Index (ix0, ix1, intIndex, ix2, ix3)
 import Covenant.JSON (deserializeAndValidate_)
 import Covenant.Prim (TwoArgFunc (AddInteger, EqualsInteger, SubtractInteger))
 import Covenant.Test
@@ -38,16 +38,25 @@ import Covenant.Test
 import Covenant.Type
   ( AbstractTy,
     BuiltinFlatT (BoolT, IntegerT, StringT),
-    CompT (Comp0, Comp1),
+    CompT (..),
     CompTBody (ReturnT, (:--:>)),
     ValT (BuiltinFlat),
-    tyvar,
+    tyvar, boolT,
   )
 import Data.Either (isRight)
 import Data.Vector qualified as Vector
-import Data.Wedge (Wedge (There))
+import Data.Wedge (Wedge (..))
 import Test.Tasty (defaultMain, testGroup)
 import Test.Tasty.HUnit (assertBool, testCase)
+import Covenant.Type (ValT(..))
+import Covenant.ASG (ASGNode(..))
+import Covenant.ASG (Arg(Arg))
+import Covenant.Index (Index)
+import Optics.Core (preview)
+import Data.Maybe (fromJust)
+import Covenant.Constant (AConstant(..))
+import Control.Monad.HashCons (MonadHashCons(..))
+import Covenant.Prim (ThreeArgFunc(IfThenElse))
 
 main :: IO ()
 main =
@@ -292,3 +301,243 @@ conformance_body2_builder = lam topLevelTy body
 
     maybeBoolT :: ValT AbstractTy
     maybeBoolT = dtype "Maybe" [boolT]
+
+
+
+
+ix4 :: forall s. Index s
+ix4 = fromJust $ preview intIndex 4
+
+thunk0 = ThunkT . Comp0
+
+thunk2 = ThunkT . Comp2
+
+testFn :: Either CovenantError ASG
+testFn = runASGBuilder (unsafeMkDatatypeInfos conformanceDatatypes1) testFnBuilder
+
+debugHelp :: ASGBuilder Id -> Either CovenantError ASG
+debugHelp act = runASGBuilder (unsafeMkDatatypeInfos conformanceDatatypes1) act
+
+intT :: ValT AbstractTy
+intT = BuiltinFlat IntegerT
+
+-- boolT :: ValT AbstractTy
+-- boolT = BuiltinFlat BoolT
+
+maybeT :: ValT AbstractTy -> ValT AbstractTy
+maybeT t = dtype "Maybe" [t]
+
+ifte ::  ASGBuilder Id
+ifte  = lam (Comp1 $ boolT :--:> tyvar Z ix0 :--:> tyvar Z ix0 :--:> ReturnT (tyvar Z ix0)) $ do
+  cond <- AnArg <$> arg Z ix0
+  t    <- AnArg <$> arg Z ix1
+  f    <- AnArg <$> arg Z ix2
+  ifThen <- builtin3 IfThenElse
+  tvHere <- boundTyVar Z ix0
+  AnId <$> app' ifThen [cond,t,f] -- [Here tvHere]
+
+
+-- NOTE: I wonder what happens if we tried to define id and monoConst in terms of each other?
+--       Like if we do it so that we get infinite mutual recursion. I should probably *try*
+--       to compile something like that just to see whether it explodes.
+identitee :: ASGBuilder Id
+identitee = lam (Comp1 $ tyvar Z ix0 :--:> ReturnT (tyvar Z ix0)) $ do
+  -- Not how you would typically implement `id` lol
+  mConst <- monoConst
+  tyX <- boundTyVar Z ix0
+  x <- AnArg <$> arg Z ix0
+  -- Might not need the ty app?
+  AnId <$> app' mConst [x,x] -- [Here tyX]
+
+
+-- forall a. a -> a -> a
+monoConst :: ASGBuilder Id
+monoConst = lam (Comp1 $ tyvar Z ix0 :--:> tyvar Z ix0 :--:> ReturnT (tyvar Z ix0)) $ do
+  AnArg <$> arg Z ix1
+
+fPolyOneIntro :: ASGBuilder Id
+fPolyOneIntro = lam fPolyOneIntroTy $ do
+  fba <- force . AnArg =<< arg Z ix0
+  faa <- force . AnArg =<< arg Z ix1
+  predA <- force . AnArg =<< arg Z ix2
+  a <- AnArg <$> arg Z ix3
+  b <- AnArg <$> arg Z ix4
+  -- let ba = fba (monoConst b b)
+  mConst <- monoConst
+  fbaArg <- AnId <$> app' mConst [b,b]
+  ba <- AnId <$> app' fba [fbaArg]
+  -- let aaa = monoConst a (faa a ba)
+  aaaArg <- AnId <$> app' faa [a,ba]
+  aaa <- AnId <$> app' mConst [a,aaaArg]
+  -- if (predA aaa) then Nothing else Just aaa
+  tvA <- boundTyVar Z ix0
+  nothing <- ctor "Maybe" "Nothing" [] [Here tvA]
+  justAAA <- ctor' "Maybe" "Just" [aaa]
+  ifThen <- ifte
+  cond <- app' predA [aaa]
+  -- might need to do this w/ the explicit type app?
+  AnId <$> app' ifThen [AnId cond,AnId nothing,AnId justAAA]
+ where
+   fPolyOneIntroTy :: CompT AbstractTy
+   fPolyOneIntroTy = Comp2 $ -- forall a b.
+                     ThunkT (Comp0 $ tyvar (S Z) ix1 :--:> ReturnT (tyvar (S Z) ix0)) -- (b -> a)
+                     :--:> ThunkT (Comp0 $ tyvar (S Z) ix0 :--:> tyvar (S Z) ix0 :--:> ReturnT (tyvar (S Z) ix0)) -- (a -> a -> a)
+                     :--:> ThunkT (Comp0 $ tyvar (S Z) ix0 :--:> ReturnT boolT) -- (a -> Bool)
+                     :--:> tyvar Z ix0 -- a
+                     :--:> tyvar Z ix1 -- b
+                     :--:> ReturnT (maybeT (tyvar Z ix0)) -- Maybe a
+
+fPolyOneElim :: ASGBuilder Id
+fPolyOneElim = lam fPolyOneElimTy $ do
+  -- false <- AnId <$> lit (ABoolean False)
+  -- zero <- AnId <$> lit (AnInteger 0)
+  -- mConst <- monoConst
+  maybeA <- AnArg <$> arg Z ix0
+  -- maybe we should move `b` into the nothingHandler so it blows up if there's a DB issue somewhere?
+  nothingHandler <- lazyLam (Comp0 $ ReturnT intT) $ do
+    --            x[       y[                 ]
+    -- monoConst 0 (bToInt (monoConst False b))
+    -- b <- AnArg <$> arg (S Z) ix2
+    -- bToInt <- force . AnArg =<< arg (S Z) ix3
+    -- y <- AnId <$> app' mConst [false,b]
+    -- x <- AnId <$> app' bToInt [y]
+    -- AnId <$> app' mConst [zero,x]
+    AnId <$> lit (AnInteger 0)
+  justHandler <- lazyLam (Comp0 $ tyvar (S Z) ix0 :--:> ReturnT intT) $ do
+    -- aToInt <- force . AnArg =<< arg (S Z) ix1
+    -- a <- AnArg <$> arg (S Z) ix0
+    -- AnId <$> app' aToInt [a]
+    AnId <$> lit (AnInteger 0)
+  AnId <$> match maybeA [AnId nothingHandler,AnId justHandler]
+ where
+   fPolyOneElimTy :: CompT AbstractTy
+   fPolyOneElimTy = Comp2 $ -- forall a b.
+                    maybeT (tyvar Z ix0) -- Maybe a
+                    :--:> thunk0 (tyvar (S Z) ix0 :--:> ReturnT intT) -- (a -> Int)
+                    :--:> tyvar Z ix1 -- b
+                    :--:> thunk0 (tyvar (S Z) ix1 :--:> ReturnT intT) -- (b -> Int)
+                    :--:> ReturnT intT -- Int
+
+fPolyOneElimMinimal :: ASGBuilder Id
+fPolyOneElimMinimal =  lam fPolyOneElimTy $ do
+  maybeA <- AnArg <$> arg Z ix0
+  nothingHandler <- lazyLam (Comp0 $ ReturnT intT) $ do
+    AnId <$> lit (AnInteger 0)
+  justHandler <- lazyLam (Comp0 $ tyvar (S Z) ix0 :--:> ReturnT intT) $ do
+    AnId <$> lit (AnInteger 0)
+  AnId <$> match maybeA [AnId nothingHandler,AnId justHandler]
+ where
+   fPolyOneElimTy :: CompT AbstractTy
+   fPolyOneElimTy = Comp2 $ -- forall a b.
+                    maybeT (tyvar Z ix0) -- Maybe a
+                    :--:> tyvar Z ix1 -- b
+                    :--:> ReturnT intT -- Int
+
+testFnBuilder' :: ASGBuilder Id
+testFnBuilder' = lam topLevelTy body
+  where
+    topLevelTy :: CompT AbstractTy
+    topLevelTy = Comp0 $ intT :--:> boolT :--:> ReturnT intT
+
+    body :: ASGBuilder Ref
+    body = do
+      intArg <- AnArg <$> arg Z ix0
+      boolArg <- AnArg <$> arg Z ix1
+      fElim <- fPolyOneElimMinimal
+      maybeInt <- ctor' "Maybe" "Just" [intArg]
+      AnId <$> app' fElim [AnId maybeInt,boolArg]
+
+
+fPolyOneElimMinimal' :: ASGBuilder Id
+fPolyOneElimMinimal' =  lam fPolyOneElimTy $ do
+  maybeA <- AnArg <$> arg Z ix0
+  nothingHandler <- lazyLam (Comp0 $ ReturnT intT) $ do
+    AnId <$> lit (AnInteger 0)
+  justHandler <- lazyLam (Comp0 $ tyvar (S Z) ix0 :--:> ReturnT intT) $ do
+    AnId <$> lit (AnInteger 0)
+  AnId <$> match maybeA [AnId nothingHandler,AnId justHandler]
+ where
+   fPolyOneElimTy :: CompT AbstractTy
+   fPolyOneElimTy = Comp1 $ -- forall a.
+                    maybeT (tyvar Z ix0) -- Maybe a
+                    :--:> ReturnT intT -- Int
+
+testFnBuilder'' :: ASGBuilder Id
+testFnBuilder'' = lam topLevelTy body
+  where
+    topLevelTy :: CompT AbstractTy
+    topLevelTy = Comp0 $ intT :--:> boolT :--:> ReturnT intT
+
+    body :: ASGBuilder Ref
+    body = do
+      intArg <- AnArg <$> arg Z ix0
+      fElim <- fPolyOneElimMinimal'
+      maybeInt <- ctor' "Maybe" "Just" [intArg]
+      AnId <$> app' fElim [AnId maybeInt]
+
+
+unsafeShowNodeType :: Id -> ASGBuilder String
+unsafeShowNodeType i = lookupRef i >>= \case
+  Nothing -> error "boom"
+  Just aNode -> case aNode of
+    AValNode t _ -> pure $ show t
+    ACompNode t _ -> pure $ show t
+    _ -> error "error node type"
+
+unsafeShowRefType :: Ref -> ASGBuilder String
+unsafeShowRefType = \case
+  AnArg (Arg _ _ t) -> pure (show t)
+  AnId i -> unsafeShowNodeType i
+
+testFnBuilder :: ASGBuilder Id
+testFnBuilder = lam topLevelTy body
+  where
+    topLevelTy :: CompT AbstractTy
+    topLevelTy = Comp0 $ intT :--:> boolT :--:> ReturnT intT
+
+    body :: ASGBuilder Ref
+    body = do
+      intArg <- AnArg <$> arg Z ix0
+      boolArg <- AnArg <$> arg Z ix1
+      idF <- AnId <$> (thunk =<< identitee)
+      fmono <- AnId <$> (thunk =<< fMono)
+      gmono <- AnId <$> (thunk =<< gMono)
+      mConst <- AnId <$> (thunk =<< monoConst)
+      intId <- AnId <$> (thunk =<< (lam (Comp0 $ intT :--:> ReturnT intT) (AnArg <$> arg Z ix0)))
+      intConst <- AnId <$> (thunk =<< (lam (Comp0 $ intT :--:> intT :--:> ReturnT intT) (AnArg <$> arg Z ix1)))
+      fIntro <- fPolyOneIntro
+      fElim <- fPolyOneElim
+      introApplied <- app' fIntro [fmono,mConst,gmono,intArg,boolArg]
+      fElimTyStr <- unsafeShowNodeType fElim
+      introAppliedTyStr <- unsafeShowNodeType introApplied
+      idFTyStr <- unsafeShowRefType intId
+      boolArgTyStr <- unsafeShowRefType boolArg
+      fMonoTyStr   <- unsafeShowRefType fmono
+      let msg :: String
+          msg = concatMap (\(x :: String) -> x <> "\n\n" :: String)
+                (  [ "fElimTy: " <> fElimTyStr
+                , "introAppliedTy: " <> introAppliedTyStr
+                , "idFTyStr: " <> idFTyStr
+                , "boolArgTyStr: " <> boolArgTyStr
+                , "fmonoTyStr: " <> fMonoTyStr
+                ] :: [String])
+      --error ("\n\n" <> msg)
+      AnId <$> app' fElim [AnId introApplied,intId,boolArg,fmono]
+
+fMono :: ASGBuilder Id
+fMono = lam (Comp0 $ boolT :--:> ReturnT intT) $ do
+      aBool <- AnArg <$> arg Z ix0
+      one <- AnId <$> lit (AnInteger 1)
+      zero <- AnId <$> lit (AnInteger 0)
+      ifThen <- ifte
+      AnId <$> app' ifThen [aBool,one,zero] -- [There (BuiltinFlat IntegerT)]
+
+gMono :: ASGBuilder Id
+gMono = lam (Comp0 $ intT :--:> ReturnT boolT) $ do
+      anInt <- AnArg <$> arg Z ix0
+      zero <- AnId <$> lit (AnInteger 0)
+      cond <- anInt #== zero
+      ifThen <- ifte
+      false <- AnId <$> lit (ABoolean False)
+      troo  <- AnId <$> lit (ABoolean True)
+      AnId <$> app' ifThen [cond,false,troo]
