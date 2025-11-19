@@ -302,9 +302,6 @@ conformance_body2_builder = lam topLevelTy body
     maybeBoolT :: ValT AbstractTy
     maybeBoolT = dtype "Maybe" [boolT]
 
-
-
-
 ix4 :: forall s. Index s
 ix4 = fromJust $ preview intIndex 4
 
@@ -389,18 +386,18 @@ fPolyOneIntro = lam fPolyOneIntroTy $ do
 
 fPolyOneElim :: ASGBuilder Id
 fPolyOneElim = lam fPolyOneElimTy $ do
-  -- false <- AnId <$> lit (ABoolean False)
-  -- zero <- AnId <$> lit (AnInteger 0)
-  -- mConst <- monoConst
+  false <- AnId <$> lit (ABoolean False)
+  zero <- AnId <$> lit (AnInteger 0)
   maybeA <- AnArg <$> arg Z ix0
   -- maybe we should move `b` into the nothingHandler so it blows up if there's a DB issue somewhere?
   nothingHandler <- lazyLam (Comp0 $ ReturnT intT) $ do
     --            x[       y[                 ]
     -- monoConst 0 (bToInt (monoConst False b))
-    -- b <- AnArg <$> arg (S Z) ix2
-    -- bToInt <- force . AnArg =<< arg (S Z) ix3
+    mConst <- monoConst
+    b <- AnArg <$> arg (S Z) ix2
+    bToInt <- force . AnArg =<< arg (S Z) ix3
     -- y <- AnId <$> app' mConst [false,b]
-    -- x <- AnId <$> app' bToInt [y]
+    x <- AnId <$> app' bToInt [b] -- [y]
     -- AnId <$> app' mConst [zero,x]
     AnId <$> lit (AnInteger 0)
   justHandler <- lazyLam (Comp0 $ tyvar (S Z) ix0 :--:> ReturnT intT) $ do
@@ -541,3 +538,13 @@ gMono = lam (Comp0 $ intT :--:> ReturnT boolT) $ do
       false <- AnId <$> lit (ABoolean False)
       troo  <- AnId <$> lit (ABoolean True)
       AnId <$> app' ifThen [cond,false,troo]
+
+
+
+
+minimalArgBugExample :: ASGBuilder Id
+minimalArgBugExample = lam (Comp1 $ tyvar Z ix0 :--:> ReturnT (tyvar Z ix0)) $ do
+  gimmeZ0 <- lam (Comp0 $ intT :--:> ReturnT (tyvar (S Z) ix0)) $ do
+    AnArg <$> arg (S Z) ix0
+  one <- AnId <$> lit (AnInteger 1)
+  AnId <$> app' gimmeZ0 [one]

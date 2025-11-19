@@ -49,7 +49,6 @@ import Data.Vector.NonEmpty (NonEmptyVector)
 import Data.Vector.NonEmpty qualified as NonEmpty
 import Data.Word (Word64)
 import Optics.Core (ix, preview, view)
-import Debug.Trace (traceM)
 import Covenant.Type (CompT(CompN), CompTBody (ArgsAndResult))
 import qualified Data.Map as M
 import Control.Applicative (Alternative((<|>)))
@@ -148,15 +147,13 @@ checkApp ::
   CompT Renamed ->
   [Maybe (ValT Renamed)] ->
   Either TypeAppError (ValT Renamed)
-checkApp tyDict f args = traceCheckApp >> runUnifyM tyDict $ checkApp' f args
-  where
-    traceCheckApp :: forall (m :: Type -> Type). Applicative m => m ()
-    traceCheckApp = traceM $ "\n\nCHECKAPP\n FN: " <> show f <> "\n ARGS: " <> show args 
+checkApp tyDict f args = runUnifyM tyDict $ checkApp' f args
+
 checkApp' ::
   CompT Renamed ->
   [Maybe (ValT Renamed)] ->
   UnifyM (ValT Renamed)
-checkApp' f@(CompT _ (CompTBody xs)) ys = traceCheckApp >> do
+checkApp' f@(CompT _ (CompTBody xs)) ys =  do
   let (curr, rest) = NonEmpty.uncons xs
       numArgsExpected = NonEmpty.length xs - 1
       numArgsActual = length ys
@@ -168,8 +165,6 @@ checkApp' f@(CompT _ (CompTBody xs)) ys = traceCheckApp >> do
       ExcessArgs f (Vector.fromList ys)
   go curr (Vector.toList rest) ys
   where
-    traceCheckApp :: forall (m :: Type -> Type). Applicative m => m ()
-    traceCheckApp = traceM $ "\n\nCHECKAPP\n FN: " <> show f <> "\n ARGS: " <> show ys 
     go ::
       ValT Renamed ->
       [ValT Renamed] ->
@@ -370,12 +365,7 @@ unify expected actual = traceUnify >>
               | tn' /= tn -> unificationError
               | otherwise -> do
                   bbFormConcreteA <- concretify bbForm args'
-                  res <- unify bbFormConcreteE bbFormConcreteA
-                  let msg = "\n\nUNIFY DATATYPE BBF:\n  EXPECTED: " <> show bbFormConcreteE
-                            <> "\n  ACTUAL: " <> show bbFormConcreteA
-                            <> "\n  RESULT: " <> show res <> "\n"
-                  traceM msg
-                  pure res 
+                  unify bbFormConcreteE bbFormConcreteA
             _ -> unificationError
         True -> case actual of
           Abstraction Rigid {} -> unificationError
@@ -434,7 +424,7 @@ concretifyFT compT@(CompN cnt (ArgsAndResult fromFn res)) fromArgs =  unfixedRes
    where
     -- NOTE/REVIEW: I am not sure if we should fix this up here. I think we shouldn't, b/c we need the unifiables to
     --              conform with the what the instantiations expect from the explicit type applications, but I
-    --              could very easily be wrong.
+    --              could very easily be wrong. 
     unfixedResult :: CompT Renamed
     unfixedResult = CompN cnt (ArgsAndResult subbedArgs subbedRes)
 

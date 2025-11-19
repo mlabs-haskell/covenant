@@ -297,7 +297,6 @@ import Optics.Core
     _1,
     _2,
   )
-import Debug.Trace (traceM)
 
 -- | A read-only pattern for exposing the internals of an 'Id'.
 --
@@ -784,13 +783,7 @@ app fId argRefs instTys = do
             let concretifiedFT = concretifyFT renamedFT renamedArgs
             instantiatedFT <- instantiate subs concretifiedFT
             tyDict <- asks (view #datatypeInfo)
-            let appTrace = "\n\nAPP\n  FN: " <> show renamedFT
-                           <> "\n  ARGS: " <> show renamedArgs
-                           <> "\n  CONCRETE: " <> show instantiatedFT
-                           <> "\n\n"
-            traceM appTrace
             result <- either (throwError . UnificationError) pure $ checkApp tyDict instantiatedFT (Vector.toList renamedArgs)
-            traceM $ "  RESULT: " <> show result 
             restored <- undoRenameM result
             unRenamedFnTy <- undoRenameCompT instantiatedFT
             checkEncodingWithInfo tyDict restored
@@ -821,7 +814,6 @@ app fId argRefs instTys = do
         []
 
     instantiate :: [(Index "tyvar", ValT Renamed)] -> CompT Renamed -> m (CompT Renamed)
-    instantiate [] fn = pure fn
     instantiate subs fn = do
       instantiated <- liftUnifyM . fixUp $ foldr (\(i, t) f -> substitute i t f) (ThunkT fn) subs
       case instantiated of
