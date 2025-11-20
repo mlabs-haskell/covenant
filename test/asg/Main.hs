@@ -76,7 +76,7 @@ import Covenant.Test
     DebugASGBuilder,
     debugASGBuilder,
     tyAppTestDatatypes,
-    typeIdTest,
+    typeIdTest, concretifyMinimalBuilder, concretifyMegaTest,
   )
 import Covenant.Type
   ( AbstractTy,
@@ -166,7 +166,8 @@ main =
         "Opaque"
         [unifyOpaque],
       testGroup "matchOpaque" [matchOpaque],
-      testGroup "argBugTest" [argBugUnitTest]
+      testGroup "argBugTest" [argBugUnitTest],
+      testGroup "concretify" [simpleConcretifyUnitTest, excessiveConcretifyUnitTest]
     ]
   where
     moreTests :: QuickCheckTests -> QuickCheckTests
@@ -830,7 +831,7 @@ matchOpaque = runIntroFormTest "matchOpaque" matchOpaqueTy $ do
     matchOpaqueTy = ThunkT matchOpaqueCompTy
 
 argBugUnitTest :: TestTree
-argBugUnitTest = testCase "argBugTest" $ withCompilationSuccessUnit asg print
+argBugUnitTest = testCase "argBugTest" $ withCompilationSuccessUnit asg (\_ -> pure ())
   where
     intT :: ValT AbstractTy
     intT = BuiltinFlat IntegerT
@@ -840,6 +841,16 @@ argBugUnitTest = testCase "argBugTest" $ withCompilationSuccessUnit asg print
         AnArg <$> arg (S Z) ix0
       one <- AnId <$> lit (AnInteger 1)
       AnId <$> app' gimmeZ0 [one]
+
+
+-- tests for our concretification fix in `app`.
+-- We only care that compilation succeeds.
+
+simpleConcretifyUnitTest :: TestTree
+simpleConcretifyUnitTest = testCase "simpleConcretify" $ withCompilationSuccessUnit concretifyMinimalBuilder (\_ -> pure ())
+
+excessiveConcretifyUnitTest :: TestTree
+excessiveConcretifyUnitTest = testCase "excessiveConcretify" $ withCompilationSuccessUnit concretifyMegaTest (\_ -> pure ())
 
 -- Helpers
 
