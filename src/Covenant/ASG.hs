@@ -253,7 +253,7 @@ import Covenant.Prim
     typeTwoArgFunc,
   )
 import Covenant.Type
-  ( CompT (Comp0),
+  ( CompT (Comp0, CompN),
     CompTBody (ArgsAndResult, ReturnT),
     Constructor,
     ConstructorName,
@@ -614,7 +614,7 @@ arg scope index = do
   lookedUp <- asks (preview (#scopeInfo % #argumentInfo % ix scopeAsInt % _2 % ix indexAsInt))
   case lookedUp of
     Nothing -> throwError . NoSuchArgument scope $ index
-    Just t -> pure . UnsafeMkArg scope index $ t
+    Just t -> pure . UnsafeMkArg scope index . fixArgType scope $ t
 
 -- | Construct a node corresponding to the given Plutus primop.
 --
@@ -1497,3 +1497,20 @@ naturalBF = TyName "#Natural"
 -- @since 1.3.0
 negativeBF :: TyName
 negativeBF = TyName "#Negative"
+
+fixArgType :: DeBruijn -> ValT AbstractTy -> ValT AbstractTy
+fixArgType distance = \case
+  Abstraction tyVar ->
+    let tyVar' = addDeBruijn distance tyVar
+     in Abstraction tyVar'
+  ThunkT (CompN cnt (ArgsAndResult args res)) ->
+    let args' = fmap (fixArgType distance) args
+        res' = fixArgType distance res
+     in ThunkT (CompN cnt (ArgsAndResult args' res'))
+  bi@(BuiltinFlat {}) -> bi
+  Datatype tn dtArgs -> Datatype tn $ fmap (fixArgType distance) dtArgs
+  where
+    addDeBruijn :: DeBruijn -> AbstractTy -> AbstractTy
+    addDeBruijn toAdd (BoundAt db indx) =
+      let db' = fromJust . preview asInt $ review asInt toAdd + review asInt db
+       in BoundAt db' indx
