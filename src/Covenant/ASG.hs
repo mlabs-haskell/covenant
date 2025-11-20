@@ -757,6 +757,13 @@ err = refTo AnError
 -- * \'Use this type variable in our scope\', specified as 'Data.Wedge.Here'.
 -- * \'Use this concrete type\', specified as 'Data.Wedge.There'.
 --
+-- *** IMPORTANT ***
+-- The *only* purpose of explicit type application arguments is to instantiate a tyvar in the result which is
+-- not determined by any argument. These variables are instantiated after every other argument has been concretified.
+--
+-- For example, if you have a function
+--   `f :: forall a b c. (a -> b) -> (b -> a) -> b -> Either a c`
+-- Then you will need to supply *ONE* explicit type application to concretify `c`.
 -- @since wip
 app ::
   forall (m :: Type -> Type).
@@ -773,7 +780,7 @@ app fId argRefs instTys = do
   case lookedUp of
     CompNodeType fT -> case runRenameM scopeInfo . renameCompT $ fT of
       Left err' -> throwError . RenameFunctionFailed fT $ err'
-      Right renamedFT@(CompT count fBody) -> do
+      Right renamedFT@(CompT count _) -> do
         let numInstantiations = Vector.length instTys
             numVars = review intCount count
         if numInstantiations /= numVars

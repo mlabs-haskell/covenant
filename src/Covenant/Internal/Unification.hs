@@ -17,9 +17,9 @@ where
 
 import Control.Monad (foldM, unless, when)
 import Data.Ord (comparing)
-#if __GLASGOW_HASKELL__==908
+
 import Data.Foldable (foldl')
-#endif
+
 import Control.Monad.Except (MonadError, catchError, throwError)
 import Control.Monad.Reader (MonadReader, ReaderT (runReaderT), ask)
 import Covenant.Data (DatatypeInfo)
@@ -272,7 +272,7 @@ unify ::
   ValT Renamed ->
   ValT Renamed ->
   UnifyM (Map (Index "tyvar") (ValT Renamed))
-unify expected actual = traceUnify >>
+unify expected actual = 
   catchError
     ( case expected of
         Abstraction t1 -> case t1 of
@@ -286,11 +286,6 @@ unify expected actual = traceUnify >>
     )
     (promoteUnificationError expected actual)
   where
-    traceUnify :: UnifyM ()
-    traceUnify = do
-      let msg = "\n\nUNIFY\n  Expected: " <> show expected <> "\n Actual: " <> show actual
-      pure () -- traceM msg
-
     unificationError :: forall (a :: Type). UnifyM a
     unificationError = throwError . DoesNotUnify expected $ actual
     noSubUnify :: forall (k :: Type) (a :: Type). UnifyM (Map k a)
@@ -420,7 +415,7 @@ reconcile =
 concretifyFT :: CompT Renamed
              -> Vector (Maybe (ValT Renamed))
              -> CompT Renamed
-concretifyFT compT@(CompN cnt (ArgsAndResult fromFn res)) fromArgs =  unfixedResult
+concretifyFT (CompN cnt (ArgsAndResult fromFn res)) fromArgs =  unfixedResult
    where
     -- NOTE/REVIEW: I am not sure if we should fix this up here. I think we shouldn't, b/c we need the unifiables to
     --              conform with the what the instantiations expect from the explicit type applications, but I
@@ -428,11 +423,11 @@ concretifyFT compT@(CompN cnt (ArgsAndResult fromFn res)) fromArgs =  unfixedRes
     unfixedResult :: CompT Renamed
     unfixedResult = CompN cnt (ArgsAndResult subbedArgs subbedRes)
 
-    subbedArgs = (substMany allSubstitutions) <$> fromFn
+    subbedArgs = substMany allSubstitutions <$> fromFn
     subbedRes  = substMany allSubstitutions res
 
     substMany :: [(Index "tyvar", ValT Renamed)] -> ValT Renamed -> ValT Renamed
-    substMany subs val = foldl' (\acc (tv,ty) -> substitute tv ty acc) val subs 
+    substMany subs val = foldl' (\acc (tv,ty) -> substitute tv ty acc) val subs
 
     allUnifiables =  Set.toList $ Vector.foldMap collectUnifiables fromFn
 
@@ -442,8 +437,8 @@ getInstantiations :: [Index "tyvar"] -> [ValT Renamed] -> [Maybe (ValT Renamed)]
 getInstantiations [] _ _ =  M.empty
 getInstantiations _ [] _ =  M.empty
 getInstantiations _ _ [] =  M.empty
-getInstantiations vs (fE: fEs) (Nothing : aEs) = getInstantiations vs fEs aEs
-getInstantiations vs@(var : vars) fs@(fE : fEs) as@(aE' : aEs) =
+getInstantiations vs (_: fEs) (Nothing : aEs) = getInstantiations vs fEs aEs
+getInstantiations (var : vars) fs@(fE : fEs) as@(aE' : aEs) =
   -- somewhat subjective but I think doing it w/ fromJust makes the logic easier to follow here 
   let aE = fromJust aE'
   in case instantiates (Unifiable var) aE fE of
