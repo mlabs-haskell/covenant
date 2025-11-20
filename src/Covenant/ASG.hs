@@ -297,6 +297,7 @@ import Optics.Core
     _1,
     _2,
   )
+
 -- | A read-only pattern for exposing the internals of an 'Id'.
 --
 -- @since 1.3.1
@@ -1517,16 +1518,16 @@ negativeBF = TyName "#Negative"
 fixArgType :: DeBruijn -> ValT AbstractTy -> ValT AbstractTy
 fixArgType distance = \case
   Abstraction tyVar ->
-      let tyVar' = addDeBruijn distance tyVar
-      in Abstraction tyVar'
+    let tyVar' = addDeBruijn distance tyVar
+     in Abstraction tyVar'
   ThunkT (CompN cnt (ArgsAndResult args res)) ->
     let args' = fmap (fixArgType distance) args
         res' = fixArgType distance res
-    in  ThunkT (CompN cnt (ArgsAndResult args' res'))
-  bi@(BuiltinFlat{}) ->  bi
+     in ThunkT (CompN cnt (ArgsAndResult args' res'))
+  bi@(BuiltinFlat {}) -> bi
   Datatype tn dtArgs -> Datatype tn $ fmap (fixArgType distance) dtArgs
- where
-  addDeBruijn :: DeBruijn -> AbstractTy -> AbstractTy
-  addDeBruijn toAdd (BoundAt db indx) =
-    let db' = fromJust . preview asInt $ review asInt toAdd + review asInt db
-    in BoundAt db' indx 
+  where
+    addDeBruijn :: DeBruijn -> AbstractTy -> AbstractTy
+    addDeBruijn toAdd (BoundAt db indx) =
+      let db' = fromJust . preview asInt $ review asInt toAdd + review asInt db
+       in BoundAt db' indx

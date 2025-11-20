@@ -830,17 +830,16 @@ matchOpaque = runIntroFormTest "matchOpaque" matchOpaqueTy $ do
     matchOpaqueTy = ThunkT matchOpaqueCompTy
 
 argBugUnitTest :: TestTree
-argBugUnitTest  = testCase "argBugTest" $ withCompilationSuccessUnit asg print
- where
-   intT :: ValT AbstractTy
-   intT = BuiltinFlat IntegerT
-   asg :: ASGBuilder Id
-   asg = lam (Comp1 $ tyvar Z ix0 :--:> ReturnT (tyvar Z ix0)) $ do
-    gimmeZ0 <- lam (Comp0 $ intT :--:> ReturnT (tyvar (S Z) ix0)) $ do
-      AnArg <$> arg (S Z) ix0
-    one <- AnId <$> lit (AnInteger 1)
-    AnId <$> app' gimmeZ0 [one]
-
+argBugUnitTest = testCase "argBugTest" $ withCompilationSuccessUnit asg print
+  where
+    intT :: ValT AbstractTy
+    intT = BuiltinFlat IntegerT
+    asg :: ASGBuilder Id
+    asg = lam (Comp1 $ tyvar Z ix0 :--:> ReturnT (tyvar Z ix0)) $ do
+      gimmeZ0 <- lam (Comp0 $ intT :--:> ReturnT (tyvar (S Z) ix0)) $ do
+        AnArg <$> arg (S Z) ix0
+      one <- AnId <$> lit (AnInteger 1)
+      AnId <$> app' gimmeZ0 [one]
 
 -- Helpers
 
