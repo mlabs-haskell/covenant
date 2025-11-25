@@ -1,6 +1,6 @@
 {-# LANGUAGE OverloadedLists #-}
 
-module Main (main)  where
+module Main (main) where
 
 import Control.Monad (void)
 import Covenant.ASG
@@ -21,8 +21,9 @@ import Covenant.ASG
     lazyLam,
     lit,
     match,
-    runASGBuilder
+    runASGBuilder,
   )
+import Covenant.Constant (AConstant (AString, AnInteger))
 import Covenant.DeBruijn (DeBruijn (S, Z))
 import Covenant.Index (ix0, ix1)
 import Covenant.JSON (deserializeAndValidate_)
@@ -32,21 +33,12 @@ import Covenant.Test
     conformanceDatatypes2,
     unsafeMkDatatypeInfos,
   )
-import Covenant.Type
-  ( AbstractTy,
-    BuiltinFlatT (BoolT, IntegerT, StringT),
-    CompT (Comp0, Comp1),
-    CompTBody (ReturnT, (:--:>)),
-    ValT,
-    tyvar,
-  )
+import Covenant.Type (AbstractTy, BuiltinFlatT (BoolT, IntegerT, StringT), CompT (Comp0, Comp1), CompTBody (ReturnT, (:--:>)), ValT (BuiltinFlat), tyvar)
 import Data.Either (isRight)
 import Data.Vector qualified as Vector
 import Data.Wedge (Wedge (There))
 import Test.Tasty (defaultMain, testGroup)
 import Test.Tasty.HUnit (assertBool, testCase)
-import Covenant.Type (ValT(BuiltinFlat))
-import Covenant.Constant (AConstant(AString, AnInteger))
 
 main :: IO ()
 main =
@@ -291,7 +283,6 @@ conformance_body2_builder = lam topLevelTy body
 
     maybeBoolT :: ValT AbstractTy
     maybeBoolT = dtype "Maybe" [boolT]
-
 
 _debugHelp :: ASGBuilder Id -> Either CovenantError ASG
 _debugHelp = runASGBuilder (unsafeMkDatatypeInfos conformanceDatatypes1)

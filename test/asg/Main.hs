@@ -74,9 +74,11 @@ import Covenant.Prim
 import Covenant.Test
   ( Concrete (Concrete),
     DebugASGBuilder,
+    concretifyMegaTest,
+    concretifyMinimalBuilder,
     debugASGBuilder,
     tyAppTestDatatypes,
-    typeIdTest, concretifyMinimalBuilder, concretifyMegaTest,
+    typeIdTest,
   )
 import Covenant.Type
   ( AbstractTy,
@@ -841,7 +843,6 @@ argBugUnitTest = testCase "argBugTest" $ withCompilationSuccessUnit asg (\_ -> p
         AnArg <$> arg (S Z) ix0
       one <- AnId <$> lit (AnInteger 1)
       AnId <$> app' gimmeZ0 [one]
-
 
 -- tests for our concretification fix in `app`.
 -- We only care that compilation succeeds.
