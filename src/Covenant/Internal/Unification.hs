@@ -15,6 +15,10 @@ module Covenant.Internal.Unification
   )
 where
 
+#if __GLASGOW_HASKELL__==908
+import Data.Foldable (foldl')
+#endif
+
 import Control.Applicative (Alternative ((<|>)))
 import Control.Monad (foldM, unless, when)
 import Control.Monad.Except (MonadError, catchError, throwError)
@@ -33,7 +37,6 @@ import Covenant.Internal.Type
     ValT (Abstraction, BuiltinFlat, Datatype, ThunkT),
   )
 import Covenant.Type (CompT (CompN), CompTBody (ArgsAndResult))
-import Data.Foldable (foldl')
 import Data.Kind (Type)
 import Data.Map (Map)
 import Data.Map qualified as M
