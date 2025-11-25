@@ -23,9 +23,7 @@ import Covenant.ASG
     match,
     runASGBuilder,
   )
-import Covenant.Constant
-  ( AConstant (AString, AnInteger),
-  )
+import Covenant.Constant (AConstant (AString, AnInteger))
 import Covenant.DeBruijn (DeBruijn (S, Z))
 import Covenant.Index (ix0, ix1)
 import Covenant.JSON (deserializeAndValidate_)
@@ -35,14 +33,7 @@ import Covenant.Test
     conformanceDatatypes2,
     unsafeMkDatatypeInfos,
   )
-import Covenant.Type
-  ( AbstractTy,
-    BuiltinFlatT (BoolT, IntegerT, StringT),
-    CompT (Comp0, Comp1),
-    CompTBody (ReturnT, (:--:>)),
-    ValT (BuiltinFlat),
-    tyvar,
-  )
+import Covenant.Type (AbstractTy, BuiltinFlatT (BoolT, IntegerT, StringT), CompT (Comp0, Comp1), CompTBody (ReturnT, (:--:>)), ValT (BuiltinFlat), tyvar)
 import Data.Either (isRight)
 import Data.Vector qualified as Vector
 import Data.Wedge (Wedge (There))
@@ -292,3 +283,6 @@ conformance_body2_builder = lam topLevelTy body
 
     maybeBoolT :: ValT AbstractTy
     maybeBoolT = dtype "Maybe" [boolT]
+
+_debugHelp :: ASGBuilder Id -> Either CovenantError ASG
+_debugHelp = runASGBuilder (unsafeMkDatatypeInfos conformanceDatatypes1)

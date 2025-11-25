@@ -235,9 +235,10 @@ pattern Comp3 xs <- (countHelper 3 -> Just xs)
 --
 -- @since 1.0.0
 pattern CompN ::
+  forall (a :: Type).
   Count "tyvar" ->
-  CompTBody AbstractTy ->
-  CompT AbstractTy
+  CompTBody a ->
+  CompT a
 pattern CompN count xs <- CompT count xs
   where
     CompN count xs = CompT count xs

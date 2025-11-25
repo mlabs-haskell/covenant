@@ -236,6 +236,7 @@ import Covenant.Internal.Unification
       ),
     UnifyM,
     checkApp,
+    concretifyFT,
     fixUp,
     reconcile,
     runUnifyM,
@@ -757,6 +758,13 @@ err = refTo AnError
 -- * \'Use this type variable in our scope\', specified as 'Data.Wedge.Here'.
 -- * \'Use this concrete type\', specified as 'Data.Wedge.There'.
 --
+-- = IMPORTANT
+-- The *only* purpose of explicit type application arguments is to instantiate a tyvar in the result which is
+-- not determined by any argument. These variables are instantiated after every other argument has been concretified.
+--
+-- For example, if you have a function
+--   @f :: forall a b c. (a -> b) -> (b -> a) -> b -> Either a c@
+-- Then you will need to supply *ONE* explicit type application to concretify @c@.
 -- @since wip
 app ::
   forall (m :: Type -> Type).
@@ -780,7 +788,7 @@ app fId argRefs instTys = do
           then throwError $ WrongNumInstantiationsInApp renamedFT numVars numInstantiations
           else do
             renamedArgs <- traverse renameArg argRefs
-            concretifiedFT <- concretifyFT renamedFT renamedArgs
+            let concretifiedFT = concretifyFT renamedFT renamedArgs
             instantiatedFT <- instantiate subs concretifiedFT
             tyDict <- asks (view #datatypeInfo)
             result <- either (throwError . UnificationError) pure $ checkApp tyDict instantiatedFT (Vector.toList renamedArgs)
@@ -796,22 +804,6 @@ app fId argRefs instTys = do
       askScope >>= \scope -> case traverse (traverse (runRenameM scope . renameValT)) subs of
         Left err' -> throwError $ FailedToRenameInstantiation err'
         Right res -> pure res
-
-    concretifyFT :: CompT Renamed -> Vector (Maybe (ValT Renamed)) -> m (CompT Renamed)
-    concretifyFT fn@(CompT _ body) argValTypes = do
-      argSubs <- getArgSubs body argValTypes
-      instantiate (Map.toList argSubs) fn
-
-    getArgSubs :: CompTBody Renamed -> Vector (Maybe (ValT Renamed)) -> m (Map (Index "tyvar") (ValT Renamed))
-    getArgSubs (ArgsAndResult args _) argValTypes =
-      liftUnifyM
-        . fmap (Vector.foldMap id)
-        $ Vector.zipWithM argSubHelper args argValTypes
-      where
-        argSubHelper :: ValT Renamed -> Maybe (ValT Renamed) -> UnifyM (Map (Index "tyvar") (ValT Renamed))
-        argSubHelper fromFn = \case
-          Nothing -> pure Map.empty
-          Just fromArg -> unify fromFn fromArg
 
     -- NOTE: The helper function below only concerns instantiations that result from
     --       explicit type applications (via the third argument to `app`).
@@ -830,7 +822,6 @@ app fId argRefs instTys = do
         []
 
     instantiate :: [(Index "tyvar", ValT Renamed)] -> CompT Renamed -> m (CompT Renamed)
-    instantiate [] fn = pure fn
     instantiate subs fn = do
       instantiated <- liftUnifyM . fixUp $ foldr (\(i, t) f -> substitute i t f) (ThunkT fn) subs
       case instantiated of

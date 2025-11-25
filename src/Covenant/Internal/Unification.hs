@@ -11,14 +11,16 @@ module Covenant.Internal.Unification
     fixUp,
     reconcile,
     lookupDatatypeInfo,
+    concretifyFT,
   )
 where
 
-import Control.Monad (foldM, unless, when)
-import Data.Ord (comparing)
 #if __GLASGOW_HASKELL__==908
 import Data.Foldable (foldl')
 #endif
+
+import Control.Applicative (Alternative ((<|>)))
+import Control.Monad (foldM, unless, when)
 import Control.Monad.Except (MonadError, catchError, throwError)
 import Control.Monad.Reader (MonadReader, ReaderT (runReaderT), ask)
 import Covenant.Data (DatatypeInfo)
@@ -34,11 +36,14 @@ import Covenant.Internal.Type
     TyName,
     ValT (Abstraction, BuiltinFlat, Datatype, ThunkT),
   )
+import Covenant.Type (CompT (CompN), CompTBody (ArgsAndResult))
 import Data.Kind (Type)
 import Data.Map (Map)
+import Data.Map qualified as M
 import Data.Map.Merge.Strict qualified as Merge
 import Data.Map.Strict qualified as Map
 import Data.Maybe (fromJust, mapMaybe)
+import Data.Ord (comparing)
 import Data.Set (Set)
 import Data.Set qualified as Set
 import Data.Text (Text)
@@ -404,3 +409,59 @@ reconcile =
           _ -> case new of
             Abstraction (Unifiable _) -> pure old
             _ -> throwError $ CouldNotReconcile i old new
+
+----- Extra stuff
+
+concretifyFT ::
+  CompT Renamed ->
+  Vector (Maybe (ValT Renamed)) ->
+  CompT Renamed
+concretifyFT (CompN cnt (ArgsAndResult fromFn res)) fromArgs = unfixedResult
+  where
+    unfixedResult :: CompT Renamed
+    unfixedResult = CompN cnt (ArgsAndResult subbedArgs subbedRes)
+
+    subbedArgs = substMany allSubstitutions <$> fromFn
+    subbedRes = substMany allSubstitutions res
+
+    substMany :: [(Index "tyvar", ValT Renamed)] -> ValT Renamed -> ValT Renamed
+    substMany subs val = foldl' (\acc (tv, ty) -> substitute tv ty acc) val subs
+
+    allUnifiables = Set.toList $ Vector.foldMap collectUnifiables fromFn
+
+    allSubstitutions = M.toList $ getInstantiations allUnifiables (Vector.toList fromFn) (Vector.toList fromArgs)
+
+getInstantiations :: [Index "tyvar"] -> [ValT Renamed] -> [Maybe (ValT Renamed)] -> Map (Index "tyvar") (ValT Renamed)
+getInstantiations [] _ _ = M.empty
+getInstantiations _ [] _ = M.empty
+getInstantiations _ _ [] = M.empty
+getInstantiations vs (_ : fEs) (Nothing : aEs) = getInstantiations vs fEs aEs
+getInstantiations (var : vars) fs@(fE : fEs) as@(aE' : aEs) =
+  -- somewhat subjective but I think doing it w/ fromJust makes the logic easier to follow here
+  let aE = fromJust aE'
+   in case instantiates (Unifiable var) aE fE of
+        Nothing -> getInstantiations [var] fEs aEs <> getInstantiations vars fs as
+        Just t -> M.insert var t $ getInstantiations vars fs as
+
+instantiates ::
+  Renamed ->
+  ValT Renamed -> -- the "more concrete type", usually the actual argument from 'app'
+  ValT Renamed -> -- the "more polymorphic type', usually from the fn definition
+  Maybe (ValT Renamed)
+instantiates var concrete abstract = case (concrete, abstract) of
+  (x, Abstraction a) -> if var == a then Just x else Nothing -- N.b. we need to be sure we only run this w/ unifiables as the first arg
+  (ThunkT (CompN _ concreteFn), ThunkT (CompN _ abstractFn)) ->
+    let concreteFn' = Vector.toList $ compTBodyToVec concreteFn
+        abstractFn' = Vector.toList $ compTBodyToVec abstractFn
+     in go concreteFn' abstractFn'
+  (Datatype tnC argsC, Datatype tnA argsA)
+    | tnC == tnA -> go (Vector.toList argsC) (Vector.toList argsA)
+  _ -> Nothing
+  where
+    go :: [ValT Renamed] -> [ValT Renamed] -> Maybe (ValT Renamed)
+    go [] _ = Nothing
+    go _ [] = Nothing
+    go (c : cs) (a : as) = instantiates var c a <|> go cs as
+
+compTBodyToVec :: forall a. CompTBody a -> Vector (ValT a)
+compTBodyToVec (ArgsAndResult args res) = Vector.snoc args res

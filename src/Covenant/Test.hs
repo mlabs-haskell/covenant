@@ -1,4 +1,5 @@
 {-# LANGUAGE CPP #-}
+{-# LANGUAGE OverloadedLists #-}
 {-# LANGUAGE PolyKinds #-}
 
 {- HLINT ignore "Use camelCase" -}
@@ -70,6 +71,10 @@ module Covenant.Test
     typeIdTest,
     Arg (UnsafeMkArg),
     Id (UnsafeMkId),
+
+    -- ** Exports for codegen tests
+    concretifyMinimalBuilder,
+    concretifyMegaTest,
   )
 where
 
@@ -90,24 +95,16 @@ import Control.Monad.State.Strict
   )
 import Control.Monad.Trans (MonadTrans (lift))
 import Control.Monad.Trans.Except (ExceptT, runExceptT)
-import Covenant.ASG (ASGEnv (ASGEnv), ASGNode, CovenantError (TypeError), CovenantTypeError, Id, ScopeInfo (ScopeInfo))
+import Covenant.ASG (ASGBuilder, ASGEnv (ASGEnv), ASGNode, CovenantError (TypeError), CovenantTypeError, Id, Ref (AnArg, AnId), ScopeInfo (ScopeInfo), app', arg, boundTyVar, builtin2, builtin3, ctor, ctor', dtype, force, lam, lazyLam, lit, match, thunk)
+import Covenant.Constant (AConstant (ABoolean, AnInteger))
 import Covenant.Data
   ( DatatypeInfo,
     mkDatatypeInfo,
     noPhantomTyVars,
     primBaseFunctorInfos,
   )
-import Covenant.DeBruijn (DeBruijn (Z), asInt)
-import Covenant.Index
-  ( Count,
-    count0,
-    count1,
-    count2,
-    intCount,
-    intIndex,
-    ix0,
-    ix1,
-  )
+import Covenant.DeBruijn (DeBruijn (S, Z), asInt)
+import Covenant.Index (Count, Index, count0, count1, count2, intCount, intIndex, ix0, ix1, ix2, ix3)
 import Covenant.Internal.KindCheck
   ( checkDataDecls,
     checkEncodingArgs,
@@ -164,9 +161,11 @@ import Covenant.Internal.Type
     runConstructorName,
   )
 import Covenant.Internal.Unification (checkApp)
+import Covenant.Prim (ThreeArgFunc (IfThenElse), TwoArgFunc (EqualsInteger))
 import Covenant.Type
-  ( CompT (Comp0, CompN),
-    CompTBody (ArgsAndResult),
+  ( CompT (Comp0, Comp1, Comp2, CompN),
+    CompTBody (ArgsAndResult, ReturnT, (:--:>)),
+    boolT,
     tyvar,
   )
 import Covenant.Util (prettyStr)
@@ -182,6 +181,7 @@ import Data.Text (Text)
 import Data.Text qualified as T
 import Data.Vector (Vector)
 import Data.Vector qualified as Vector
+import Data.Wedge (Wedge (Here))
 import GHC.Exts (fromListN)
 import GHC.Word (Word32)
 import Optics.Core
@@ -994,3 +994,175 @@ conformance_Result =
         Ctor "OK" [tyvar Z ix1]
       ]
       (PlutusData ConstrData)
+
+-- These are canned tests for concretification. They do double duty as tests for
+-- part of the code generator, so we put them here to avoid having to duplicate them across
+-- repositories.
+
+intT :: ValT AbstractTy
+intT = BuiltinFlat IntegerT
+
+mkMaybeT :: ValT AbstractTy -> ValT AbstractTy
+mkMaybeT t = dtype "Maybe" [t]
+
+ix4 :: forall s. Index s
+ix4 = fromJust $ preview intIndex 4
+
+thunk0 :: forall (a :: Type). CompTBody a -> ValT a
+thunk0 = ThunkT . Comp0
+
+(#==) :: Ref -> Ref -> ASGBuilder Ref
+x #== y = do
+  equals <- builtin2 EqualsInteger
+  AnId <$> app' equals [x, y]
+
+-- This is the minimal example, largely for testing that our fix to the concretification/unification glitch
+-- in this repo works.
+concretifyMinimalBuilder :: ASGBuilder Id
+concretifyMinimalBuilder = lam topLevelTy body
+  where
+    topLevelTy :: CompT AbstractTy
+    topLevelTy = Comp0 $ intT :--:> boolT :--:> ReturnT intT
+
+    body :: ASGBuilder Ref
+    body = do
+      intArg <- AnArg <$> arg Z ix0
+      boolArg <- AnArg <$> arg Z ix1
+      fElim <- fPolyOneElimMinimal
+      maybeInt <- ctor' "Maybe" "Just" [intArg]
+      AnId <$> app' fElim [AnId maybeInt, boolArg]
+
+    fPolyOneElimMinimal :: ASGBuilder Id
+    fPolyOneElimMinimal = lam fPolyOneElimTy $ do
+      maybeA <- AnArg <$> arg Z ix0
+      nothingHandler <- lazyLam (Comp0 $ ReturnT intT) $ do
+        AnId <$> lit (AnInteger 0)
+      justHandler <- lazyLam (Comp0 $ tyvar (S Z) ix0 :--:> ReturnT intT) $ do
+        AnId <$> lit (AnInteger 0)
+      AnId <$> match maybeA [AnId justHandler, AnId nothingHandler]
+      where
+        fPolyOneElimTy :: CompT AbstractTy
+        fPolyOneElimTy =
+          Comp2 $ -- forall a b.
+            mkMaybeT (tyvar Z ix0) -- Maybe a
+              :--:> tyvar Z ix1 -- b
+              :--:> ReturnT intT -- Int
+
+-- This is a torture test example. We'll use it here since we have it and it's relevant, but it's largely
+-- designed for a test in the code generator.
+concretifyMegaTest :: ASGBuilder Id
+concretifyMegaTest = lam topLevelTy body
+  where
+    body :: ASGBuilder Ref
+    body = do
+      intArg <- AnArg <$> arg Z ix0
+      boolArg <- AnArg <$> arg Z ix1
+      idF <- AnId <$> (thunk =<< identitee)
+      fmono <- AnId <$> (thunk =<< fMono)
+      gmono <- AnId <$> (thunk =<< gMono)
+      mConst <- AnId <$> (thunk =<< monoConst)
+      fIntro <- fPolyOneIntro
+      fElim <- fPolyOneElim
+      introApplied <- app' fIntro [fmono, mConst, gmono, intArg, boolArg]
+      -- REVIEW @Koz: You said that a fully polymorphic identity function *should not work* as the second arg here, but it does work?
+      AnId <$> app' fElim [AnId introApplied, idF, boolArg, fmono]
+
+    ifte :: ASGBuilder Id
+    ifte = lam (Comp1 $ boolT :--:> tyvar Z ix0 :--:> tyvar Z ix0 :--:> ReturnT (tyvar Z ix0)) $ do
+      cond <- AnArg <$> arg Z ix0
+      t <- AnArg <$> arg Z ix1
+      f <- AnArg <$> arg Z ix2
+      ifThen <- builtin3 IfThenElse
+      AnId <$> app' ifThen [cond, t, f]
+
+    -- NOTE: I wonder what happens if we tried to define id and monoConst in terms of each other?
+    --       Like if we do it so that we get infinite mutual recursion. I should probably *try*
+    --       to compile something like that just to see whether it explodes.
+    identitee :: ASGBuilder Id
+    identitee = lam (Comp1 $ tyvar Z ix0 :--:> ReturnT (tyvar Z ix0)) $ do
+      -- Not how you would typically implement `id` lol
+      mConst <- monoConst
+      x <- AnArg <$> arg Z ix0
+      -- Might not need the ty app?
+      AnId <$> app' mConst [x, x] -- [Here tyX]
+
+    -- forall a. a -> a -> a
+    monoConst :: ASGBuilder Id
+    monoConst = lam (Comp1 $ tyvar Z ix0 :--:> tyvar Z ix0 :--:> ReturnT (tyvar Z ix0)) $ do
+      AnArg <$> arg Z ix1
+
+    topLevelTy :: CompT AbstractTy
+    topLevelTy = Comp0 $ intT :--:> boolT :--:> ReturnT intT
+
+    fPolyOneElim :: ASGBuilder Id
+    fPolyOneElim = lam fPolyOneElimTy $ do
+      zero <- AnId <$> lit (AnInteger 0)
+      maybeA <- AnArg <$> arg Z ix0
+      nothingHandler <- lazyLam (Comp0 $ ReturnT intT) $ do
+        mConst <- monoConst
+        b <- AnArg <$> arg (S Z) ix2
+        bToInt <- force . AnArg =<< arg (S Z) ix3
+        x <- AnId <$> app' bToInt [b]
+        AnId <$> app' mConst [zero, x]
+      justHandler <- lazyLam (Comp0 $ tyvar (S Z) ix0 :--:> ReturnT intT) $ do
+        aToInt <- force . AnArg =<< arg (S Z) ix1
+        a <- AnArg <$> arg Z ix0
+        AnId <$> app' aToInt [a]
+      AnId <$> match maybeA [AnId justHandler, AnId nothingHandler] -- ,AnId justHandler]
+      where
+        fPolyOneElimTy :: CompT AbstractTy
+        fPolyOneElimTy =
+          Comp2 $ -- forall a b.
+            mkMaybeT (tyvar Z ix0) -- Maybe a
+              :--:> thunk0 (tyvar (S Z) ix0 :--:> ReturnT intT) -- (a -> Int)
+              :--:> tyvar Z ix1 -- b
+              :--:> thunk0 (tyvar (S Z) ix1 :--:> ReturnT intT) -- (b -> Int)
+              :--:> ReturnT intT -- Int
+    fPolyOneIntro :: ASGBuilder Id
+    fPolyOneIntro = lam fPolyOneIntroTy $ do
+      fba <- force . AnArg =<< arg Z ix0
+      faa <- force . AnArg =<< arg Z ix1
+      predA <- force . AnArg =<< arg Z ix2
+      a <- AnArg <$> arg Z ix3
+      b <- AnArg <$> arg Z ix4
+      -- let ba = fba (monoConst b b)
+      mConst <- monoConst
+      fbaArg <- AnId <$> app' mConst [b, b]
+      ba <- AnId <$> app' fba [fbaArg]
+      -- let aaa = monoConst a (faa a ba)
+      aaaArg <- AnId <$> app' faa [a, ba]
+      aaa <- AnId <$> app' mConst [a, aaaArg]
+      -- if (predA aaa) then Nothing else Just aaa
+      tvA <- boundTyVar Z ix0
+      nothing <- ctor "Maybe" "Nothing" [] [Here tvA]
+      justAAA <- ctor' "Maybe" "Just" [aaa]
+      ifThen <- ifte
+      cond <- app' predA [aaa]
+      AnId <$> app' ifThen [AnId cond, AnId nothing, AnId justAAA]
+      where
+        fPolyOneIntroTy :: CompT AbstractTy
+        fPolyOneIntroTy =
+          Comp2 $ -- forall a b.
+            ThunkT (Comp0 $ tyvar (S Z) ix1 :--:> ReturnT (tyvar (S Z) ix0)) -- (b -> a)
+              :--:> ThunkT (Comp0 $ tyvar (S Z) ix0 :--:> tyvar (S Z) ix0 :--:> ReturnT (tyvar (S Z) ix0)) -- (a -> a -> a)
+              :--:> ThunkT (Comp0 $ tyvar (S Z) ix0 :--:> ReturnT boolT) -- (a -> Bool)
+              :--:> tyvar Z ix0 -- a
+              :--:> tyvar Z ix1 -- b
+              :--:> ReturnT (mkMaybeT (tyvar Z ix0)) -- Maybe a
+    fMono :: ASGBuilder Id
+    fMono = lam (Comp0 $ boolT :--:> ReturnT intT) $ do
+      aBool <- AnArg <$> arg Z ix0
+      one <- AnId <$> lit (AnInteger 1)
+      zero <- AnId <$> lit (AnInteger 0)
+      ifThen <- ifte
+      AnId <$> app' ifThen [aBool, one, zero]
+
+    gMono :: ASGBuilder Id
+    gMono = lam (Comp0 $ intT :--:> ReturnT boolT) $ do
+      anInt <- AnArg <$> arg Z ix0
+      zero <- AnId <$> lit (AnInteger 0)
+      cond <- anInt #== zero
+      ifThen <- ifte
+      false <- AnId <$> lit (ABoolean False)
+      troo <- AnId <$> lit (ABoolean True)
+      AnId <$> app' ifThen [cond, false, troo]
