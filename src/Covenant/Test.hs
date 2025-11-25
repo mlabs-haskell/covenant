@@ -139,7 +139,6 @@ import Covenant.Internal.Term
   ( ASGNodeType (CompNodeType, ValNodeType),
     Arg (UnsafeMkArg),
     Id (UnsafeMkId),
-    Ref,
     typeId,
   )
 import Covenant.Internal.Type
