@@ -263,7 +263,7 @@ import Covenant.Prim
   )
 import Covenant.Type
   ( CompT (Comp0, Comp1, CompN),
-    CompTBody (ReturnT, (:--:>), ArgsAndResult), 
+    CompTBody (ArgsAndResult, ReturnT, (:--:>)),
     Constructor,
     ConstructorName,
     DataDeclaration (OpaqueData),

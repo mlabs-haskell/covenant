@@ -29,7 +29,7 @@ import Covenant.Constant
   )
 import Covenant.DeBruijn (DeBruijn (S, Z))
 import Covenant.Index (ix0, ix1)
-import Covenant.JSON (deserializeAndValidate_, compileAndSerialize)
+import Covenant.JSON (compileAndSerialize, deserializeAndValidate_)
 import Covenant.Prim (TwoArgFunc (AddInteger, EqualsInteger, SubtractInteger))
 import Covenant.Test
   ( conformanceDatatypes1,
