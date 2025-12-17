@@ -54,6 +54,7 @@ import Covenant.Util (pattern ConsV, pattern NilV)
 import Data.Functor.Identity (Identity, runIdentity)
 import Data.Kind (Type)
 import Data.Monoid (Endo (Endo))
+import Data.Vector qualified as Vector
 import GHC.Exts (toList)
 
 -- | A requested movement from the zipper. To build these, use dedicated smart
@@ -228,7 +229,9 @@ downStep zs@(ZipperState walkedOff g parentLevels currentLevel) =
                       AValNode _ info -> case info of
                         App f args _ _ -> next . Tape [] (AnId f) . toList $ args
                         Thunk f -> next . Tape [] (AnId f) $ []
-                        Cata alg x -> next . Tape [] alg $ [x]
+                        Cata _ arms x -> case arms of
+                          NilV -> zs -- impossible
+                          ConsV c cs -> next . Tape [] c . toList . Vector.snoc cs $ x -- next . Tape [] alg $ [x]
                         DataConstructor _ _ args -> case args of
                           NilV -> miss
                           ConsV arg args' -> next . Tape [] arg . toList $ args'

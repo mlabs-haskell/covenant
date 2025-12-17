@@ -11,6 +11,7 @@ import Covenant.ASG
     Ref (AnArg, AnId),
     app',
     arg,
+    baseFunctorOf,
     builtin2,
     cata,
     ctor,
@@ -23,7 +24,9 @@ import Covenant.ASG
     match,
     runASGBuilder,
   )
-import Covenant.Constant (AConstant (AString, AnInteger))
+import Covenant.Constant
+  ( AConstant (AString, AnInteger),
+  )
 import Covenant.DeBruijn (DeBruijn (S, Z))
 import Covenant.Index (ix0, ix1)
 import Covenant.JSON (deserializeAndValidate_)
@@ -33,7 +36,14 @@ import Covenant.Test
     conformanceDatatypes2,
     unsafeMkDatatypeInfos,
   )
-import Covenant.Type (AbstractTy, BuiltinFlatT (BoolT, IntegerT, StringT), CompT (Comp0, Comp1), CompTBody (ReturnT, (:--:>)), ValT (BuiltinFlat), tyvar)
+import Covenant.Type
+  ( AbstractTy,
+    BuiltinFlatT (BoolT, IntegerT, StringT),
+    CompT (Comp0, Comp1),
+    CompTBody (ReturnT, (:--:>)),
+    ValT (BuiltinFlat, Datatype),
+    tyvar,
+  )
 import Data.Either (isRight)
 import Data.Vector qualified as Vector
 import Data.Wedge (Wedge (There))
@@ -146,6 +156,17 @@ conformance_body1_builder = lam topLevelTy body
 
     sumList :: Ref -> ASGBuilder Id
     sumList listToSum = do
+      listF <- baseFunctorOf "List"
+      let cataTy = Comp0 $ Datatype listF [intT, intT] :--:> ReturnT intT
+      nilHandler <- AnId <$> lit (AnInteger 0)
+      consHandler <- lazyLam (Comp0 $ intT :--:> intT :--:> ReturnT intT) $ do
+        x <- AnArg <$> arg Z ix0
+        y <- AnArg <$> arg Z ix1
+        x #+ y
+      cata cataTy [nilHandler, AnId consHandler] listToSum
+    {-
+    sumList :: Ref -> ASGBuilder Id
+    sumList listToSum = do
       sumListF' <- AnId <$> sumListF
       cata sumListF' listToSum
 
@@ -161,6 +182,7 @@ conformance_body1_builder = lam topLevelTy body
       where
         listFIntT :: ValT AbstractTy
         listFIntT = dtype "#List" [intT, intT]
+    -}
 
     intT :: ValT AbstractTy
     intT = BuiltinFlat IntegerT
@@ -283,6 +305,3 @@ conformance_body2_builder = lam topLevelTy body
 
     maybeBoolT :: ValT AbstractTy
     maybeBoolT = dtype "Maybe" [boolT]
-
-_debugHelp :: ASGBuilder Id -> Either CovenantError ASG
-_debugHelp = runASGBuilder (unsafeMkDatatypeInfos conformanceDatatypes1)

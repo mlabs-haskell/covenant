@@ -24,7 +24,6 @@ import Covenant.Internal.KindCheck (EncodingArgErr)
 import Covenant.Internal.Rename (RenameError, UnRenameError)
 import Covenant.Internal.Type
   ( AbstractTy,
-    BuiltinFlatT,
     CompT,
     TyName,
     ValT,
@@ -134,46 +133,6 @@ data CovenantTypeError
     --
     -- @since 1.1.0
     EncodingError (EncodingArgErr AbstractTy)
-  | -- | The first argument to a catamorphism wasn't an algebra, as
-    -- it had the wrong arity.
-    --
-    -- @since 1.2.0
-    CataAlgebraWrongArity Int
-  | -- | The first argument to a catamorphism wasn't an algebra.
-    --
-    -- @since 1.1.0
-    CataNotAnAlgebra ASGNodeType
-  | -- | The second argument to a catamorphism wasn't a value type.
-    --
-    -- @since 1.1.0
-    CataApplyToNonValT ASGNodeType
-  | -- The algebra given to this catamorphism is not rigid (that is, its
-    -- computation type binds variables).
-    --
-    -- @since 1.2.0
-    CataNonRigidAlgebra (CompT AbstractTy)
-  | -- | The second argument to a catamorphism is a builtin type, but not one
-    -- we can eliminate with a catamorphism.
-    --
-    -- @since 1.1.0
-    CataWrongBuiltinType BuiltinFlatT
-  | -- | The second argument to a catamorphism is a value type, but not one we
-    -- can eliminate with a catamorphism. Usually, this means it's a variable.
-    --
-    -- @since 1.1.0
-    CataWrongValT (ValT AbstractTy)
-  | -- | We requested a catamorphism for a type that doesn't exist.
-    --
-    -- @since 1.2.0
-    CataNoSuchType TyName
-  | -- | We requested a catamorphism for a type without a base functor.
-    --
-    -- @since 1.2.0
-    CataNoBaseFunctorForType TyName
-  | -- | The provided algebra is not suitable for the given type.
-    --
-    -- @since 1.1.0
-    CataUnsuitable (CompT AbstractTy) (ValT AbstractTy)
   | -- | Someone attempted to construct a tyvar using a DB index or argument position
     --   which refers to a scope (or argument) that does not exist.
     --
@@ -283,6 +242,96 @@ data CovenantTypeError
     --
     -- @since 1.3.0
     OtherError Text
+  | -- | The stated algebra type for a catamorphism has an arity different to what we
+    -- expected. Algebras must have an arity of 1.
+    --
+    -- @since wip
+    CataWrongArity (CompT AbstractTy)
+  | -- | The stated algebra type for a catamorphism has a different return type
+    -- to what we expected. Algebras must have the same return type as the last
+    -- type argument to the base functor.
+    --
+    -- The first field of this error is the type we expected, the second is the
+    -- one we actually found.
+    --
+    -- @since wip
+    CataWrongOutputType (ValT AbstractTy) (ValT AbstractTy)
+  | -- | The stated algebra type's base functor does not correspond to any type
+    -- known to us.
+    --
+    -- @since wip
+    CataNoTypeForBaseFunctor TyName
+  | -- | The stated algebra type's \'base functor\' is monomorphic.
+    --
+    -- @since wip
+    CataMonomorphicBaseFunctor TyName
+  | -- | The stated algebra type's \'base functor\' is not a datatype.
+    --
+    -- @since wip
+    CataNotADatatypeBaseFunctor (ValT AbstractTy)
+  | -- | The stated algebra type is not rigid: that is, it binds type variables.
+    --
+    -- @since wip
+    CataNonRigidAlgebra (CompT AbstractTy)
+  | -- | The structure to be torn down by a catamorphism is not suitable given
+    -- the stated algebra type.
+    --
+    -- @since wip
+    CataInvalidStructure (CompT AbstractTy) (ValT AbstractTy)
+  | -- | The number of handlers provided to a catamorphism is wrong for the
+    -- stated algebra type.
+    --
+    -- @since wip
+    CataWrongNumberOfHandlers (CompT AbstractTy) (Vector Ref)
+  | -- | The (internal) unification for a catamorphism failed. If you see this kind
+    -- of error, it means that one of your handlers is not typed correctly. The
+    -- exact unifier error is provided to help debug.
+    --
+    -- @since wip
+    CataDidNotUnify (CompT AbstractTy) (Vector Ref) TypeAppError
+  | -- | The (internal) renaming of the handlers for a catamorphism failed. If
+    -- you see this kind of error, it means that one of your handlers is
+    -- malformed. The exact renaming error is provided to help debug.
+    --
+    -- @since wip
+    CataCouldNotRenameHandler (CompT AbstractTy) (Vector Ref) RenameError
+  | -- | The (internal) Boehm-Berrarducci form of the structure to be torn down by
+    -- a catamorphism did not rename correctly. If you see this error, this is a
+    -- bug, so please report it!
+    --
+    -- @since wip
+    CataCouldNotRenameBB (CompT AbstractTy) (Vector Ref) (CompT AbstractTy) RenameError
+  | -- | A handler given to a catamorphism is not of a value type.
+    --
+    -- @since wip
+    CataHandlerNotAValType ASGNodeType
+  | -- | We could not rename one of the required substitutions into the (internal)
+    -- Boehm-Berrarducci form of the structure to be torn down by a catamorphism
+    -- over a polymorphic structure. If you see this error, this is a bug, so
+    -- please report it!
+    --
+    -- @since wip
+    CataCouldNotRenameSubstitutions (CompT AbstractTy) (Vector Ref) (CompT AbstractTy) (Vector (ValT AbstractTy)) RenameError
+  | -- | We could not \'fix up\' the (internal) Boehm-Berrarducci form of the
+    -- structure to be torn down by a catamorphism over a polymorphic structure
+    -- after substitution. If you see this error, this is a bug, so please
+    -- report it!
+    --
+    -- @since wip
+    CataFixUpFailedForBB (CompT AbstractTy) (Vector Ref) (Vector (ValT AbstractTy)) (ValT Renamed) TypeAppError
+  | -- | The argument given to a catamorphism to be torn down is not a value type.
+    --
+    -- @since wip
+    CataNotAValueType ASGNodeType
+  | -- | The expected result type of a catamorphism according to its stated algebra
+    -- was not the same as what we actually got after applying handlers. If you
+    -- see this error, it means that one or more of your handlers is not
+    -- correct.
+    --
+    -- The first field is the type we expected, the second is what we got.
+    --
+    -- @since wip
+    CataUnexpectedResultType (ValT AbstractTy) (ValT AbstractTy)
   deriving stock
     ( -- | @since 1.0.0
       Eq,
@@ -421,7 +470,7 @@ data ValNodeInfo
     AppInternal Id (Vector Ref) (Vector (Wedge BoundTyVar (ValT Void))) (CompT AbstractTy)
   | ThunkInternal Id
   | -- | @since 1.1.0
-    CataInternal Ref Ref
+    CataInternal (CompT AbstractTy) (Vector Ref) Ref
   | -- | @since 1.2.0
     DataConstructorInternal TyName ConstructorName (Vector Ref)
   | -- | @since 1.2.0

@@ -1,4 +1,5 @@
 {-# LANGUAGE CPP #-}
+{-# LANGUAGE MultiWayIf #-}
 {-# LANGUAGE PatternSynonyms #-}
 
 -- |
@@ -104,7 +105,7 @@ where
 import Data.Foldable (foldl')
 #endif
 
-import Control.Monad (foldM, join, unless, zipWithM)
+import Control.Monad (foldM, join, unless, zipWithM, (>=>))
 import Control.Monad.Except
   ( ExceptT,
     MonadError (throwError),
@@ -124,7 +125,7 @@ import Control.Monad.Reader
 import Covenant.Constant (AConstant, typeConstant)
 import Covenant.Data (DatatypeInfo, mkDatatypeInfo, primBaseFunctorInfos)
 import Covenant.DeBruijn (DeBruijn (S, Z), asInt)
-import Covenant.Index (Count, Index, count0, intCount, intIndex, wordCount)
+import Covenant.Index (Count, Index, count0, intCount, intIndex, ix0, wordCount)
 import Covenant.Internal.KindCheck (EncodingArgErr (EncodingArgMismatch), checkEncodingArgs)
 import Covenant.Internal.Ledger (ledgerTypes)
 import Covenant.Internal.Rename
@@ -158,15 +159,22 @@ import Covenant.Internal.Term
         ApplyToValType,
         BaseFunctorDoesNotExistFor,
         BrokenIdReference,
-        CataAlgebraWrongArity,
-        CataApplyToNonValT,
-        CataNoBaseFunctorForType,
-        CataNoSuchType,
+        CataCouldNotRenameBB,
+        CataCouldNotRenameHandler,
+        CataCouldNotRenameSubstitutions,
+        CataDidNotUnify,
+        CataFixUpFailedForBB,
+        CataHandlerNotAValType,
+        CataInvalidStructure,
+        CataMonomorphicBaseFunctor,
+        CataNoTypeForBaseFunctor,
         CataNonRigidAlgebra,
-        CataNotAnAlgebra,
-        CataUnsuitable,
-        CataWrongBuiltinType,
-        CataWrongValT,
+        CataNotADatatypeBaseFunctor,
+        CataNotAValueType,
+        CataUnexpectedResultType,
+        CataWrongArity,
+        CataWrongNumberOfHandlers,
+        CataWrongOutputType,
         ConstructorDoesNotExistForType,
         DatatypeInfoRenameError,
         EncodingError,
@@ -254,8 +262,8 @@ import Covenant.Prim
     typeTwoArgFunc,
   )
 import Covenant.Type
-  ( CompT (Comp0, CompN),
-    CompTBody (ArgsAndResult, ReturnT),
+  ( CompT (Comp0, Comp1, CompN),
+    CompTBody (ArgsAndResult, ReturnT, (:--:>)),
     Constructor,
     ConstructorName,
     DataDeclaration (OpaqueData),
@@ -263,8 +271,10 @@ import Covenant.Type
     Renamed (Unifiable),
     TyName (TyName),
     ValT (Abstraction),
+    integerT,
     tyvar,
   )
+import Covenant.Util (pattern ConsV, pattern NilV)
 import Data.Bimap (Bimap)
 import Data.Bimap qualified as Bimap
 import Data.Coerce (coerce)
@@ -273,7 +283,7 @@ import Data.Kind (Type)
 import Data.List (find)
 import Data.Map.Strict (Map)
 import Data.Map.Strict qualified as Map
-import Data.Maybe (fromJust, isJust, mapMaybe)
+import Data.Maybe (fromJust, fromMaybe, isJust, mapMaybe)
 import Data.Set qualified as Set
 import Data.Text qualified as T
 import Data.Vector (Vector)
@@ -285,7 +295,6 @@ import Data.Word (Word32, Word64)
 import Optics.Core
   ( A_Lens,
     LabelOptic (labelOptic),
-    at,
     folded,
     ix,
     lens,
@@ -494,11 +503,14 @@ pattern App f args instTys concreteFnTy <- AppInternal f args instTys concreteFn
 pattern Thunk :: Id -> ValNodeInfo
 pattern Thunk i <- ThunkInternal i
 
--- | \'Tear down\' a self-recursive value with an algebra.
+-- | \'Tear down\' a self-recursive value with an algebra. The first argument is
+-- the signature of the algebra used; the second argument is
+-- a list of \'handlers\' for the base functor, represented similar to 'Match'
+-- handlers, while the third is the type of thing to be torn down.
 --
--- @since 1.0.0
-pattern Cata :: Ref -> Ref -> ValNodeInfo
-pattern Cata algebraRef valRef <- CataInternal algebraRef valRef
+-- @since 1.4.0
+pattern Cata :: CompT AbstractTy -> Vector Ref -> Ref -> ValNodeInfo
+pattern Cata algT handlerRefs valRef <- CataInternal algT handlerRefs valRef
 
 -- | Inject (zero or more) fields into a data constructor
 --
@@ -1013,76 +1025,130 @@ thunk i = do
     ValNodeType t -> throwError . ThunkValType $ t
     ErrorNodeType -> throwError ThunkError
 
--- | Given a 'Ref' to an algebra (that is, something taking a base functor and
--- producing some result), and a 'Ref' to a value associated with that base
--- functor, build a catamorphism to tear it down. This can fail for a range of
--- reasons:
+-- | Given a computation type for an algebra (the \'stated algebra type\'), as
+-- well as a set of handlers designed to deal with each case of the stated
+-- algebra's base functor, plus a 'Ref' to a value associated with that base
+-- functor, build a catamorphism to tear that value down.
 --
--- * First 'Ref' is not a thunk taking one argument
--- * The argument to the thunk isn't a base functor, or isn't a suitable base
---   functor for the second argument
--- * Second argument is not a value type
+-- Ensure the following:
 --
--- = Note
+-- * The stated algebra type must be a 'Comp0' taking a base functor and
+--   returning the same type as the last type variable instantiation of that base
+--   functor.
+-- * The handlers must be provided in the same order as the constructors of the
+--   parameter of the stated algebra type. Handlers for \'arms\' with no fields
+--   must be non-thunks, while handlers for \'arms\' with fields must be thunks.
+-- * The third argument must be a value type with a base functor.
 --
--- 'cata' cannot work with /non-rigid/ algebras; that is, all algebras must be
--- functions that bind no type variables of their own.
---
--- @since 1.1.0
+-- @since wip
 cata ::
   forall (m :: Type -> Type).
   (MonadHashCons Id ASGNode m, MonadError CovenantTypeError m, MonadReader ASGEnv m) =>
-  Ref ->
+  CompT AbstractTy ->
+  Vector Ref ->
   Ref ->
   m Id
-cata rAlg rVal =
-  typeRef rVal >>= \case
-    ValNodeType valT ->
-      typeRef rAlg >>= \case
-        t@(ValNodeType (ThunkT algT)) -> case algT of
-          Comp0 (CompTBody nev) -> do
-            let algebraArity = arity algT
-            unless (algebraArity == 1) (throwError . CataAlgebraWrongArity $ algebraArity)
-            case nev NonEmpty.! 0 of
-              Datatype bfName bfTyArgs -> do
-                -- If we got this far, we know at minimum that we have somewhat
-                -- sensical arguments. Now we have to make sure that we have a
-                -- suitable type for the algebra, and a suitable thing to tear
-                -- down.
-                --
-                -- After verifying this, we use `tryApply` so the unification
-                -- machinery can produce the type we expect with proper
-                -- concretifications.
-                unless (Vector.length bfTyArgs > 0) (throwError . CataNotAnAlgebra $ t)
-                let lastTyArg = Vector.last bfTyArgs
-                unless (nev NonEmpty.! 1 == lastTyArg) (throwError . CataNotAnAlgebra $ t)
-                appliedArgT <- case valT of
-                  BuiltinFlat bT -> case bT of
-                    ByteStringT -> do
-                      unless (bfName == "#ByteString") (throwError . CataUnsuitable algT $ valT)
-                      pure $ Datatype "#ByteString" . Vector.singleton $ lastTyArg
-                    IntegerT -> do
-                      let isSuitableBaseFunctor = bfName == "#Natural" || bfName == "#Negative"
-                      unless isSuitableBaseFunctor (throwError . CataUnsuitable algT $ valT)
-                      pure $ Datatype bfName . Vector.singleton $ lastTyArg
-                    _ -> throwError . CataWrongBuiltinType $ bT
-                  Datatype tyName tyVars -> do
-                    lookedUp <- asks (view (#datatypeInfo % at tyName))
-                    case lookedUp of
-                      Nothing -> throwError . CataNoSuchType $ tyName
-                      Just info -> case view #baseFunctor info of
-                        Just (DataDeclaration actualBfName _ _ _, _) -> do
-                          unless (bfName == actualBfName) (throwError . CataUnsuitable algT $ valT)
-                          let lastTyArg' = stepDownDB lastTyArg
-                          pure . Datatype bfName . Vector.snoc tyVars $ lastTyArg'
-                        _ -> throwError . CataNoBaseFunctorForType $ tyName
-                  _ -> throwError . CataWrongValT $ valT
-                resultT <- tryApply algT appliedArgT
-                refTo . AValNode resultT . CataInternal rAlg $ rVal
-              _ -> throwError . CataNotAnAlgebra $ t
-          _ -> throwError . CataNonRigidAlgebra $ algT
-        t -> throwError . CataNotAnAlgebra $ t
-    t -> throwError . CataApplyToNonValT $ t
+cata algT handlers rVal =
+  getCataInfo algT >>= \case
+    (resultT, IntegerCata) ->
+      typeRef rVal >>= \case
+        ValNodeType (BuiltinFlat IntegerT) -> tryApply resultT integerBB
+        ValNodeType t -> throwError . CataInvalidStructure algT $ t
+        t -> throwError . CataNotAValueType $ t
+    (resultT, ByteStringCata) ->
+      typeRef rVal >>= \case
+        ValNodeType (BuiltinFlat ByteStringT) -> tryApply resultT bsBB
+        ValNodeType t -> throwError . CataInvalidStructure algT $ t
+        t -> throwError . CataNotAValueType $ t
+    (resultT, RigidCata expectedTyName bbForm) ->
+      typeRef rVal >>= \case
+        ValNodeType t@(Datatype tyName _) -> do
+          unless (tyName == expectedTyName) (throwError . CataInvalidStructure algT $ t)
+          tryApply resultT bbForm
+        ValNodeType t -> throwError . CataInvalidStructure algT $ t
+        t -> throwError . CataNotAValueType $ t
+    (resultT, NonRigidCata expectedTyName bbf) ->
+      typeRef rVal >>= \case
+        ValNodeType t@(Datatype tyName tyVars) -> do
+          unless (tyName == expectedTyName) (throwError . CataInvalidStructure algT $ t)
+          tryApplySubstituting resultT bbf tyVars
+        ValNodeType t -> throwError . CataInvalidStructure algT $ t
+        t -> throwError . CataNotAValueType $ t
+  where
+    integerBB :: CompT AbstractTy
+    integerBB =
+      Comp1 $
+        tyvar Z ix0
+          :--:> ThunkT (Comp0 $ tyvar (S Z) ix0 :--:> ReturnT (tyvar (S Z) ix0))
+          :--:> ReturnT (tyvar Z ix0)
+    bsBB :: CompT AbstractTy
+    bsBB =
+      Comp1 $
+        tyvar Z ix0
+          :--:> ThunkT (Comp0 $ integerT :--:> tyvar (S Z) ix0 :--:> ReturnT (tyvar (S Z) ix0))
+          :--:> ReturnT (tyvar Z ix0)
+    tryApplySubstituting :: ValT AbstractTy -> ValT AbstractTy -> Vector (ValT AbstractTy) -> m Id
+    tryApplySubstituting resultT bbThunk subs = do
+      scopeInfo <- askScope
+      tyDict <- asks (view #datatypeInfo)
+      case runRenameM scopeInfo . renameValT $ bbThunk of
+        Right renamedBBThunk -> case traverse (runRenameM scopeInfo . renameValT) subs of
+          Right renamedSubs -> case runUnifyM tyDict (fixUp . doSubsVal renamedSubs $ renamedBBThunk) of
+            Right substitutedBBThunk -> do
+              asArgs <- traverse handlerToArg handlers
+              case traverse (runRenameM scopeInfo . renameValT) asArgs of
+                Right renamedHandlers -> case checkApp tyDict (fromThunk substitutedBBThunk) (fmap Just . Vector.toList $ renamedHandlers) of
+                  Right result -> do
+                    restored <- undoRenameM result
+                    unless (restored == resultT) (throwError . CataUnexpectedResultType resultT $ restored)
+                    refTo . AValNode restored . CataInternal algT handlers $ rVal
+                  Left err' -> throwError . CataDidNotUnify algT handlers $ err'
+                Left err' -> throwError . CataCouldNotRenameHandler algT handlers $ err'
+            Left err' -> throwError . CataFixUpFailedForBB algT handlers subs renamedBBThunk $ err'
+          Left err' -> throwError . CataCouldNotRenameSubstitutions algT handlers (fromThunk bbThunk) subs $ err'
+        Left err' -> throwError . CataCouldNotRenameBB algT handlers (fromThunk bbThunk) $ err'
+    fromThunk :: forall (a :: Type). (Show a) => ValT a -> CompT a
+    fromThunk = \case
+      ThunkT t -> t
+      t -> error $ "cata: ValT given by getCataInfo wasn't a thunk as expected" <> show t
+    tryApply :: ValT AbstractTy -> CompT AbstractTy -> m Id
+    tryApply resultT bb = do
+      let bbArity = arity bb
+      unless (bbArity == Vector.length handlers) (throwError . CataWrongNumberOfHandlers algT $ handlers)
+      scopeInfo <- askScope
+      case runRenameM scopeInfo . renameCompT $ bb of
+        Right renamedBB -> do
+          tyDict <- asks (view #datatypeInfo)
+          asArgs <- traverse handlerToArg handlers
+          case traverse (runRenameM scopeInfo . renameValT) asArgs of
+            Right renamedHandlers -> case checkApp tyDict renamedBB (fmap Just . Vector.toList $ renamedHandlers) of
+              Right result -> do
+                restored <- undoRenameM result
+                unless (restored == resultT) (throwError . CataUnexpectedResultType resultT $ restored)
+                refTo . AValNode restored . CataInternal algT handlers $ rVal
+              Left err' -> throwError . CataDidNotUnify algT handlers $ err'
+            Left err' -> throwError . CataCouldNotRenameHandler algT handlers $ err'
+        Left err' -> throwError . CataCouldNotRenameBB algT handlers bb $ err'
+    handlerToArg :: Ref -> m (ValT AbstractTy)
+    handlerToArg =
+      typeRef >=> \case
+        ValNodeType t -> pure t
+        t -> throwError . CataHandlerNotAValType $ t
+    doSubsComp :: Vector (ValT Renamed) -> CompT Renamed -> CompT Renamed
+    doSubsComp subs (CompT count (CompTBody nev)) = CompT count . CompTBody . fmap (doSubsVal subs) $ nev
+    doSubsVal :: Vector (ValT Renamed) -> ValT Renamed -> ValT Renamed
+    doSubsVal subs = \case
+      -- Note (Koz, 11/11/2025): The indexing ends up being a bit strange here,
+      -- as the _last_ tyvar in a BB form is always meant to stay abstract.
+      -- However, this means that if we have `n` substitutions, we have `n + 1`
+      -- possible unifiables for those substitutions to go into. Thus, doing a
+      -- blind indexing into `subs` can blow up.
+      --
+      -- Thus, if we 'miss', we should leave it alone.
+      t@(Abstraction (Unifiable i)) -> fromMaybe t $ subs Vector.!? review intIndex i
+      ThunkT someComp -> ThunkT . doSubsComp subs $ someComp
+      Datatype tyName tyVars -> Datatype tyName . fmap (doSubsVal subs) $ tyVars
+      t -> t
 
 -- | Perform a pattern match. The first argument is the value to be matched on,
 -- and the second argument is a 'Vector' of \'handlers\' for each possible
@@ -1091,24 +1157,33 @@ cata rAlg rVal =
 -- All handlers must be thunks, and must all return the same (concrete) result.
 -- Polymorphic \'handlers\' (that is, thunks whose computation binds type
 -- variables of its own) will fail to compile.
--- NOTE: Opaque the handlers for an opaque type must follow the order:
+--
+-- = Note
+--
+-- Opaque the handlers for an opaque type must follow the order:
+--
+--  @
 --  [ PlutusI,
 --    PlutusB,
 --    PlutusConstr,
 --    PlutusMap,
 --    PlutusList
 --  ]
+--  @
 --
---  Where types not included in the provided constructors to the Opaque declaration are omitted.
+--  Where types not included in the provided constructors to the opaque declaration are omitted.
 --
 --  Furthermore, the handlers for opaque constructors operate on the unwrapped arguments to
---  their respective PlutusData constructor. That is, for some result type 'r', the handlers for a
+--  their respective PlutusData constructor. That is, for some result type @r@, the handlers for a
 --  an opaque type which uses all the constructors should have the types:
+--
+--  @
 --    PlutusI :: Integer -> r
 --    PlutusB :: ByteString -> r
 --    PlutusConstr :: Integer -> [Data] -> r
 --    PlutusMap :: [(Integer,Data)] -> r
 --    PlutusList :: [Data] -> r
+--  @
 --
 -- @since 1.2.0
 match ::
@@ -1224,54 +1299,6 @@ match scrutinee handlers = do
 
 -- Helpers
 
--- Note (Koz, 13/08/2025): We need this procedure specifically for `cata`. The
--- reason for this has to do with how we construct the 'base functor form' of
--- the value to be torn down by the catamorphism, in order to use the
--- unification machinery to get the type of the final result.
---
--- To be specific, suppose we have `<#List r (Maybe r) -> !Maybe r>` as our algebra
--- argument (where `r` is some rigid), and `List r` as the value to be torn
--- down. If we assume the rigid is bound one scope away, `r`'s DeBruijn index
--- will be `S Z` for
--- the value to be torn down, but `S (S Z)` for the algebra argument. The way
--- our approach works is:
---
--- 1. Look at the algebra argument, specifically the base functor type. Take its
---    last type argument, which we will call `last`.
--- 2. Determine the base functor for the value to be torn down. Cook up a new
---    instance of the base functor type, copying all the type arguments from the
---    value to be torn down in the same order. Then put `last` at the end.
--- 3. Force the algebra argument thunk, then try and apply the result of Step 2
---    to that.
---
--- Following the steps above for our example, we would proceed as follows:
---
--- 1. Set `last` as `Maybe r`.
--- 2. Cook up `#List r (Maybe r)`. Note that this matches what the algebra
---    expects.
--- 3. Use the unifier with `#List r (Maybe r) -> !Maybe r`, applying the
---    argument `#List r (Maybe r)` from Step 2.
---
--- However, if `last` is a rigid, we have an 'off by one error'. To see why,
--- consider the form of the algebra argument:
---
--- `ThunkT . Comp0 $ Datatype "#List" [tyvar (S (S Z)) ix0, ....`
---
--- However, `tyvar (S (S Z)) ix0` is not valid in the scope of the value to be
--- torn down: that same rigid would have DeBruijn index `S Z` there instead.
--- This applies the same if the tyvar is part of a datatype.
---
--- As we prohibit non-rigid algebras, this requires us to lower the DeBruijn
--- index by one for our process.
-stepDownDB :: ValT AbstractTy -> ValT AbstractTy
-stepDownDB = \case
-  Abstraction (BoundAt db i) -> case db of
-    -- This is impossible, so we just return it unmodified
-    Z -> Abstraction (BoundAt db i)
-    (S db') -> Abstraction (BoundAt db' i)
-  Datatype tyName tyArgs -> Datatype tyName . fmap stepDownDB $ tyArgs
-  x -> x
-
 renameArg ::
   forall (m :: Type -> Type).
   (MonadHashCons Id ASGNode m, MonadError CovenantTypeError m, MonadReader ASGEnv m) =>
@@ -1295,23 +1322,6 @@ checkEncodingWithInfo ::
 checkEncodingWithInfo tyDict valT = case checkEncodingArgs (view (#originalDecl % #datatypeEncoding)) tyDict valT of
   Left encErr -> throwError $ EncodingError encErr
   Right {} -> pure ()
-
-tryApply ::
-  forall (m :: Type -> Type).
-  (MonadError CovenantTypeError m, MonadReader ASGEnv m) =>
-  CompT AbstractTy ->
-  ValT AbstractTy ->
-  m (ValT AbstractTy)
-tryApply algebraT argT =
-  askScope >>= \scope -> case runRenameM scope . renameCompT $ algebraT of
-    Left err' -> throwError . RenameFunctionFailed algebraT $ err'
-    Right renamedAlgebraT -> case runRenameM scope . renameValT $ argT of
-      Left err' -> throwError . RenameArgumentFailed argT $ err'
-      Right renamedArgT -> do
-        tyDict <- asks (view #datatypeInfo)
-        case checkApp tyDict renamedAlgebraT [Just renamedArgT] of
-          Left err' -> throwError . UnificationError $ err'
-          Right resultT -> undoRenameM resultT
 
 -- Putting this here to reduce chance of annoying manual merge (will move later)
 
@@ -1505,6 +1515,103 @@ naturalBF = TyName "#Natural"
 -- @since 1.3.0
 negativeBF :: TyName
 negativeBF = TyName "#Negative"
+
+-- Used as a helper for catamorphisms to classify what we need to do based on
+-- the stated algebra type
+data CataInfo
+  = IntegerCata
+  | ByteStringCata
+  | RigidCata TyName (CompT AbstractTy)
+  | NonRigidCata TyName (ValT AbstractTy)
+
+getCataInfo ::
+  forall (m :: Type -> Type).
+  (MonadReader ASGEnv m, MonadError CovenantTypeError m) =>
+  CompT AbstractTy -> m (ValT AbstractTy, CataInfo)
+getCataInfo t = case t of
+  Comp0 (CompTBody nev) -> do
+    unless (NonEmpty.length nev == 2) (throwError . CataWrongArity $ t)
+    let inputT = nev NonEmpty.! 0
+    let outputT = nev NonEmpty.! 1
+    case inputT of
+      Datatype bfTyName bfTyVars ->
+        (stepDown outputT,) <$> case Vector.unsnoc bfTyVars of
+          Just (tyVarInsts, lastT) -> do
+            unless (lastT == outputT) (throwError . CataWrongOutputType outputT $ lastT)
+            if
+              | bfTyName == naturalBF -> pure IntegerCata
+              | bfTyName == negativeBF -> pure IntegerCata
+              -- Note (Koz, 10/11/2025): This is hacky as hell, but since
+              -- ByteString is technically a builtin type, this is the only
+              -- way to spot its base functor.
+              | bfTyName == "#ByteString" -> pure ByteStringCata
+              | otherwise -> do
+                  datatypes <- asks (view #datatypeInfo)
+                  case Map.foldlWithKey' (go bfTyName) Nothing datatypes of
+                    Just (k, bbf) -> case tyVarInsts of
+                      NilV -> pure . RigidCata k $ bbf
+                      ConsV _ _ -> pure . NonRigidCata k . ThunkT $ bbf
+                    Nothing -> throwError . CataNoTypeForBaseFunctor $ bfTyName
+          _ -> throwError . CataMonomorphicBaseFunctor $ bfTyName
+      _ -> throwError . CataNotADatatypeBaseFunctor $ inputT
+  _ -> throwError . CataNonRigidAlgebra $ t
+  where
+    go ::
+      TyName ->
+      Maybe (TyName, CompT AbstractTy) ->
+      TyName ->
+      DatatypeInfo AbstractTy ->
+      Maybe (TyName, CompT AbstractTy)
+    go targetTyName acc currTyName currTyInfo = case acc of
+      Nothing -> case view #baseFunctor currTyInfo of
+        Just (DataDeclaration name _ _ _, _) ->
+          if name == targetTyName
+            then case view #bbForm currTyInfo of
+              Just (ThunkT bbfTy) -> Just (currTyName, bbfTy)
+              _ -> acc -- technically impossible
+            else acc
+        _ -> acc
+      _ -> acc
+    -- Note (Koz, 11/11/2025): We need this procedure specifically for `cata`. The
+    -- reason for this has to do with how we construct the 'base functor form' of
+    -- the value to be torn down by the catamorphism, in order to use the
+    -- unification machinery to get the type of the final result.
+    --
+    -- To be specific, suppose we have `<#List r (Maybe r) -> !Maybe r>` as our
+    -- stated algebra type, with `r` rigid. Suppose also that the value to be torn
+    -- down is `List r`. If we assume the rigid `r` is bound one scope away, `r`'s
+    -- DeBruijn index will be different for each of these:
+    --
+    -- \* In the stated algebra type, `r`'s index will be `S (S Z)`; but
+    -- \* In the value to be torn down, `r`'s index will be `S Z`.
+    --
+    -- As part of what we do here, we 'collect' the expected result of the
+    -- catamorphism according to the stated algebra type. Then, we use a
+    -- combination of the value to be torn down (or more precisely, its
+    -- Boehm-Berrarducci form), together with the handlers, as arguments to the
+    -- unifier to see what result we get on that basis. In theory, if the expected
+    -- result type and the result of this unification agree, we type check.
+    -- However, this would fail in our case: as the stated algebra type is
+    -- `Comp0 $ Datatype "#List" [tyvar (S (S Z)) ix0, ...`, the expected result
+    -- type would be `Datatype "Maybe" [tyvar (S (S Z) ix0]`. However, this is not
+    -- valid in the scope of the value to be torn down: that same rigid would have
+    -- the DeBruijn index `S Z` in that scope instead. This applies regardless of
+    -- whether the tyvar is part of a datatype or not. This gives us an 'off by
+    -- one' error.
+    --
+    -- As we prohibit non-rigid algebras, this requires us to lower the DeBruijn
+    -- index by one for our process. This is, in fact, _why_ stated algebra
+    -- types must be rigid: if they weren't, this process would become far more
+    -- complicated, as we would now have to be careful to establish _which_
+    -- tyvars need 'stepping down' and which don't!
+    stepDown :: ValT AbstractTy -> ValT AbstractTy
+    stepDown = \case
+      Abstraction (BoundAt db i) -> case db of
+        -- This is impossible, so we just return it unmodified
+        Z -> Abstraction (BoundAt db i)
+        (S db') -> Abstraction (BoundAt db' i)
+      Datatype tyName tyArgs -> Datatype tyName . fmap stepDown $ tyArgs
+      x -> x
 
 fixArgType :: DeBruijn -> ValT AbstractTy -> ValT AbstractTy
 fixArgType distance = \case
