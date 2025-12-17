@@ -29,7 +29,7 @@ import Covenant.Constant
   )
 import Covenant.DeBruijn (DeBruijn (S, Z))
 import Covenant.Index (ix0, ix1)
-import Covenant.JSON (deserializeAndValidate_)
+import Covenant.JSON (deserializeAndValidate_,compileAndSerialize)
 import Covenant.Prim (TwoArgFunc (AddInteger, EqualsInteger, SubtractInteger))
 import Covenant.Test
   ( conformanceDatatypes1,
@@ -158,12 +158,12 @@ conformance_body1_builder = lam topLevelTy body
     sumList listToSum = do
       listF <- baseFunctorOf "List"
       let cataTy = Comp0 $ Datatype listF [intT, intT] :--:> ReturnT intT
-      nilHandler <- lazyLam (Comp0 $ ReturnT intT) (AnId <$> lit (AnInteger 0))
+      nilHandler <- AnId <$> lit (AnInteger 0)
       consHandler <- lazyLam (Comp0 $ intT :--:> intT :--:> ReturnT intT) $ do
         x <- AnArg <$> arg Z ix0
         y <- AnArg <$> arg Z ix1
         x #+ y
-      cata cataTy [AnId nilHandler, AnId consHandler] listToSum
+      cata cataTy [nilHandler, AnId consHandler] listToSum
     {-
     sumList :: Ref -> ASGBuilder Id
     sumList listToSum = do
