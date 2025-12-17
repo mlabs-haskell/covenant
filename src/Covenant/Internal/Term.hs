@@ -465,8 +465,9 @@ data CompNodeInfo
 -- @since 1.0.0
 data ValNodeInfo
   = LitInternal AConstant
-  | -- | @since 1.3.0
-    AppInternal Id (Vector Ref) (Vector (Wedge BoundTyVar (ValT Void)))
+  | -- | @since wip
+    -- The CompT is the "fully concretified" function type
+    AppInternal Id (Vector Ref) (Vector (Wedge BoundTyVar (ValT Void))) (CompT AbstractTy)
   | ThunkInternal Id
   | -- | @since 1.1.0
     CataInternal (CompT AbstractTy) (Vector Ref) Ref

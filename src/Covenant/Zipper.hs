@@ -227,7 +227,7 @@ downStep zs@(ZipperState walkedOff g parentLevels currentLevel) =
                         Force r -> next . Tape [] r $ []
                         _ -> miss
                       AValNode _ info -> case info of
-                        App f args _ -> next . Tape [] (AnId f) . toList $ args
+                        App f args _ _ -> next . Tape [] (AnId f) . toList $ args
                         Thunk f -> next . Tape [] (AnId f) $ []
                         Cata _ arms x -> case arms of
                           NilV -> zs -- impossible

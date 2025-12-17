@@ -407,7 +407,7 @@ validateCompilationUnit' (CompilationUnit datatypes asg _) = do
         ForceInternal ref -> checkNode "force" $ force ref
       AValNode _ valInfo -> case valInfo of
         LitInternal aConstant -> checkNode "Lit" (lit aConstant)
-        AppInternal fId argRefs instTys -> checkNode "App" (app fId argRefs instTys)
+        AppInternal fId argRefs instTys _ -> checkNode "App" (app fId argRefs instTys)
         ThunkInternal i -> checkNode "Thunk" (thunk i)
         CataInternal t r1 r2 -> checkNode "Cata" (cata t r1 r2)
         DataConstructorInternal tn cn args -> checkNode "DataConstructor" (dataConstructor tn cn args)
@@ -838,7 +838,7 @@ decodeAConstant =
    Serializes as a sum type without named fields:
 
    {tag: "Lit", fields: [a]}
-   | {tag: "App", fields: [a,b]}
+   | {tag: "App", fields: [a,b,c,d]}
    | {tag: "Thunk",fields: [a]}
    | {tag: "Cata", fields: [a,b]}
    | {tag: "DataConstructor", fields: [a,b,c]}
@@ -850,12 +850,13 @@ decodeAConstant =
 encodeValNodeInfo :: ValNodeInfo -> Encoding
 encodeValNodeInfo = \case
   LitInternal aconst -> taggedFields "Lit" [encodeAConstant aconst]
-  AppInternal f args instTys ->
+  AppInternal f args instTys fTy ->
     taggedFields
       "App"
       [ encodeId f,
         list encodeRef . toList $ args,
-        list encodeInstTy . toList $ instTys
+        list encodeInstTy . toList $ instTys,
+        encodeCompT encodeAbstractTy fTy
       ]
   ThunkInternal f -> taggedFields "Thunk" [encodeId f]
   CataInternal t handlers r2 -> taggedFields "Cata" [encodeCompT encodeAbstractTy t, list encodeRef . toList $ handlers, encodeRef r2]
@@ -880,7 +881,8 @@ decodeValNodeInfo =
           f <- withIndex 0 decodeId fieldsArr
           args <- withIndex 1 (withArray "App args" (traverse decodeRef)) fieldsArr
           instTys <- withIndex 2 (withArray "App instTys" (traverse decodeInstTy)) fieldsArr
-          pure $ AppInternal f args instTys,
+          fTy <- withIndex 3 (decodeCompT decodeAbstractTy) fieldsArr
+          pure $ AppInternal f args instTys fTy,
       "Thunk" :=> withField0 (fmap ThunkInternal . decodeId),
       "Cata"
         :=> withFields

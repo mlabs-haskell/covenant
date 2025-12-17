@@ -244,6 +244,7 @@ import Covenant.Internal.Unification
       ),
     UnifyM,
     checkApp,
+    concretifyFT,
     fixUp,
     reconcile,
     runUnifyM,
@@ -261,8 +262,8 @@ import Covenant.Prim
     typeTwoArgFunc,
   )
 import Covenant.Type
-  ( CompT (Comp0, Comp1),
-    CompTBody (ReturnT, (:--:>)),
+  ( CompT (Comp0, Comp1, CompN),
+    CompTBody (ReturnT, (:--:>), ArgsAndResult), 
     Constructor,
     ConstructorName,
     DataDeclaration (OpaqueData),
@@ -486,13 +487,15 @@ pattern Lit c <- LitInternal c
 -- or
 -- * 'Data.Wedge.There', meaning \'a concrete type\'.
 --
--- @since 1.3.0
+-- The final CompT is the concretified function type, which is necessary for codegen.
+-- @since wip
 pattern App ::
   Id ->
   Vector Ref ->
   Vector (Wedge BoundTyVar (ValT Void)) ->
+  CompT AbstractTy ->
   ValNodeInfo
-pattern App f args instTys <- AppInternal f args instTys
+pattern App f args instTys concreteFnTy <- AppInternal f args instTys concreteFnTy
 
 -- | Wrap a computation into a value (essentially delaying it).
 --
@@ -624,7 +627,7 @@ arg scope index = do
   lookedUp <- asks (preview (#scopeInfo % #argumentInfo % ix scopeAsInt % _2 % ix indexAsInt))
   case lookedUp of
     Nothing -> throwError . NoSuchArgument scope $ index
-    Just t -> pure . UnsafeMkArg scope index $ t
+    Just t -> pure . UnsafeMkArg scope index . fixArgType scope $ t
 
 -- | Construct a node corresponding to the given Plutus primop.
 --
@@ -767,7 +770,14 @@ err = refTo AnError
 -- * \'Use this type variable in our scope\', specified as 'Data.Wedge.Here'.
 -- * \'Use this concrete type\', specified as 'Data.Wedge.There'.
 --
--- @since 1.2.0
+-- = IMPORTANT
+-- The *only* purpose of explicit type application arguments is to instantiate a tyvar in the result which is
+-- not determined by any argument. These variables are instantiated after every other argument has been concretified.
+--
+-- For example, if you have a function
+--   @f :: forall a b c. (a -> b) -> (b -> a) -> b -> Either a c@
+-- Then you will need to supply *ONE* explicit type application to concretify @c@.
+-- @since wip
 app ::
   forall (m :: Type -> Type).
   (MonadHashCons Id ASGNode m, MonadError CovenantTypeError m, MonadReader ASGEnv m) =>
@@ -789,16 +799,27 @@ app fId argRefs instTys = do
         if numInstantiations /= numVars
           then throwError $ WrongNumInstantiationsInApp renamedFT numVars numInstantiations
           else do
-            instantiatedFT <- instantiate subs renamedFT
             renamedArgs <- traverse renameArg argRefs
+            let concretifiedFT = concretifyFT renamedFT renamedArgs
+            instantiatedFT <- instantiate subs concretifiedFT
             tyDict <- asks (view #datatypeInfo)
             result <- either (throwError . UnificationError) pure $ checkApp tyDict instantiatedFT (Vector.toList renamedArgs)
             restored <- undoRenameM result
+            unRenamedFnTy <- undoRenameCompT instantiatedFT
             checkEncodingWithInfo tyDict restored
-            refTo . AValNode restored $ AppInternal fId argRefs instTys
+            refTo . AValNode restored $ AppInternal fId argRefs instTys unRenamedFnTy
     ValNodeType t -> throwError . ApplyToValType $ t
     ErrorNodeType -> throwError ApplyToError
   where
+    renameSubs :: [(Index "tyvar", ValT AbstractTy)] -> m [(Index "tyvar", ValT Renamed)]
+    renameSubs subs =
+      askScope >>= \scope -> case traverse (traverse (runRenameM scope . renameValT)) subs of
+        Left err' -> throwError $ FailedToRenameInstantiation err'
+        Right res -> pure res
+
+    -- NOTE: The helper function below only concerns instantiations that result from
+    --       explicit type applications (via the third argument to `app`).
+    --
     mkSubstitutions :: Vector (Wedge BoundTyVar (ValT Void)) -> [(Index "tyvar", ValT AbstractTy)]
     mkSubstitutions =
       Vector.ifoldl'
@@ -812,14 +833,7 @@ app fId argRefs instTys = do
         )
         []
 
-    renameSubs :: [(Index "tyvar", ValT AbstractTy)] -> m [(Index "tyvar", ValT Renamed)]
-    renameSubs subs =
-      askScope >>= \scope -> case traverse (traverse (runRenameM scope . renameValT)) subs of
-        Left err' -> throwError $ FailedToRenameInstantiation err'
-        Right res -> pure res
-
     instantiate :: [(Index "tyvar", ValT Renamed)] -> CompT Renamed -> m (CompT Renamed)
-    instantiate [] fn = pure fn
     instantiate subs fn = do
       instantiated <- liftUnifyM . fixUp $ foldr (\(i, t) f -> substitute i t f) (ThunkT fn) subs
       case instantiated of
@@ -1309,6 +1323,8 @@ checkEncodingWithInfo tyDict valT = case checkEncodingArgs (view (#originalDecl 
   Left encErr -> throwError $ EncodingError encErr
   Right {} -> pure ()
 
+-- Putting this here to reduce chance of annoying manual merge (will move later)
+
 -- | Given a DeBruijn index (designating scope) and positional index (designating
 -- which variable in that scope we are interested in), retrieve an in-scope type
 -- variable.
@@ -1352,6 +1368,17 @@ undoRenameM val = do
   case undoRename scope val of
     Left err' -> throwError $ UndoRenameFailure err'
     Right renamed -> pure renamed
+
+undoRenameCompT ::
+  forall (m :: Type -> Type).
+  (MonadError CovenantTypeError m, MonadReader ASGEnv m) =>
+  CompT Renamed ->
+  m (CompT AbstractTy)
+undoRenameCompT comp =
+  undoRenameM (ThunkT comp) >>= \case
+    ThunkT res -> pure res
+    -- This really should be impossible, not just unlikely.
+    _other -> error "Undoing renaming on a CompT resulting in something other than a thunk, which should be totally impossible"
 
 askScope ::
   forall (m :: Type -> Type).
@@ -1585,3 +1612,20 @@ getCataInfo t = case t of
         (S db') -> Abstraction (BoundAt db' i)
       Datatype tyName tyArgs -> Datatype tyName . fmap stepDown $ tyArgs
       x -> x
+
+fixArgType :: DeBruijn -> ValT AbstractTy -> ValT AbstractTy
+fixArgType distance = \case
+  Abstraction tyVar ->
+    let tyVar' = addDeBruijn distance tyVar
+     in Abstraction tyVar'
+  ThunkT (CompN cnt (ArgsAndResult args res)) ->
+    let args' = fmap (fixArgType distance) args
+        res' = fixArgType distance res
+     in ThunkT (CompN cnt (ArgsAndResult args' res'))
+  bi@(BuiltinFlat {}) -> bi
+  Datatype tn dtArgs -> Datatype tn $ fmap (fixArgType distance) dtArgs
+  where
+    addDeBruijn :: DeBruijn -> AbstractTy -> AbstractTy
+    addDeBruijn toAdd (BoundAt db indx) =
+      let db' = fromJust . preview asInt $ review asInt toAdd + review asInt db
+       in BoundAt db' indx

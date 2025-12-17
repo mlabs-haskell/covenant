@@ -122,6 +122,8 @@ data BBFError
 data DatatypeInfo (var :: Type)
   = DatatypeInfo
   { _originalDecl :: DataDeclaration var,
+    -- The second element of the tuple here is the BB form of the Base functor
+    -- (this is what we actually care about most of the time)
     _baseFunctorStuff :: Maybe (DataDeclaration var, ValT var),
     -- NOTE: The ONLY type that won't have a BB form is `Void` (or something isomorphic to it)
     _bbForm :: Maybe (ValT var),
