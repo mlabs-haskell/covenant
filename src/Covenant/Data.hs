@@ -29,6 +29,7 @@ module Covenant.Data
     allComponentTypes,
     mkBBF,
     noPhantomTyVars,
+    mkMatchFunTy,
 
     -- ** Lower-level
     mkBaseFunctor,
@@ -492,6 +493,102 @@ mkBBF' (DataDeclaration tn numVars ctors _)
                 dtArgs' <- traverse fixArg dtArgs
                 pure . Datatype tn' $ dtArgs'
           _ -> pure arg
+
+
+{- This constructs a function type for a "functionalized pattern match". We need this for code generation,
+   since one way or another we need to conjure up a function type to resolve representational polymorphism
+   issues.
+
+   For non-recursive types, all this really does is prepend the actual datatype as an argument to the BBF.
+   For recursive types, it constructs a variant of the BBF that does *NOT* replace direct recursive
+   child types with the `r` type variable, and also prepends the datatype as an argument.
+
+   Examples make this clearer:
+
+   ```
+     data Maybe a = Just a | Nothing
+
+     ==> forall a r. Maybe a -> r -> (a -> r) -> r
+
+     data List a = Nil | Cons a
+
+     ==> forall a r. List a -> r -> (a -> List a -> r) -> r
+   ```
+
+   This returns a `CompT` because that's actually what we need.
+
+-}
+mkMatchFunTy :: DataDeclaration AbstractTy -> ExceptT BBFError Maybe (CompT AbstractTy)
+mkMatchFunTy (OpaqueData tn ctorsSet) = do
+  let bbfFunArgs = map mkOpaqueFn (Set.toList ctorsSet)
+  case NEV.fromList bbfFunArgs of
+    Nothing -> error "No ctors for opaque. If this happens it means we didn't run the kind checker."
+    Just fn -> lift
+               . Just
+               . Comp1
+               . CompTBody
+               . NEV.cons (Datatype tn V.empty)
+               $ NEV.snoc fn (tyvar Z ix0)
+  where
+    -- `r` as it appears in the thunks
+    r :: ValT AbstractTy
+    r = Abstraction (BoundAt (S Z) ix0)
+    helper :: ValT AbstractTy -> ValT AbstractTy
+    helper arg = ThunkT . Comp0 $ arg :--:> ReturnT r
+    pList :: V.Vector (ValT AbstractTy) -> ValT AbstractTy
+    pList = Datatype "List"
+    pData :: ValT AbstractTy
+    pData = Datatype "Data" mempty
+    pPair :: ValT AbstractTy -> ValT AbstractTy -> ValT AbstractTy
+    pPair a b = Datatype "Pair" $ V.fromList [a, b]
+    mkOpaqueFn :: PlutusDataConstructor -> ValT AbstractTy
+    mkOpaqueFn = \case
+      PlutusI -> helper $ BuiltinFlat IntegerT
+      PlutusB -> helper $ BuiltinFlat ByteStringT
+      PlutusConstr ->
+        ThunkT . Comp0 $
+          BuiltinFlat IntegerT
+            :--:> pList (V.fromList [pData])
+            :--:> ReturnT r
+      PlutusList -> helper (pList (V.singleton pData))
+      PlutusMap -> helper (pList (V.singleton (pPair pData pData)))
+mkMatchFunTy (DataDeclaration tn numVars ctors _)
+  | V.null ctors = lift Nothing
+  | otherwise = do
+      ctors' <- traverse mkBBCtor ctors
+      lift $ CompT bbfCount
+             . CompTBody
+             . NEV.cons thisTyCon 
+             . flip NEV.snoc topLevelOut
+             <$> NEV.fromVector ctors'
+  where
+    topLevelOut = Abstraction $ BoundAt Z outIx
+
+    thisTyCon :: ValT AbstractTy
+    thisTyCon = Datatype tn tyConParams
+
+    tyConParams :: V.Vector (ValT AbstractTy)
+    tyConParams =
+      let varCount = review intCount numVars
+      in if varCount == 0
+         then mempty
+         else let maxVarIx = varCount - 1
+              in fmap (\i -> let vix = fromJust $ preview intIndex i
+                             in  Abstraction (BoundAt Z vix)) (V.fromList [0..maxVarIx])
+
+    outIx :: Index "tyvar"
+    outIx = fromJust . preview intIndex $ review intCount numVars
+
+    bbfCount = fromJust . preview intCount $ review intCount numVars + 1
+
+    mkBBCtor :: Constructor AbstractTy -> ExceptT BBFError Maybe (ValT AbstractTy)
+    mkBBCtor (Constructor _ args)
+      | V.null args = pure topLevelOut
+      | otherwise = do
+          let elimArgs = fmap incAbstractionDB  args
+          elimArgs' <- lift . NEV.fromVector $ elimArgs
+          let out = Abstraction $ BoundAt (S Z) outIx
+          pure . ThunkT . CompT count0 . CompTBody . flip NEV.snoc out $ elimArgs'
 
 {- Note (Sean, 14/05/25): Re  DeBruijn indices:
 
