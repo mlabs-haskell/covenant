@@ -494,7 +494,6 @@ mkBBF' (DataDeclaration tn numVars ctors _)
                 pure . Datatype tn' $ dtArgs'
           _ -> pure arg
 
-
 {- This constructs a function type for a "functionalized pattern match". We need this for code generation,
    since one way or another we need to conjure up a function type to resolve representational polymorphism
    issues.
@@ -523,12 +522,13 @@ mkMatchFunTy (OpaqueData tn ctorsSet) = do
   let bbfFunArgs = map mkOpaqueFn (Set.toList ctorsSet)
   case NEV.fromList bbfFunArgs of
     Nothing -> error "No ctors for opaque. If this happens it means we didn't run the kind checker."
-    Just fn -> lift
-               . Just
-               . Comp1
-               . CompTBody
-               . NEV.cons (Datatype tn V.empty)
-               $ NEV.snoc fn (tyvar Z ix0)
+    Just fn ->
+      lift
+        . Just
+        . Comp1
+        . CompTBody
+        . NEV.cons (Datatype tn V.empty)
+        $ NEV.snoc fn (tyvar Z ix0)
   where
     -- `r` as it appears in the thunks
     r :: ValT AbstractTy
@@ -556,11 +556,12 @@ mkMatchFunTy (DataDeclaration tn numVars ctors _)
   | V.null ctors = lift Nothing
   | otherwise = do
       ctors' <- traverse mkBBCtor ctors
-      lift $ CompT bbfCount
-             . CompTBody
-             . NEV.cons thisTyCon 
-             . flip NEV.snoc topLevelOut
-             <$> NEV.fromVector ctors'
+      lift $
+        CompT bbfCount
+          . CompTBody
+          . NEV.cons thisTyCon
+          . flip NEV.snoc topLevelOut
+          <$> NEV.fromVector ctors'
   where
     topLevelOut = Abstraction $ BoundAt Z outIx
 
@@ -570,11 +571,16 @@ mkMatchFunTy (DataDeclaration tn numVars ctors _)
     tyConParams :: V.Vector (ValT AbstractTy)
     tyConParams =
       let varCount = review intCount numVars
-      in if varCount == 0
-         then mempty
-         else let maxVarIx = varCount - 1
-              in fmap (\i -> let vix = fromJust $ preview intIndex i
-                             in  Abstraction (BoundAt Z vix)) (V.fromList [0..maxVarIx])
+       in if varCount == 0
+            then mempty
+            else
+              let maxVarIx = varCount - 1
+               in fmap
+                    ( \i ->
+                        let vix = fromJust $ preview intIndex i
+                         in Abstraction (BoundAt Z vix)
+                    )
+                    (V.fromList [0 .. maxVarIx])
 
     outIx :: Index "tyvar"
     outIx = fromJust . preview intIndex $ review intCount numVars
@@ -585,7 +591,7 @@ mkMatchFunTy (DataDeclaration tn numVars ctors _)
     mkBBCtor (Constructor _ args)
       | V.null args = pure topLevelOut
       | otherwise = do
-          let elimArgs = fmap incAbstractionDB  args
+          let elimArgs = fmap incAbstractionDB args
           elimArgs' <- lift . NEV.fromVector $ elimArgs
           let out = Abstraction $ BoundAt (S Z) outIx
           pure . ThunkT . CompT count0 . CompTBody . flip NEV.snoc out $ elimArgs'
