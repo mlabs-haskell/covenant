@@ -597,7 +597,6 @@ mkMatchFunTy (DataDeclaration tn numVars ctors _)
           let out = Abstraction $ BoundAt (S Z) outIx
           pure . ThunkT . CompT count0 . CompTBody . flip NEV.snoc out $ elimArgs'
 
-
 {- This constructs the "synthetic function type" for a catamorphism.
 
    That is, for
@@ -625,12 +624,12 @@ mkCataFunTy (OpaqueData tn ctorsSet) = do
     Nothing -> error "No ctors for opaque. If this happens it means we didn't run the kind checker."
     Just fn ->
       lift
-      . Just
-      . ThunkT
-      . Comp1
-      . CompTBody
-      . NEV.cons (Datatype tn mempty)
-      $ NEV.snoc fn (tyvar Z ix0)
+        . Just
+        . ThunkT
+        . Comp1
+        . CompTBody
+        . NEV.cons (Datatype tn mempty)
+        $ NEV.snoc fn (tyvar Z ix0)
   where
     -- `r` as it appears in the thunks
     r :: ValT AbstractTy
@@ -654,19 +653,19 @@ mkCataFunTy (OpaqueData tn ctorsSet) = do
             :--:> ReturnT r
       PlutusList -> helper (pList (V.singleton pData))
       PlutusMap -> helper (pList (V.singleton (pPair pData pData)))
+
 mkCataFnTy (DataDeclaration tn numVars ctors _)
   | V.null ctors = lift Nothing
   | otherwise = do
       ctors' <- traverse mkBBCtor ctors
       lift $
         ThunkT
-        . CompT bbfCount
-        . CompTBody
-        . flip NEV.snoc topLevelOut
-        . NEV.cons thisTyCon
-        <$> NEV.fromVector ctors'
+          . CompT bbfCount
+          . CompTBody
+          . flip NEV.snoc topLevelOut
+          . NEV.cons thisTyCon
+          <$> NEV.fromVector ctors'
   where
-
     thisTyCon :: ValT AbstractTy
     thisTyCon = Datatype tn tyConParams
 
