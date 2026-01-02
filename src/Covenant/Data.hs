@@ -653,8 +653,7 @@ mkCataFunTy (OpaqueData tn ctorsSet) = do
             :--:> ReturnT r
       PlutusList -> helper (pList (V.singleton pData))
       PlutusMap -> helper (pList (V.singleton (pPair pData pData)))
-
-mkCataFnTy (DataDeclaration tn numVars ctors _)
+mkCataFunTy (DataDeclaration tn numVars ctors _)
   | V.null ctors = lift Nothing
   | otherwise = do
       ctors' <- traverse mkBBCtor ctors

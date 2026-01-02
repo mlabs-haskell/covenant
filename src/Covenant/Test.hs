@@ -75,6 +75,10 @@ module Covenant.Test
     -- ** Exports for codegen tests
     concretifyMinimalBuilder,
     concretifyMegaTest,
+
+    -- FIXME: Don't have have to do this right
+    ValNodeInfo(..),
+    CompNodeInfo(..)
   )
 where
 
@@ -213,6 +217,7 @@ import Test.QuickCheck.GenT qualified as GT
 import Test.QuickCheck.Instances.Containers ()
 import Test.QuickCheck.Instances.Vector ()
 import Test.Tasty.HUnit (assertFailure)
+import Covenant.Internal.Term (CompNodeInfo(..), ValNodeInfo(..))
 
 -- | Wrapper for 'ValT' to provide an 'Arbitrary' instance to generate only
 -- value types without any type variables.
