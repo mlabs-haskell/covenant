@@ -22,6 +22,8 @@ extra-source-files:
 -- Common sections
 common lang
   ghc-options:
+    --  -Wmissing-export-lists
+    --  -Wmissing-import-lists
     -Wall
     -Wcompat
     -Wredundant-bang-patterns
@@ -30,8 +32,6 @@ common lang
     -Woperator-whitespace
     -Wambiguous-fields
     -Wmisplaced-pragmas
-   --  -Wmissing-export-lists
-   --  -Wmissing-import-lists
     -Wunused-imports
 
   default-extensions:
