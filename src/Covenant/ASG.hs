@@ -1204,7 +1204,6 @@ match scrutinee handlers = do
     ValNodeType other -> throwError $ MatchNonDatatypeScrutinee other
     other -> throwError $ MatchNonValTy other
   where
-
     isRecursive :: ValT AbstractTy -> m Bool
     isRecursive (Datatype tyName _) = do
       datatypeInfoExists <- asks (isJust . preview (#datatypeInfo % ix tyName))
@@ -1219,7 +1218,7 @@ match scrutinee handlers = do
       -- determines whether we're in this branch or the non-recursive one
       rawBFBB <- asks (snd . fromJust . join . preview (#datatypeInfo % ix tn % #baseFunctor))
       bfbb <- instantiateBFBB rawBFBB
-      handlerTypes <- Vector.toList <$> traverse renameArg  handlers
+      handlerTypes <- Vector.toList <$> traverse renameArg handlers
       tyDict <- asks (view #datatypeInfo)
       case checkApp tyDict bfbb handlerTypes of
         Right appliedBfbb -> do
@@ -1272,7 +1271,7 @@ match scrutinee handlers = do
                 pure (v,deThunkedTerm)
             | otherwise -> throwError $ MatchPolymorphicHandler hdlr
           other -> pure (other,r)
-    -} 
+    -}
     goNonRecursive :: TyName -> Vector (ValT AbstractTy) -> m Id
     goNonRecursive tn tyConArgs = do
       rawBBF <- asks (fromJust . preview (#datatypeInfo % ix tn % #bbForm))

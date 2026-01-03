@@ -1095,7 +1095,7 @@ concretifyMegaTest = lam topLevelTy body
     fPolyOneElim = lam fPolyOneElimTy $ do
       zero <- AnId <$> lit (AnInteger 0)
       maybeA <- AnArg <$> arg Z ix0
-      nothingHandler <-  do
+      nothingHandler <- do
         mConst <- monoConst
         b <- AnArg <$> arg Z ix2
         bToInt <- force . AnArg =<< arg Z ix3

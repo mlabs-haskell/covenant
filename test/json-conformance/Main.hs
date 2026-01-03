@@ -3,6 +3,7 @@
 module Main (main, writeAsgJSON) where
 
 import Control.Monad (void)
+import Control.Monad.Except (runExceptT)
 import Covenant.ASG
   ( ASG,
     ASGBuilder,
@@ -29,28 +30,19 @@ import Covenant.Constant
   )
 import Covenant.DeBruijn (DeBruijn (S, Z))
 import Covenant.Index (ix0, ix1)
-import Covenant.JSON (deserializeAndValidate_, compileAndSerialize, Version(..))
+import Covenant.JSON (Version (..), compileAndSerialize, deserializeAndValidate_)
 import Covenant.Prim (TwoArgFunc (AddInteger, EqualsInteger, SubtractInteger))
 import Covenant.Test
   ( conformanceDatatypes1,
     conformanceDatatypes2,
     unsafeMkDatatypeInfos,
   )
-import Covenant.Type
-  ( AbstractTy,
-    BuiltinFlatT (BoolT, IntegerT, StringT),
-    CompT (Comp0, Comp1),
-    CompTBody (ReturnT, (:--:>)),
-    ValT (BuiltinFlat, Datatype),
-    tyvar,
-  )
+import Covenant.Type (AbstractTy, BuiltinFlatT (BoolT, IntegerT, StringT), CompT (Comp0, Comp1), CompTBody (ReturnT, (:--:>)), DataDeclaration, ValT (BuiltinFlat, Datatype), tyvar)
 import Data.Either (isRight)
 import Data.Vector qualified as Vector
 import Data.Wedge (Wedge (There))
 import Test.Tasty (defaultMain, testGroup)
 import Test.Tasty.HUnit (assertBool, testCase)
-import Covenant.Type (DataDeclaration)
-import Control.Monad.Except (runExceptT)
 
 main :: IO ()
 main =
@@ -61,16 +53,22 @@ main =
       testCase "deserialize_2" (void $ deserializeAndValidate_ "./test/json-conformance/conformance_case_2.json")
     ]
 
-writeAsgJSON :: FilePath
-             -> [DataDeclaration AbstractTy]
-             -> Version
-             -> ASGBuilder a
-             -> IO ()
-writeAsgJSON path decls version asg = runExceptT (compileAndSerialize path decls asg version) >>= \case
-  Left erro -> error $ "Could not write ASG to " <> show path
-                      <> "\n Reason: Compilation Failed"
-                      <> "\n Error: " <> show erro
-  Right () -> print $ "Wrote asg to: " <> show path
+writeAsgJSON ::
+  FilePath ->
+  [DataDeclaration AbstractTy] ->
+  Version ->
+  ASGBuilder a ->
+  IO ()
+writeAsgJSON path decls version asg =
+  runExceptT (compileAndSerialize path decls asg version) >>= \case
+    Left erro ->
+      error $
+        "Could not write ASG to "
+          <> show path
+          <> "\n Reason: Compilation Failed"
+          <> "\n Error: "
+          <> show erro
+    Right () -> print $ "Wrote asg to: " <> show path
 
 {- Case 1:
 
@@ -138,7 +136,7 @@ conformance_body1_builder = lam topLevelTy body
       AnId <$> match maybeIntPair [nothingHandler', AnId justHandler']
 
     nothingHandler :: ASGBuilder Ref
-    nothingHandler =  do
+    nothingHandler = do
       errMsg <- AnId <$> lit (AString "Input is nothing")
       AnId <$> ctor "Result" "Exception" (Vector.singleton errMsg) [There (BuiltinFlat IntegerT)]
 

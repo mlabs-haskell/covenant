@@ -851,7 +851,7 @@ maybeToList :: TestTree
 maybeToList = runIntroFormTest "maybeToList" maybeToListTy $ do
   thonk <- lazyLam maybeToListCompTy $ do
     let justHandlerTy = Comp0 $ tyvar (S Z) ix0 :--:> ReturnT (dtype "List" [tyvar (S Z) ix0])
-    nothingHandler <-  do
+    nothingHandler <- do
       tvA <- boundTyVar Z ix0
       AnId <$> ctor "List" "Nil" mempty (Vector.singleton (Here tvA))
     justHandler <- lazyLam justHandlerTy $ do
