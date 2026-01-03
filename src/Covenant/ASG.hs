@@ -125,7 +125,7 @@ import Control.Monad.Reader
 import Covenant.Constant (AConstant, typeConstant)
 import Covenant.Data (DatatypeInfo, mkDatatypeInfo, primBaseFunctorInfos)
 import Covenant.DeBruijn (DeBruijn (S, Z), asInt)
-import Covenant.Index (Count, Index, count0, intCount, intIndex, ix0, wordCount)
+import Covenant.Index (Count, Index, intCount, intIndex, ix0, wordCount)
 import Covenant.Internal.KindCheck (EncodingArgErr (EncodingArgMismatch), checkEncodingArgs)
 import Covenant.Internal.Ledger (ledgerTypes)
 import Covenant.Internal.Rename
@@ -1154,9 +1154,11 @@ cata algT handlers rVal =
 -- and the second argument is a 'Vector' of \'handlers\' for each possible
 -- \'arm\' of the type of the value to be matched on.
 --
--- All handlers must be thunks, and must all return the same (concrete) result.
--- Polymorphic \'handlers\' (that is, thunks whose computation binds type
--- variables of its own) will fail to compile.
+-- Handlers for non-nullary constructors must be thunks. Handlers for
+-- nullary constructors must NOT be thunks (consistent with Cata).
+-- All return the same (concrete) result type.
+-- Polymorphic \'handlers\' (that is, thunks with computation types that bind type
+-- variables, i.e. thunks with an underlying CompT that is NOT a Comp0) will fail to compile.
 --
 -- = Note
 --
@@ -1202,6 +1204,7 @@ match scrutinee handlers = do
     ValNodeType other -> throwError $ MatchNonDatatypeScrutinee other
     other -> throwError $ MatchNonValTy other
   where
+
     isRecursive :: ValT AbstractTy -> m Bool
     isRecursive (Datatype tyName _) = do
       datatypeInfoExists <- asks (isJust . preview (#datatypeInfo % ix tyName))
@@ -1216,9 +1219,9 @@ match scrutinee handlers = do
       -- determines whether we're in this branch or the non-recursive one
       rawBFBB <- asks (snd . fromJust . join . preview (#datatypeInfo % ix tn % #baseFunctor))
       bfbb <- instantiateBFBB rawBFBB
-      handlers' <- Vector.toList <$> traverse cleanupHandler handlers
+      handlerTypes <- Vector.toList <$> traverse renameArg  handlers
       tyDict <- asks (view #datatypeInfo)
-      case checkApp tyDict bfbb (Just <$> handlers') of
+      case checkApp tyDict bfbb handlerTypes of
         Right appliedBfbb -> do
           result <- undoRenameM appliedBfbb
           refTo $ AValNode result (MatchInternal scrutinee handlers)
@@ -1255,26 +1258,28 @@ match scrutinee handlers = do
           case subbed of
             ThunkT bfComp -> pure bfComp
             other -> throwError $ MatchNonThunkBBF other
-
+    {-
     -- Unwraps a thunk handler if it is a handler for a nullary constructor.
-    cleanupHandler :: Ref -> m (ValT Renamed)
+    cleanupHandler :: Ref -> m (ValT Renamed, Ref)
     cleanupHandler r =
       renameArg r >>= \case
         Nothing ->
           throwError $ MatchErrorAsHandler r
         Just hVal -> case hVal of
           hdlr@(ThunkT (CompT cnt (ReturnT v)))
-            | cnt == count0 -> pure v
+            | cnt == count0 -> do
+                deThunkedTerm <- AnId <$> force r
+                pure (v,deThunkedTerm)
             | otherwise -> throwError $ MatchPolymorphicHandler hdlr
-          other -> pure other
-
+          other -> pure (other,r)
+    -} 
     goNonRecursive :: TyName -> Vector (ValT AbstractTy) -> m Id
     goNonRecursive tn tyConArgs = do
       rawBBF <- asks (fromJust . preview (#datatypeInfo % ix tn % #bbForm))
       (instantiatedBBF :: CompT Renamed) <- instantiateBB rawBBF tyConArgs
-      handlers' <- Vector.toList <$> traverse cleanupHandler handlers
       tyDict <- asks (view #datatypeInfo)
-      case checkApp tyDict instantiatedBBF (Just <$> handlers') of
+      handlerTypes <- Vector.toList <$> traverse renameArg handlers
+      case checkApp tyDict instantiatedBBF handlerTypes of
         Right appliedBBF -> do
           result <- undoRenameM appliedBBF
           refTo $ AValNode result (MatchInternal scrutinee handlers)

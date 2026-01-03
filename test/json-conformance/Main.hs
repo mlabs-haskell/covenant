@@ -1,6 +1,6 @@
 {-# LANGUAGE OverloadedLists #-}
 
-module Main (main) where
+module Main (main, writeAsgJSON) where
 
 import Control.Monad (void)
 import Covenant.ASG
@@ -29,7 +29,7 @@ import Covenant.Constant
   )
 import Covenant.DeBruijn (DeBruijn (S, Z))
 import Covenant.Index (ix0, ix1)
-import Covenant.JSON (deserializeAndValidate_)
+import Covenant.JSON (deserializeAndValidate_, compileAndSerialize, Version(..))
 import Covenant.Prim (TwoArgFunc (AddInteger, EqualsInteger, SubtractInteger))
 import Covenant.Test
   ( conformanceDatatypes1,
@@ -49,6 +49,8 @@ import Data.Vector qualified as Vector
 import Data.Wedge (Wedge (There))
 import Test.Tasty (defaultMain, testGroup)
 import Test.Tasty.HUnit (assertBool, testCase)
+import Covenant.Type (DataDeclaration)
+import Control.Monad.Except (runExceptT)
 
 main :: IO ()
 main =
@@ -58,6 +60,17 @@ main =
       testCase "deserialize_1" (void $ deserializeAndValidate_ "./test/json-conformance/conformance_case_1.json"),
       testCase "deserialize_2" (void $ deserializeAndValidate_ "./test/json-conformance/conformance_case_2.json")
     ]
+
+writeAsgJSON :: FilePath
+             -> [DataDeclaration AbstractTy]
+             -> Version
+             -> ASGBuilder a
+             -> IO ()
+writeAsgJSON path decls version asg = runExceptT (compileAndSerialize path decls asg version) >>= \case
+  Left erro -> error $ "Could not write ASG to " <> show path
+                      <> "\n Reason: Compilation Failed"
+                      <> "\n Error: " <> show erro
+  Right () -> print $ "Wrote asg to: " <> show path
 
 {- Case 1:
 
@@ -122,15 +135,12 @@ conformance_body1_builder = lam topLevelTy body
       maybeIntPair <- AnArg <$> arg Z ix0
       nothingHandler' <- nothingHandler
       justHandler' <- justHandler
-      AnId <$> match maybeIntPair [AnId nothingHandler', AnId justHandler']
+      AnId <$> match maybeIntPair [nothingHandler', AnId justHandler']
 
-    nothingHandler :: ASGBuilder Id
-    nothingHandler = lazyLam nothingHandlerT $ do
+    nothingHandler :: ASGBuilder Ref
+    nothingHandler =  do
       errMsg <- AnId <$> lit (AString "Input is nothing")
       AnId <$> ctor "Result" "Exception" (Vector.singleton errMsg) [There (BuiltinFlat IntegerT)]
-      where
-        nothingHandlerT :: CompT AbstractTy
-        nothingHandlerT = Comp0 $ ReturnT resultT
 
     justHandler :: ASGBuilder Id
     justHandler = lazyLam justHandlerT $ do
@@ -248,13 +258,10 @@ conformance_body2_builder = lam topLevelTy body
       g' <- g
       nothingHandler' <- nothingHandler
       justHandler' <- justHandler g'
-      AnId <$> match maybeIntFooPair [AnId nothingHandler', AnId justHandler']
+      AnId <$> match maybeIntFooPair [nothingHandler', AnId justHandler']
 
-    nothingHandler :: ASGBuilder Id
-    nothingHandler = lazyLam nothingHandlerT (AnId <$> err)
-      where
-        nothingHandlerT :: CompT AbstractTy
-        nothingHandlerT = Comp0 $ ReturnT maybeBoolT
+    nothingHandler :: ASGBuilder Ref
+    nothingHandler = AnId <$> err
 
     justHandler :: Id -> ASGBuilder Id
     justHandler gx = lazyLam justHandlerTy $ do

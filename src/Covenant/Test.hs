@@ -1033,8 +1033,7 @@ concretifyMinimalBuilder = lam topLevelTy body
     fPolyOneElimMinimal :: ASGBuilder Id
     fPolyOneElimMinimal = lam fPolyOneElimTy $ do
       maybeA <- AnArg <$> arg Z ix0
-      nothingHandler <- lazyLam (Comp0 $ ReturnT intT) $ do
-        AnId <$> lit (AnInteger 0)
+      nothingHandler <- lit (AnInteger 0)
       justHandler <- lazyLam (Comp0 $ tyvar (S Z) ix0 :--:> ReturnT intT) $ do
         AnId <$> lit (AnInteger 0)
       AnId <$> match maybeA [AnId justHandler, AnId nothingHandler]
@@ -1096,17 +1095,17 @@ concretifyMegaTest = lam topLevelTy body
     fPolyOneElim = lam fPolyOneElimTy $ do
       zero <- AnId <$> lit (AnInteger 0)
       maybeA <- AnArg <$> arg Z ix0
-      nothingHandler <- lazyLam (Comp0 $ ReturnT intT) $ do
+      nothingHandler <-  do
         mConst <- monoConst
-        b <- AnArg <$> arg (S Z) ix2
-        bToInt <- force . AnArg =<< arg (S Z) ix3
+        b <- AnArg <$> arg Z ix2
+        bToInt <- force . AnArg =<< arg Z ix3
         x <- AnId <$> app' bToInt [b]
         AnId <$> app' mConst [zero, x]
       justHandler <- lazyLam (Comp0 $ tyvar (S Z) ix0 :--:> ReturnT intT) $ do
         aToInt <- force . AnArg =<< arg (S Z) ix1
         a <- AnArg <$> arg Z ix0
         AnId <$> app' aToInt [a]
-      AnId <$> match maybeA [AnId justHandler, AnId nothingHandler] -- ,AnId justHandler]
+      AnId <$> match maybeA [AnId justHandler, nothingHandler] -- ,AnId justHandler]
       where
         fPolyOneElimTy :: CompT AbstractTy
         fPolyOneElimTy =

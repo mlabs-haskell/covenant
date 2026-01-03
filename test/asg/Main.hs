@@ -817,9 +817,9 @@ matchMaybe :: TestTree
 matchMaybe = runIntroFormTest "matchMaybe" (BuiltinFlat IntegerT) $ do
   unit <- AnId <$> lit AUnit
   scrutinee <- ctor' "Maybe" "Just" (Vector.singleton unit)
-  nothingHandler <- lazyLam (Comp0 $ ReturnT (BuiltinFlat IntegerT)) (AnId <$> lit (AnInteger 0))
+  nothingHandler <- AnId <$> lit (AnInteger 0)
   justHandler <- lazyLam (Comp0 $ BuiltinFlat UnitT :--:> ReturnT (BuiltinFlat IntegerT)) (AnId <$> lit (AnInteger 1))
-  result <- match (AnId scrutinee) (AnId <$> Vector.fromList [justHandler, nothingHandler])
+  result <- match (AnId scrutinee) (Vector.fromList [AnId justHandler, nothingHandler])
   typeIdTest result
 
 {- Construct a pattern match on 'List Unit' that returns an integer.
@@ -831,15 +831,14 @@ matchList = runIntroFormTest "matchList" (BuiltinFlat IntegerT) $ do
   unit <- AnId <$> lit AUnit
   nilUnit <- ctor "List" "Nil" mempty (Vector.singleton $ There (BuiltinFlat UnitT))
   scrutinee <- ctor' "List" "Cons" (Vector.fromList [unit, AnId nilUnit])
-  let nilHandlerTy = Comp0 $ ReturnT (BuiltinFlat IntegerT)
-      consHandlerTy =
+  let consHandlerTy =
         Comp0 $
           BuiltinFlat UnitT
             :--:> Datatype "#List" (Vector.fromList [BuiltinFlat UnitT, Datatype "List" (Vector.singleton $ BuiltinFlat UnitT)])
             :--:> ReturnT (BuiltinFlat IntegerT)
-  nilHandler <- lazyLam nilHandlerTy (AnId <$> lit (AnInteger 0))
+  nilHandler <- AnId <$> lit (AnInteger 0)
   consHandler <- lazyLam consHandlerTy (AnId <$> lit (AnInteger 0))
-  result <- match (AnId scrutinee) (AnId <$> Vector.fromList [nilHandler, consHandler])
+  result <- match (AnId scrutinee) (Vector.fromList [nilHandler, AnId consHandler])
   typeIdTest result
 
 {- This differs from the two above tests in that we're using pattern matching to construct the
@@ -851,10 +850,9 @@ matchList = runIntroFormTest "matchList" (BuiltinFlat IntegerT) $ do
 maybeToList :: TestTree
 maybeToList = runIntroFormTest "maybeToList" maybeToListTy $ do
   thonk <- lazyLam maybeToListCompTy $ do
-    let nothingHandlerTy = Comp0 $ ReturnT (dtype "List" [tyvar (S Z) ix0])
-        justHandlerTy = Comp0 $ tyvar (S Z) ix0 :--:> ReturnT (dtype "List" [tyvar (S Z) ix0])
-    nothingHandler <- lazyLam nothingHandlerTy $ do
-      tvA <- boundTyVar (S Z) ix0
+    let justHandlerTy = Comp0 $ tyvar (S Z) ix0 :--:> ReturnT (dtype "List" [tyvar (S Z) ix0])
+    nothingHandler <-  do
+      tvA <- boundTyVar Z ix0
       AnId <$> ctor "List" "Nil" mempty (Vector.singleton (Here tvA))
     justHandler <- lazyLam justHandlerTy $ do
       tvA <- boundTyVar (S Z) ix0
@@ -862,7 +860,7 @@ maybeToList = runIntroFormTest "maybeToList" maybeToListTy $ do
       nil <- AnId <$> ctor "List" "Nil" mempty (Vector.singleton (Here tvA))
       AnId <$> ctor "List" "Cons" (Vector.fromList [vA, nil]) Vector.empty
     scrutinee <- AnArg <$> arg Z ix0
-    AnId <$> match scrutinee (AnId <$> Vector.fromList [justHandler, nothingHandler])
+    AnId <$> match scrutinee (Vector.fromList [AnId justHandler, nothingHandler])
   typeIdTest thonk
   where
     maybeToListCompTy :: CompT AbstractTy
@@ -880,9 +878,8 @@ maybeToList = runIntroFormTest "maybeToList" maybeToListTy $ do
 unifyOpaque :: TestTree
 unifyOpaque = runIntroFormTest "unifyOpaque" unifyOpaqueTy $ do
   thonk <- lazyLam unifyOpaqueCompTy $ do
-    let nothingHandlerTy = Comp0 $ ReturnT (BuiltinFlat IntegerT)
-        justHandlerTy = Comp0 $ dtype "Foo" [] :--:> ReturnT (BuiltinFlat IntegerT)
-    nothingHandler <- lazyLam nothingHandlerTy (AnId <$> lit (AnInteger 0))
+    let justHandlerTy = Comp0 $ dtype "Foo" [] :--:> ReturnT (BuiltinFlat IntegerT)
+    nothingHandler <- lit (AnInteger 0)
     justHandler <- lazyLam justHandlerTy (AnId <$> lit (AnInteger 1))
     scrutinee <- AnArg <$> arg Z ix0
     AnId <$> match scrutinee (AnId <$> Vector.fromList [justHandler, nothingHandler])
