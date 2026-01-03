@@ -37,7 +37,7 @@ module Covenant.JSON
     deserializeAndValidate_,
 
     -- * HOW DID WE NOT EXPORT THIS
-    CompilationUnit(..)
+    CompilationUnit (..),
   )
 where
 
