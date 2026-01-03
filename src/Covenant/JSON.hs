@@ -18,7 +18,7 @@
 -- Is encoded to JSON using @{tag: \<CTOR NAME\>, fields: [\<Arg1\>, \<Arg2\>, \<ArgN\>]}@
 --
 -- This is used for all Haskell sum types which do /not/ have 'LabelOptic'
--- instnaces. For those with field names given by such instances, the @fields@
+-- instances. For those with field names given by such instances, the @fields@
 -- part of the encoded sum is not an array of arguments, but instead a JSON
 -- object, with fields whose names correspond to the label optics. Comments make
 -- it clear which types are encoded in which way.
@@ -35,6 +35,9 @@ module Covenant.JSON
     DeserializeErr (..),
     deserializeAndValidate,
     deserializeAndValidate_,
+
+    -- * HOW DID WE NOT EXPORT THIS
+    CompilationUnit(..)
   )
 where
 
