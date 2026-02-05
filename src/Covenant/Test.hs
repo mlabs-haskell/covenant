@@ -71,6 +71,7 @@ module Covenant.Test
     typeIdTest,
     Arg (UnsafeMkArg),
     Id (UnsafeMkId),
+    BoundTyVar(BoundTyVar),
 
     -- ** Exports for codegen tests
     concretifyMinimalBuilder,
@@ -138,7 +139,9 @@ import Covenant.Internal.Strategy
     PlutusDataConstructor (PlutusB, PlutusI),
     PlutusDataStrategy (ConstrData),
   )
-import Covenant.Internal.Term (ASGNodeType (CompNodeType, ValNodeType), Arg (UnsafeMkArg), CompNodeInfo (..), Id (UnsafeMkId), ValNodeInfo (..), typeId)
+import Covenant.Internal.Term (ASGNodeType (CompNodeType, ValNodeType),
+                               Arg (UnsafeMkArg), CompNodeInfo (..),
+                               Id (UnsafeMkId), ValNodeInfo (..), typeId, BoundTyVar(BoundTyVar))
 import Covenant.Internal.Type
   ( AbstractTy (BoundAt),
     BuiltinFlatT
