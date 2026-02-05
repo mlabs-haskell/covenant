@@ -35,6 +35,7 @@ module Covenant.JSON
     DeserializeErr (..),
     deserializeAndValidate,
     deserializeAndValidate_,
+    deserializeCompilationUnit,
 
     -- * HOW DID WE NOT EXPORT THIS
     CompilationUnit (..),
@@ -354,6 +355,14 @@ deserializeAndValidate path = do
     Left err' -> throwError . ASGValidationFail $ err'
     Right asg -> pure asg
 
+deserializeCompilationUnit ::
+  FilePath ->
+  IO CompilationUnit 
+deserializeCompilationUnit path = either (throwIO . userError . show) pure =<< (runExceptT $ do
+  rawCU@(CompilationUnit datatypes _ version) <- readJSON @CompilationUnit path
+  case validateCompilationUnit rawCU of
+    Left err' -> throwError . ASGValidationFail $ err'
+    Right (ASG asg) -> pure $ CompilationUnit datatypes asg version)
 -- | Like 'deserializeAndValidate' but runs directly in 'IO'.
 --
 -- = Note
