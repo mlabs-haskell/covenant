@@ -79,7 +79,7 @@ module Covenant.Test
     -- FIXME: Don't have have to do this right
     ValNodeInfo (..),
     CompNodeInfo (..),
-    ledgerTypes
+    ledgerTypes,
   )
 where
 
@@ -118,13 +118,13 @@ import Covenant.Internal.KindCheck
 import Covenant.Internal.Ledger
   ( CtorBuilder (Ctor),
     DeclBuilder (Decl),
+    ledgerTypes,
     list,
     maybeT,
     mkDecl,
     pair,
     tree,
     weirderList,
-    ledgerTypes
   )
 import Covenant.Internal.PrettyPrint (ScopeBoundary)
 import Covenant.Internal.Rename
