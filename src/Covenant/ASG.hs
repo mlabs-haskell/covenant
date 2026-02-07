@@ -1198,9 +1198,12 @@ match scrutinee handlers = do
   scrutNodeTy <- typeRef scrutinee
   case scrutNodeTy of
     ValNodeType scrutTy@(Datatype tn args) ->
+      goNonRecursive tn args
+      {-
       isRecursive scrutTy >>= \case
         True -> goRecursive tn args
         False -> goNonRecursive tn args
+      -}
     ValNodeType other -> throwError $ MatchNonDatatypeScrutinee other
     other -> throwError $ MatchNonValTy other
   where
