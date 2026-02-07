@@ -1198,12 +1198,9 @@ match scrutinee handlers = do
   scrutNodeTy <- typeRef scrutinee
   case scrutNodeTy of
     ValNodeType scrutTy@(Datatype tn args) ->
-      goNonRecursive tn args
-      {-
       isRecursive scrutTy >>= \case
         True -> goRecursive tn args
         False -> goNonRecursive tn args
-      -}
     ValNodeType other -> throwError $ MatchNonDatatypeScrutinee other
     other -> throwError $ MatchNonValTy other
   where
@@ -1243,14 +1240,16 @@ match scrutinee handlers = do
             Left err' -> throwError $ MatchRenameBBFail err'
             Right res -> pure res
           -- The type constructor for the base-functor variant of the scrutinee type.
+          -- so like `List a`
           let scrut = Datatype tn tyConArgs
+          -- `ListF a (List a)` -- but is that reaallly what we want? I don't think so -_-
           let scrutF = Datatype (TyName $ "#" <> rawTn) (Vector.snoc tyConArgs scrut)
           -- These are arguments to the original type constructor plus the snoc'd original type.
           -- E.g. if we have:
           --      Scrutinee: List Int
           --   this should be:
           --   [Int, List Int]
-          let bfInstArgs = Vector.snoc tyConArgs scrutF
+          let bfInstArgs = Vector.snoc tyConArgs scrut
           renamedArgs <- case runRenameM scope (traverse renameValT bfInstArgs) of
             Left err' -> throwError $ MatchRenameTyConArgFail err'
             Right res -> pure res
