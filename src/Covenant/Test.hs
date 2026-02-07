@@ -79,6 +79,7 @@ module Covenant.Test
     -- FIXME: Don't have have to do this right
     ValNodeInfo (..),
     CompNodeInfo (..),
+    ledgerTypes
   )
 where
 
@@ -123,6 +124,7 @@ import Covenant.Internal.Ledger
     pair,
     tree,
     weirderList,
+    ledgerTypes
   )
 import Covenant.Internal.PrettyPrint (ScopeBoundary)
 import Covenant.Internal.Rename
