@@ -85,9 +85,10 @@ import Covenant.Internal.KindCheck (checkDataDecls)
 import Covenant.Internal.Strategy
   ( InternalStrategy
       ( InternalAssocMapStrat,
+        InternalDataStrat,
         InternalListStrat,
         InternalOpaqueStrat,
-        InternalPairStrat, InternalDataStrat
+        InternalPairStrat
       ),
   )
 import Covenant.Internal.Term
