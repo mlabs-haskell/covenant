@@ -87,7 +87,7 @@ import Covenant.Internal.Strategy
       ( InternalAssocMapStrat,
         InternalListStrat,
         InternalOpaqueStrat,
-        InternalPairStrat
+        InternalPairStrat, InternalDataStrat
       ),
   )
 import Covenant.Internal.Term
@@ -647,7 +647,8 @@ decodeInternalStrategy =
     [ "InternalListStrat" :=> constM InternalListStrat,
       "InternalPairStrat" :=> constM InternalPairStrat,
       "InternalAssocMapStrat" :=> constM InternalAssocMapStrat,
-      "InternalOpaqueStrat" :=> constM InternalOpaqueStrat
+      "InternalOpaqueStrat" :=> constM InternalOpaqueStrat,
+      "InternalDataStrat" :=> constM InternalDataStrat
     ]
 
 {- PlutusDataConstructor encodes as a typical enumeration type:

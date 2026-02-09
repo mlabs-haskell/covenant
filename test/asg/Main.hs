@@ -834,7 +834,7 @@ matchList = runIntroFormTest "matchList" (BuiltinFlat IntegerT) $ do
   let consHandlerTy =
         Comp0 $
           BuiltinFlat UnitT
-            :--:> Datatype "#List" (Vector.fromList [BuiltinFlat UnitT, Datatype "List" (Vector.singleton $ BuiltinFlat UnitT)])
+            :--:> Datatype "List" (Vector.singleton $ BuiltinFlat UnitT)
             :--:> ReturnT (BuiltinFlat IntegerT)
   nilHandler <- AnId <$> lit (AnInteger 0)
   consHandler <- lazyLam consHandlerTy (AnId <$> lit (AnInteger 0))

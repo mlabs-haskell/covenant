@@ -1213,7 +1213,7 @@ match scrutinee handlers = do
     isRecursive _ = pure False
 
     goRecursive :: TyName -> Vector (ValT AbstractTy) -> m Id
-    goRecursive tn@(TyName rawTn) tyConArgs = do
+    goRecursive tn tyConArgs = do
       -- This fromJust is safe b/c the presence of absence of base functor data is the condition that
       -- determines whether we're in this branch or the non-recursive one
       rawBFBB <- asks (snd . fromJust . join . preview (#datatypeInfo % ix tn % #baseFunctor))
@@ -1242,8 +1242,6 @@ match scrutinee handlers = do
           -- The type constructor for the base-functor variant of the scrutinee type.
           -- so like `List a`
           let scrut = Datatype tn tyConArgs
-          -- `ListF a (List a)` -- but is that reaallly what we want? I don't think so -_-
-          let scrutF = Datatype (TyName $ "#" <> rawTn) (Vector.snoc tyConArgs scrut)
           -- These are arguments to the original type constructor plus the snoc'd original type.
           -- E.g. if we have:
           --      Scrutinee: List Int
