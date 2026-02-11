@@ -74,7 +74,7 @@ import Covenant.Prim
     typeThreeArgFunc,
     typeTwoArgFunc,
   )
-import Covenant.Test
+import Covenant.Unsafe
   ( Concrete (Concrete),
     DebugASGBuilder,
     concretifyMegaTest,

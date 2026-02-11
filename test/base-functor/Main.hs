@@ -6,7 +6,7 @@ import Covenant.Data
     hasRecursive,
     mkBaseFunctor,
   )
-import Covenant.Test
+import Covenant.Unsafe
   ( DataDeclFlavor (Poly1PolyThunks),
     DataDeclSet (DataDeclSet),
     prettyDeclSet,

@@ -55,6 +55,8 @@ module Covenant.Type
         PlutusMap
       ),
     DataDeclaration (DataDeclaration, OpaqueData),
+    InternalStrategy(InternalListStrat,
+                     InternalPairStrat, InternalDataStrat, InternalAssocMapStrat, InternalOpaqueStrat)
   )
 where
 
@@ -83,7 +85,7 @@ import Covenant.Internal.Strategy
         EnumData,
         NewtypeData,
         ProductListData
-      ),
+      ), InternalStrategy (InternalListStrat, InternalPairStrat, InternalAssocMapStrat, InternalDataStrat, InternalOpaqueStrat),
   )
 import Covenant.Internal.Type
   ( AbstractTy (BoundAt),

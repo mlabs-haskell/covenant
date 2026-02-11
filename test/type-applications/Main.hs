@@ -18,7 +18,7 @@ import Covenant.Index
     ix1,
     ix2,
   )
-import Covenant.Test
+import Covenant.Unsafe
   ( Concrete (Concrete),
     checkApp,
     failLeft,

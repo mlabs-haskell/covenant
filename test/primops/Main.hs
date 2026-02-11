@@ -29,7 +29,7 @@ import Covenant.Prim
     typeThreeArgFunc,
     typeTwoArgFunc,
   )
-import Covenant.Test
+import Covenant.Unsafe
   ( checkApp,
     renameCompT,
     renameValT,

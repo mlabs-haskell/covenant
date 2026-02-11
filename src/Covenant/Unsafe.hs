@@ -5,20 +5,20 @@
 {- HLINT ignore "Use camelCase" -}
 
 -- |
--- Module: Covenant.Test
+-- Module: Covenant.Unsafe
 -- Copyright: (C) MLabs 2025
 -- License: Apache 2.0
 -- Maintainer: koz@mlabs.city, sean@mlabs.city
 --
--- Various utilities designed to help test Covenant.
+-- Various utilities for unsafe ASG construction and manipulation.
 --
 -- = Note
 --
--- This is probably not that useful to end users of Covenant, but needs to be
--- exposed so the tests can use this functionality.
---
--- @since 1.0.0
-module Covenant.Test
+-- This is probably not that useful to end users of Covenant, who should use the
+-- safe APIs if possible. This is, however, necessary for the c2uplc code generator,
+-- which must manipulate the ASG.
+-- @since wip 
+module Covenant.Unsafe
   ( -- * QuickCheck data wrappers
     Concrete (Concrete),
     DataDeclFlavor (ConcreteDecl, ConcreteNestedDecl, SimpleRecursive, Poly1, Poly1PolyThunks),
@@ -76,7 +76,7 @@ module Covenant.Test
     -- ** Exports for codegen tests
     concretifyMinimalBuilder,
     concretifyMegaTest,
-    -- FIXME: Don't have have to do this right
+    -- For code generator
     ValNodeInfo (..),
     CompNodeInfo (..),
     ledgerTypes,

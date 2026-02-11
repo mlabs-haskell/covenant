@@ -8,7 +8,7 @@ import Covenant.Index
   ( ix0,
     ix1,
   )
-import Covenant.Test
+import Covenant.Unsafe
   ( Concrete (Concrete),
     RenameError (InvalidAbstractionReference),
     renameCompT,

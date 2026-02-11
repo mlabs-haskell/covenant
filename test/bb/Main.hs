@@ -9,7 +9,7 @@ import Covenant.Data
   )
 import Covenant.DeBruijn (DeBruijn (S, Z))
 import Covenant.Index (ix0, ix1)
-import Covenant.Test
+import Covenant.Unsafe
   ( DataDeclFlavor (Poly1PolyThunks),
     DataDeclSet (DataDeclSet),
     failLeft,

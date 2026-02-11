@@ -4,7 +4,7 @@ import Covenant.ASG (defaultDatatypes)
 import Covenant.Data ()
 import Covenant.DeBruijn (DeBruijn (Z))
 import Covenant.Index (count0, count1, ix0)
-import Covenant.Test
+import Covenant.Unsafe
   ( checkDataDecls,
     checkEncodingArgs,
     cycleCheck,

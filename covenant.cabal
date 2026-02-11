@@ -110,7 +110,7 @@ library
     Covenant.Index
     Covenant.JSON
     Covenant.Prim
-    Covenant.Test
+    Covenant.Unsafe
     Covenant.Type
     Covenant.Util
     Covenant.Zipper
