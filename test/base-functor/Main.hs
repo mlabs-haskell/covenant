@@ -6,12 +6,12 @@ import Covenant.Data
     hasRecursive,
     mkBaseFunctor,
   )
+import Covenant.Type ()
 import Covenant.Unsafe
   ( DataDeclFlavor (Poly1PolyThunks),
     DataDeclSet (DataDeclSet),
     prettyDeclSet,
   )
-import Covenant.Type ()
 import Data.Map.Strict qualified as M
 import Optics.Core (view)
 import Test.QuickCheck

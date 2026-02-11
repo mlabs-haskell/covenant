@@ -21,7 +21,7 @@ module Covenant.ASG
   ( -- * The ASG itself
 
     -- ** Types
-    ASG (ASG,ASGInternal),
+    ASG (ASG, ASGInternal),
 
     -- ** Functions
     topLevelId,
@@ -323,7 +323,7 @@ pattern Arg db i t <- UnsafeMkArg db i t
 -- | A fully-assembled Covenant ASG.
 --
 -- = Note: You should not construct this by hand unless you really know what you are doing!
---   Prefer the use of helper functions from this module if at all possible. 
+--   Prefer the use of helper functions from this module if at all possible.
 -- @since wip
 newtype ASG = ASGInternal (Id, Map Id ASGNode)
   deriving stock

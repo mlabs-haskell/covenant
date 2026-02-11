@@ -32,12 +32,12 @@ import Covenant.DeBruijn (DeBruijn (S, Z))
 import Covenant.Index (ix0, ix1)
 import Covenant.JSON (Version (..), compileAndSerialize, deserializeAndValidate_)
 import Covenant.Prim (TwoArgFunc (AddInteger, EqualsInteger, SubtractInteger))
+import Covenant.Type (AbstractTy, BuiltinFlatT (BoolT, IntegerT, StringT), CompT (Comp0, Comp1), CompTBody (ReturnT, (:--:>)), DataDeclaration, ValT (BuiltinFlat, Datatype), tyvar)
 import Covenant.Unsafe
   ( conformanceDatatypes1,
     conformanceDatatypes2,
     unsafeMkDatatypeInfos,
   )
-import Covenant.Type (AbstractTy, BuiltinFlatT (BoolT, IntegerT, StringT), CompT (Comp0, Comp1), CompTBody (ReturnT, (:--:>)), DataDeclaration, ValT (BuiltinFlat, Datatype), tyvar)
 import Data.Either (isRight)
 import Data.Vector qualified as Vector
 import Data.Wedge (Wedge (There))

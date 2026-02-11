@@ -74,15 +74,6 @@ import Covenant.Prim
     typeThreeArgFunc,
     typeTwoArgFunc,
   )
-import Covenant.Unsafe
-  ( Concrete (Concrete),
-    DebugASGBuilder,
-    concretifyMegaTest,
-    concretifyMinimalBuilder,
-    debugASGBuilder,
-    tyAppTestDatatypes,
-    typeIdTest,
-  )
 import Covenant.Type
   ( AbstractTy,
     BuiltinFlatT (ByteStringT, IntegerT, UnitT),
@@ -94,6 +85,15 @@ import Covenant.Type
     byteStringT,
     integerT,
     tyvar,
+  )
+import Covenant.Unsafe
+  ( Concrete (Concrete),
+    DebugASGBuilder,
+    concretifyMegaTest,
+    concretifyMinimalBuilder,
+    debugASGBuilder,
+    tyAppTestDatatypes,
+    typeIdTest,
   )
 import Covenant.Util (pattern ConsV, pattern NilV)
 import Data.Coerce (coerce)

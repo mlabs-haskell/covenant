@@ -17,7 +17,7 @@
 -- This is probably not that useful to end users of Covenant, who should use the
 -- safe APIs if possible. This is, however, necessary for the c2uplc code generator,
 -- which must manipulate the ASG.
--- @since wip 
+-- @since wip
 module Covenant.Unsafe
   ( -- * QuickCheck data wrappers
     Concrete (Concrete),
