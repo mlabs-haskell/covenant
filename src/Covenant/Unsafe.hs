@@ -77,8 +77,8 @@ module Covenant.Unsafe
     concretifyMinimalBuilder,
     concretifyMegaTest,
     -- For code generator
-    ValNodeInfo (..),
-    CompNodeInfo (..),
+    ValNodeInfo (LitInternal, AppInternal, ThunkInternal, CataInternal, DataConstructorInternal, MatchInternal),
+    CompNodeInfo (Builtin1Internal, Builtin2Internal, Builtin3Internal, Builtin6Internal, LamInternal, ForceInternal),
     ledgerTypes,
   )
 where
@@ -100,7 +100,9 @@ import Control.Monad.State.Strict
   )
 import Control.Monad.Trans (MonadTrans (lift))
 import Control.Monad.Trans.Except (ExceptT, runExceptT)
-import Covenant.ASG (ASGBuilder, ASGEnv (ASGEnv), ASGNode, CovenantError (TypeError), CovenantTypeError, Id, Ref (AnArg, AnId), ScopeInfo (ScopeInfo), app', arg, boundTyVar, builtin2, builtin3, ctor, ctor', dtype, force, lam, lazyLam, lit, match, thunk)
+import Covenant.ASG (ASGBuilder,
+                     ASGEnv (ASGEnv),
+                     ASGNode, CovenantError (TypeError), CovenantTypeError, Id, Ref (AnArg, AnId), ScopeInfo (ScopeInfo), app', arg, boundTyVar, builtin2, builtin3, ctor, ctor', dtype, force, lam, lazyLam, lit, match, thunk)
 import Covenant.Constant (AConstant (ABoolean, AnInteger))
 import Covenant.Data
   ( DatatypeInfo,
@@ -145,9 +147,9 @@ import Covenant.Internal.Term
   ( ASGNodeType (CompNodeType, ValNodeType),
     Arg (UnsafeMkArg),
     BoundTyVar (BoundTyVar),
-    CompNodeInfo (..),
+    ValNodeInfo (LitInternal, AppInternal, ThunkInternal, CataInternal, DataConstructorInternal, MatchInternal),
+    CompNodeInfo (Builtin1Internal, Builtin2Internal, Builtin3Internal, Builtin6Internal, LamInternal, ForceInternal),
     Id (UnsafeMkId),
-    ValNodeInfo (..),
     typeId,
   )
 import Covenant.Internal.Type
