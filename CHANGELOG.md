@@ -7,12 +7,17 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 ## UNRELEASED
 
 * Expose unsafe constructors `UnsafeMkId` and `UnsafeMkArg` for `Id` and `Arg`
-  respectively from `Covenant.Test`
+  respectively from `Covenant.Unsafe`
 * Add read-only synonyms `Id` and `Arg` for the two data types with the same
   name in `Covenant.ASG`
 * Modify `CovenantTypeError` for new catamorphism related errors
 * Rewrite `cata` to take explicit handlers for the base functor (similar to
   `match`)
+* Expose `ValNodeInfo`, `CompNodeInfo`, and `ASG` internals via `Covenant.Unsafe`
+* Renamed `Covenant.Test` to `Covenant.Unsafe`
+* Fixed a few small bugs affecting the analysis pass in the code generator (we no longer use 
+  base functors of BB forms for recursive matches, which is conceptually sound but we lose nothing 
+  by using the "match function form" directly)
 
 ## 1.3.0 -- 2025-10-07
 

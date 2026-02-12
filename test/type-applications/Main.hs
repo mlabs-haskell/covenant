@@ -18,15 +18,6 @@ import Covenant.Index
     ix1,
     ix2,
   )
-import Covenant.Test
-  ( Concrete (Concrete),
-    checkApp,
-    failLeft,
-    renameCompT,
-    renameValT,
-    runRenameM,
-    tyAppTestDatatypes,
-  )
 import Covenant.Type
   ( AbstractTy,
     BuiltinFlatT (BoolT, IntegerT, UnitT),
@@ -37,6 +28,15 @@ import Covenant.Type
     tyvar,
     pattern ReturnT,
     pattern (:--:>),
+  )
+import Covenant.Unsafe
+  ( Concrete (Concrete),
+    checkApp,
+    failLeft,
+    renameCompT,
+    renameValT,
+    runRenameM,
+    tyAppTestDatatypes,
   )
 import Covenant.Util (prettyStr)
 import Data.Coerce (coerce)

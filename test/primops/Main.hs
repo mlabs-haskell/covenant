@@ -29,12 +29,6 @@ import Covenant.Prim
     typeThreeArgFunc,
     typeTwoArgFunc,
   )
-import Covenant.Test
-  ( checkApp,
-    renameCompT,
-    renameValT,
-    runRenameM,
-  )
 import Covenant.Type
   ( AbstractTy (BoundAt),
     CompT,
@@ -44,6 +38,12 @@ import Covenant.Type
     boolT,
     byteStringT,
     integerT,
+  )
+import Covenant.Unsafe
+  ( checkApp,
+    renameCompT,
+    renameValT,
+    runRenameM,
   )
 import Data.Functor.Classes (liftEq)
 import Data.Functor.Identity (Identity (Identity))

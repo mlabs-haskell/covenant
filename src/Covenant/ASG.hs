@@ -125,7 +125,7 @@ import Control.Monad.Reader
 import Covenant.Constant (AConstant, typeConstant)
 import Covenant.Data (DatatypeInfo, mkDatatypeInfo, primBaseFunctorInfos)
 import Covenant.DeBruijn (DeBruijn (S, Z), asInt)
-import Covenant.Index (Count, Index, count0, intCount, intIndex, ix0, wordCount)
+import Covenant.Index (Count, Index, intCount, intIndex, ix0, wordCount)
 import Covenant.Internal.KindCheck (EncodingArgErr (EncodingArgMismatch), checkEncodingArgs)
 import Covenant.Internal.Ledger (ledgerTypes)
 import Covenant.Internal.Rename
@@ -322,20 +322,18 @@ pattern Arg db i t <- UnsafeMkArg db i t
 
 -- | A fully-assembled Covenant ASG.
 --
+-- = Note: You should not construct this by hand unless you really know what you are doing!
+--   Prefer the use of helper functions from this module if at all possible.
 -- @since 1.0.0
-newtype ASG = ASGInternal (Id, Map Id ASGNode)
+newtype ASG
+  = -- | @since wip
+    ASG (Id, Map Id ASGNode)
   deriving stock
     ( -- | @since 1.0.0
       Eq,
       -- | @since 1.0.0
       Show
     )
-
-{-# COMPLETE ASG #-}
-
--- | @since 1.3.0
-pattern ASG :: Map Id ASGNode -> ASG
-pattern ASG m <- ASGInternal (_, m)
 
 -- Note (Koz, 24/04/25): The `topLevelNode` and `nodeAt` functions use `fromJust`,
 -- because we can guarantee it's impossible to miss. For an end user, the only
@@ -351,13 +349,13 @@ pattern ASG m <- ASGInternal (_, m)
 --
 -- @since 1.3.0
 topLevelId :: ASG -> Id
-topLevelId (ASGInternal (i, _)) = i
+topLevelId (ASG (i, _)) = i
 
 -- | Retrieves the top-level node of an ASG.
 --
 -- @since 1.0.0
 topLevelNode :: ASG -> ASGNode
-topLevelNode asg@(ASGInternal (rootId, _)) = nodeAt rootId asg
+topLevelNode asg@(ASG (rootId, _)) = nodeAt rootId asg
 
 -- | Given an 'Id' and an ASG, produces the node corresponding to that 'Id'.
 --
@@ -370,7 +368,7 @@ topLevelNode asg@(ASGInternal (rootId, _)) = nodeAt rootId asg
 --
 -- @since 1.0.0
 nodeAt :: Id -> ASG -> ASGNode
-nodeAt i (ASG mappings) = fromJust . Map.lookup i $ mappings
+nodeAt i (ASG (_, mappings)) = fromJust . Map.lookup i $ mappings
 
 -- | The environment used when \'building up\' an 'ASG'. This type is exposed
 -- only for testing, or debugging, and should /not/ be used in general by those
@@ -607,7 +605,7 @@ runASGBuilder tyDict (ASGBuilder comp) =
           let (i, rootNode') = Bimap.findMax bm
           case rootNode' of
             AnError -> Left TopLevelError
-            ACompNode _ _ -> pure . ASGInternal $ (i, Bimap.toMap bm)
+            ACompNode _ _ -> pure . ASG $ (i, Bimap.toMap bm)
             AValNode t info -> Left . TopLevelValue bm t $ info
 
 -- | Given a scope and a positional argument index, construct that argument.
@@ -1154,9 +1152,11 @@ cata algT handlers rVal =
 -- and the second argument is a 'Vector' of \'handlers\' for each possible
 -- \'arm\' of the type of the value to be matched on.
 --
--- All handlers must be thunks, and must all return the same (concrete) result.
--- Polymorphic \'handlers\' (that is, thunks whose computation binds type
--- variables of its own) will fail to compile.
+-- Handlers for non-nullary constructors must be thunks. Handlers for
+-- nullary constructors must NOT be thunks (consistent with Cata).
+-- All return the same (concrete) result type.
+-- Polymorphic \'handlers\' (that is, thunks with computation types that bind type
+-- variables, i.e. thunks with an underlying CompT that is NOT a Comp0) will fail to compile.
 --
 -- = Note
 --
@@ -1211,14 +1211,14 @@ match scrutinee handlers = do
     isRecursive _ = pure False
 
     goRecursive :: TyName -> Vector (ValT AbstractTy) -> m Id
-    goRecursive tn@(TyName rawTn) tyConArgs = do
+    goRecursive tn tyConArgs = do
       -- This fromJust is safe b/c the presence of absence of base functor data is the condition that
       -- determines whether we're in this branch or the non-recursive one
       rawBFBB <- asks (snd . fromJust . join . preview (#datatypeInfo % ix tn % #baseFunctor))
       bfbb <- instantiateBFBB rawBFBB
-      handlers' <- Vector.toList <$> traverse cleanupHandler handlers
+      handlerTypes <- Vector.toList <$> traverse renameArg handlers
       tyDict <- asks (view #datatypeInfo)
-      case checkApp tyDict bfbb (Just <$> handlers') of
+      case checkApp tyDict bfbb handlerTypes of
         Right appliedBfbb -> do
           result <- undoRenameM appliedBfbb
           refTo $ AValNode result (MatchInternal scrutinee handlers)
@@ -1238,14 +1238,14 @@ match scrutinee handlers = do
             Left err' -> throwError $ MatchRenameBBFail err'
             Right res -> pure res
           -- The type constructor for the base-functor variant of the scrutinee type.
+          -- so like `List a`
           let scrut = Datatype tn tyConArgs
-          let scrutF = Datatype (TyName $ "#" <> rawTn) (Vector.snoc tyConArgs scrut)
           -- These are arguments to the original type constructor plus the snoc'd original type.
           -- E.g. if we have:
           --      Scrutinee: List Int
           --   this should be:
           --   [Int, List Int]
-          let bfInstArgs = Vector.snoc tyConArgs scrutF
+          let bfInstArgs = Vector.snoc tyConArgs scrut
           renamedArgs <- case runRenameM scope (traverse renameValT bfInstArgs) of
             Left err' -> throwError $ MatchRenameTyConArgFail err'
             Right res -> pure res
@@ -1255,26 +1255,28 @@ match scrutinee handlers = do
           case subbed of
             ThunkT bfComp -> pure bfComp
             other -> throwError $ MatchNonThunkBBF other
-
+    {-
     -- Unwraps a thunk handler if it is a handler for a nullary constructor.
-    cleanupHandler :: Ref -> m (ValT Renamed)
+    cleanupHandler :: Ref -> m (ValT Renamed, Ref)
     cleanupHandler r =
       renameArg r >>= \case
         Nothing ->
           throwError $ MatchErrorAsHandler r
         Just hVal -> case hVal of
           hdlr@(ThunkT (CompT cnt (ReturnT v)))
-            | cnt == count0 -> pure v
+            | cnt == count0 -> do
+                deThunkedTerm <- AnId <$> force r
+                pure (v,deThunkedTerm)
             | otherwise -> throwError $ MatchPolymorphicHandler hdlr
-          other -> pure other
-
+          other -> pure (other,r)
+    -}
     goNonRecursive :: TyName -> Vector (ValT AbstractTy) -> m Id
     goNonRecursive tn tyConArgs = do
       rawBBF <- asks (fromJust . preview (#datatypeInfo % ix tn % #bbForm))
       (instantiatedBBF :: CompT Renamed) <- instantiateBB rawBBF tyConArgs
-      handlers' <- Vector.toList <$> traverse cleanupHandler handlers
       tyDict <- asks (view #datatypeInfo)
-      case checkApp tyDict instantiatedBBF (Just <$> handlers') of
+      handlerTypes <- Vector.toList <$> traverse renameArg handlers
+      case checkApp tyDict instantiatedBBF handlerTypes of
         Right appliedBBF -> do
           result <- undoRenameM appliedBBF
           refTo $ AValNode result (MatchInternal scrutinee handlers)

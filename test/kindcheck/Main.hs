@@ -4,12 +4,6 @@ import Covenant.ASG (defaultDatatypes)
 import Covenant.Data ()
 import Covenant.DeBruijn (DeBruijn (Z))
 import Covenant.Index (count0, count1, ix0)
-import Covenant.Test
-  ( checkDataDecls,
-    checkEncodingArgs,
-    cycleCheck,
-    unsafeTyCon,
-  )
 import Covenant.Type
   ( AbstractTy (BoundAt),
     BuiltinFlatT (IntegerT),
@@ -22,6 +16,12 @@ import Covenant.Type
     TyName,
     ValT (Abstraction, BuiltinFlat, Datatype, ThunkT),
     tyvar,
+  )
+import Covenant.Unsafe
+  ( checkDataDecls,
+    checkEncodingArgs,
+    cycleCheck,
+    unsafeTyCon,
   )
 import Data.Map.Strict qualified as M
 import Data.Vector qualified as V

@@ -5,20 +5,20 @@
 {- HLINT ignore "Use camelCase" -}
 
 -- |
--- Module: Covenant.Test
+-- Module: Covenant.Unsafe
 -- Copyright: (C) MLabs 2025
 -- License: Apache 2.0
 -- Maintainer: koz@mlabs.city, sean@mlabs.city
 --
--- Various utilities designed to help test Covenant.
+-- Various utilities for unsafe ASG construction and manipulation.
 --
 -- = Note
 --
--- This is probably not that useful to end users of Covenant, but needs to be
--- exposed so the tests can use this functionality.
---
--- @since 1.0.0
-module Covenant.Test
+-- This is probably not that useful to end users of Covenant, who should use the
+-- safe APIs if possible. This is, however, necessary for both the c2uplc code generator,
+-- which must manipulate the ASG, and for testing.
+-- @since wip
+module Covenant.Unsafe
   ( -- * QuickCheck data wrappers
     Concrete (Concrete),
     DataDeclFlavor (ConcreteDecl, ConcreteNestedDecl, SimpleRecursive, Poly1, Poly1PolyThunks),
@@ -71,10 +71,15 @@ module Covenant.Test
     typeIdTest,
     Arg (UnsafeMkArg),
     Id (UnsafeMkId),
+    BoundTyVar (BoundTyVar),
 
     -- ** Exports for codegen tests
     concretifyMinimalBuilder,
     concretifyMegaTest,
+    -- For code generator
+    ValNodeInfo (LitInternal, AppInternal, ThunkInternal, CataInternal, DataConstructorInternal, MatchInternal),
+    CompNodeInfo (Builtin1Internal, Builtin2Internal, Builtin3Internal, Builtin6Internal, LamInternal, ForceInternal),
+    ledgerTypes,
   )
 where
 
@@ -95,7 +100,30 @@ import Control.Monad.State.Strict
   )
 import Control.Monad.Trans (MonadTrans (lift))
 import Control.Monad.Trans.Except (ExceptT, runExceptT)
-import Covenant.ASG (ASGBuilder, ASGEnv (ASGEnv), ASGNode, CovenantError (TypeError), CovenantTypeError, Id, Ref (AnArg, AnId), ScopeInfo (ScopeInfo), app', arg, boundTyVar, builtin2, builtin3, ctor, ctor', dtype, force, lam, lazyLam, lit, match, thunk)
+import Covenant.ASG
+  ( ASGBuilder,
+    ASGEnv (ASGEnv),
+    ASGNode,
+    CovenantError (TypeError),
+    CovenantTypeError,
+    Id,
+    Ref (AnArg, AnId),
+    ScopeInfo (ScopeInfo),
+    app',
+    arg,
+    boundTyVar,
+    builtin2,
+    builtin3,
+    ctor,
+    ctor',
+    dtype,
+    force,
+    lam,
+    lazyLam,
+    lit,
+    match,
+    thunk,
+  )
 import Covenant.Constant (AConstant (ABoolean, AnInteger))
 import Covenant.Data
   ( DatatypeInfo,
@@ -113,6 +141,7 @@ import Covenant.Internal.KindCheck
 import Covenant.Internal.Ledger
   ( CtorBuilder (Ctor),
     DeclBuilder (Decl),
+    ledgerTypes,
     list,
     maybeT,
     mkDecl,
@@ -138,7 +167,10 @@ import Covenant.Internal.Strategy
 import Covenant.Internal.Term
   ( ASGNodeType (CompNodeType, ValNodeType),
     Arg (UnsafeMkArg),
+    BoundTyVar (BoundTyVar),
+    CompNodeInfo (Builtin1Internal, Builtin2Internal, Builtin3Internal, Builtin6Internal, ForceInternal, LamInternal),
     Id (UnsafeMkId),
+    ValNodeInfo (AppInternal, CataInternal, DataConstructorInternal, LitInternal, MatchInternal, ThunkInternal),
     typeId,
   )
 import Covenant.Internal.Type
@@ -1035,8 +1067,7 @@ concretifyMinimalBuilder = lam topLevelTy body
     fPolyOneElimMinimal :: ASGBuilder Id
     fPolyOneElimMinimal = lam fPolyOneElimTy $ do
       maybeA <- AnArg <$> arg Z ix0
-      nothingHandler <- lazyLam (Comp0 $ ReturnT intT) $ do
-        AnId <$> lit (AnInteger 0)
+      nothingHandler <- lit (AnInteger 0)
       justHandler <- lazyLam (Comp0 $ tyvar (S Z) ix0 :--:> ReturnT intT) $ do
         AnId <$> lit (AnInteger 0)
       AnId <$> match maybeA [AnId justHandler, AnId nothingHandler]
@@ -1098,17 +1129,17 @@ concretifyMegaTest = lam topLevelTy body
     fPolyOneElim = lam fPolyOneElimTy $ do
       zero <- AnId <$> lit (AnInteger 0)
       maybeA <- AnArg <$> arg Z ix0
-      nothingHandler <- lazyLam (Comp0 $ ReturnT intT) $ do
+      nothingHandler <- do
         mConst <- monoConst
-        b <- AnArg <$> arg (S Z) ix2
-        bToInt <- force . AnArg =<< arg (S Z) ix3
+        b <- AnArg <$> arg Z ix2
+        bToInt <- force . AnArg =<< arg Z ix3
         x <- AnId <$> app' bToInt [b]
         AnId <$> app' mConst [zero, x]
       justHandler <- lazyLam (Comp0 $ tyvar (S Z) ix0 :--:> ReturnT intT) $ do
         aToInt <- force . AnArg =<< arg (S Z) ix1
         a <- AnArg <$> arg Z ix0
         AnId <$> app' aToInt [a]
-      AnId <$> match maybeA [AnId justHandler, AnId nothingHandler] -- ,AnId justHandler]
+      AnId <$> match maybeA [AnId justHandler, nothingHandler] -- ,AnId justHandler]
       where
         fPolyOneElimTy :: CompT AbstractTy
         fPolyOneElimTy =

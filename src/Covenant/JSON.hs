@@ -18,7 +18,7 @@
 -- Is encoded to JSON using @{tag: \<CTOR NAME\>, fields: [\<Arg1\>, \<Arg2\>, \<ArgN\>]}@
 --
 -- This is used for all Haskell sum types which do /not/ have 'LabelOptic'
--- instnaces. For those with field names given by such instances, the @fields@
+-- instances. For those with field names given by such instances, the @fields@
 -- part of the encoded sum is not an array of arguments, but instead a JSON
 -- object, with fields whose names correspond to the label optics. Comments make
 -- it clear which types are encoded in which way.
@@ -35,9 +35,10 @@ module Covenant.JSON
     DeserializeErr (..),
     deserializeAndValidate,
     deserializeAndValidate_,
+    deserializeCompilationUnit,
+    CompilationUnit (..),
   )
 where
-
 #if __GLASGOW_HASKELL__==908
 import Data.Foldable (foldl')
 #endif
@@ -81,6 +82,7 @@ import Covenant.Internal.KindCheck (checkDataDecls)
 import Covenant.Internal.Strategy
   ( InternalStrategy
       ( InternalAssocMapStrat,
+        InternalDataStrat,
         InternalListStrat,
         InternalOpaqueStrat,
         InternalPairStrat
@@ -318,7 +320,7 @@ compileAndSerialize path decls asgBuilder version = do
     Left err' -> throwError . DatatypeConversionFailure $ err'
     Right infos -> case runASGBuilder infos asgBuilder of
       Left err' -> throwError . ASGCompilationFailure $ err'
-      Right (ASG asg) -> do
+      Right (ASG (_, asg)) -> do
         let cu = CompilationUnit (Vector.fromList decls) asg version
         liftIO $ writeJSONWith path cu encodeCompilationUnit
 
@@ -351,6 +353,20 @@ deserializeAndValidate path = do
     Left err' -> throwError . ASGValidationFail $ err'
     Right asg -> pure asg
 
+-- @since wip
+deserializeCompilationUnit ::
+  FilePath ->
+  IO CompilationUnit
+deserializeCompilationUnit path =
+  either (throwIO . userError . show) pure
+    =<< runExceptT
+      ( do
+          rawCU@(CompilationUnit datatypes _ version) <- readJSON @CompilationUnit path
+          case validateCompilationUnit rawCU of
+            Left err' -> throwError . ASGValidationFail $ err'
+            Right (ASG (_, asg)) -> pure $ CompilationUnit datatypes asg version
+      )
+
 -- | Like 'deserializeAndValidate' but runs directly in 'IO'.
 --
 -- = Note
@@ -378,6 +394,9 @@ data Version = Version {_major :: Int, _minor :: Int}
       Ord
     )
 
+-- TODO: the asg field should actually contain an ASG (so that we persist the pointer to the top level node,
+--       so that users don't have to maintain our "the node with the highest Id must be the entry point")
+-- @since wip
 data CompilationUnit
   = CompilationUnit
   { _datatypes :: Vector (DataDeclaration AbstractTy),
@@ -631,7 +650,8 @@ decodeInternalStrategy =
     [ "InternalListStrat" :=> constM InternalListStrat,
       "InternalPairStrat" :=> constM InternalPairStrat,
       "InternalAssocMapStrat" :=> constM InternalAssocMapStrat,
-      "InternalOpaqueStrat" :=> constM InternalOpaqueStrat
+      "InternalOpaqueStrat" :=> constM InternalOpaqueStrat,
+      "InternalDataStrat" :=> constM InternalDataStrat
     ]
 
 {- PlutusDataConstructor encodes as a typical enumeration type:

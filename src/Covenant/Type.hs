@@ -55,6 +55,13 @@ module Covenant.Type
         PlutusMap
       ),
     DataDeclaration (DataDeclaration, OpaqueData),
+    InternalStrategy
+      ( InternalListStrat,
+        InternalPairStrat,
+        InternalDataStrat,
+        InternalAssocMapStrat,
+        InternalOpaqueStrat
+      ),
   )
 where
 
@@ -71,6 +78,7 @@ import Covenant.Index
   )
 import Covenant.Internal.Strategy
   ( DataEncoding (BuiltinStrategy, PlutusData, SOP),
+    InternalStrategy (InternalAssocMapStrat, InternalDataStrat, InternalListStrat, InternalOpaqueStrat, InternalPairStrat),
     PlutusDataConstructor
       ( PlutusB,
         PlutusConstr,

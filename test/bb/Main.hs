@@ -9,7 +9,14 @@ import Covenant.Data
   )
 import Covenant.DeBruijn (DeBruijn (S, Z))
 import Covenant.Index (ix0, ix1)
-import Covenant.Test
+import Covenant.Type
+  ( AbstractTy (BoundAt),
+    CompT (Comp0, Comp1, Comp2),
+    CompTBody (ReturnT, (:--:>)),
+    ValT (Abstraction, ThunkT),
+    tyvar,
+  )
+import Covenant.Unsafe
   ( DataDeclFlavor (Poly1PolyThunks),
     DataDeclSet (DataDeclSet),
     failLeft,
@@ -22,13 +29,6 @@ import Covenant.Test
     tyAppTestDatatypes,
     unsafeTyCon,
     weirderList,
-  )
-import Covenant.Type
-  ( AbstractTy (BoundAt),
-    CompT (Comp0, Comp1, Comp2),
-    CompTBody (ReturnT, (:--:>)),
-    ValT (Abstraction, ThunkT),
-    tyvar,
   )
 import Data.Map qualified as M
 import Data.Maybe (catMaybes, fromJust)
