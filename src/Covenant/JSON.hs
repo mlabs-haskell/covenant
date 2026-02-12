@@ -39,7 +39,9 @@ module Covenant.JSON
     CompilationUnit (..),
   )
 where
-
+#if __GLASGOW_HASKELL__==908
+import Data.Foldable (foldl')
+#endif
 import Control.Exception (throwIO)
 import Control.Monad (foldM, unless)
 import Control.Monad.Error.Class (MonadError (throwError))
@@ -268,7 +270,7 @@ import Data.Bifunctor (Bifunctor (first))
 import Data.ByteString (ByteString)
 import Data.ByteString.Lazy qualified as BL
 import Data.Char (isAlphaNum, isUpper)
-import Data.Foldable (foldl', toList, traverse_)
+import Data.Foldable (toList, traverse_)
 import Data.Kind (Type)
 import Data.Map (Map)
 import Data.Map qualified as M
