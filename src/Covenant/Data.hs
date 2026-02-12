@@ -518,6 +518,7 @@ mkBBF' (DataDeclaration tn numVars ctors _)
    This returns a `CompT` because that's actually what we need.
 
 -}
+-- @since wip
 mkMatchFunTy :: DataDeclaration AbstractTy -> ExceptT BBFError Maybe (CompT AbstractTy)
 mkMatchFunTy (OpaqueData tn ctorsSet) = do
   let bbfFunArgs = map mkOpaqueFn (Set.toList ctorsSet)
@@ -617,6 +618,7 @@ mkMatchFunTy (DataDeclaration tn numVars ctors _)
    much that this will return something even for a non-recursive type.
 
 -}
+-- @since wip
 mkCataFunTy :: DataDeclaration AbstractTy -> ExceptT BBFError Maybe (ValT AbstractTy)
 mkCataFunTy (OpaqueData tn ctorsSet) = do
   let bbfFunArgs = map mkOpaqueFn (Set.toList ctorsSet)
