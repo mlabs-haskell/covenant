@@ -36,13 +36,9 @@ module Covenant.JSON
     deserializeAndValidate,
     deserializeAndValidate_,
     deserializeCompilationUnit,
-
     CompilationUnit (..),
   )
 where
-
-
-import Data.Foldable (foldl')
 
 import Control.Exception (throwIO)
 import Control.Monad (foldM, unless)
@@ -272,7 +268,7 @@ import Data.Bifunctor (Bifunctor (first))
 import Data.ByteString (ByteString)
 import Data.ByteString.Lazy qualified as BL
 import Data.Char (isAlphaNum, isUpper)
-import Data.Foldable (toList, traverse_)
+import Data.Foldable (foldl', toList, traverse_)
 import Data.Kind (Type)
 import Data.Map (Map)
 import Data.Map qualified as M
@@ -322,7 +318,7 @@ compileAndSerialize path decls asgBuilder version = do
     Left err' -> throwError . DatatypeConversionFailure $ err'
     Right infos -> case runASGBuilder infos asgBuilder of
       Left err' -> throwError . ASGCompilationFailure $ err'
-      Right (ASG (_,asg)) -> do
+      Right (ASG (_, asg)) -> do
         let cu = CompilationUnit (Vector.fromList decls) asg version
         liftIO $ writeJSONWith path cu encodeCompilationUnit
 
@@ -361,11 +357,13 @@ deserializeCompilationUnit ::
   IO CompilationUnit
 deserializeCompilationUnit path =
   either (throwIO . userError . show) pure
-    =<< runExceptT (do
-            rawCU@(CompilationUnit datatypes _ version) <- readJSON @CompilationUnit path
-            case validateCompilationUnit rawCU of
-              Left err' -> throwError . ASGValidationFail $ err'
-              Right (ASG (_,asg)) -> pure $ CompilationUnit datatypes asg version)
+    =<< runExceptT
+      ( do
+          rawCU@(CompilationUnit datatypes _ version) <- readJSON @CompilationUnit path
+          case validateCompilationUnit rawCU of
+            Left err' -> throwError . ASGValidationFail $ err'
+            Right (ASG (_, asg)) -> pure $ CompilationUnit datatypes asg version
+      )
 
 -- | Like 'deserializeAndValidate' but runs directly in 'IO'.
 --

@@ -325,9 +325,9 @@ pattern Arg db i t <- UnsafeMkArg db i t
 -- = Note: You should not construct this by hand unless you really know what you are doing!
 --   Prefer the use of helper functions from this module if at all possible.
 -- @since 1.0.0
-newtype ASG =
-  -- | @since wip
-  ASG (Id, Map Id ASGNode)
+newtype ASG
+  = -- | @since wip
+    ASG (Id, Map Id ASGNode)
   deriving stock
     ( -- | @since 1.0.0
       Eq,
@@ -368,7 +368,7 @@ topLevelNode asg@(ASG (rootId, _)) = nodeAt rootId asg
 --
 -- @since 1.0.0
 nodeAt :: Id -> ASG -> ASGNode
-nodeAt i (ASG (_,mappings)) = fromJust . Map.lookup i $ mappings
+nodeAt i (ASG (_, mappings)) = fromJust . Map.lookup i $ mappings
 
 -- | The environment used when \'building up\' an 'ASG'. This type is exposed
 -- only for testing, or debugging, and should /not/ be used in general by those
