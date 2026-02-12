@@ -37,14 +37,13 @@ module Covenant.JSON
     deserializeAndValidate_,
     deserializeCompilationUnit,
 
-    -- * HOW DID WE NOT EXPORT THIS
     CompilationUnit (..),
   )
 where
 
-#if __GLASGOW_HASKELL__==908
+
 import Data.Foldable (foldl')
-#endif
+
 import Control.Exception (throwIO)
 import Control.Monad (foldM, unless)
 import Control.Monad.Error.Class (MonadError (throwError))
@@ -323,7 +322,7 @@ compileAndSerialize path decls asgBuilder version = do
     Left err' -> throwError . DatatypeConversionFailure $ err'
     Right infos -> case runASGBuilder infos asgBuilder of
       Left err' -> throwError . ASGCompilationFailure $ err'
-      Right (ASG asg) -> do
+      Right (ASG (_,asg)) -> do
         let cu = CompilationUnit (Vector.fromList decls) asg version
         liftIO $ writeJSONWith path cu encodeCompilationUnit
 
@@ -356,17 +355,17 @@ deserializeAndValidate path = do
     Left err' -> throwError . ASGValidationFail $ err'
     Right asg -> pure asg
 
+-- @since wip
 deserializeCompilationUnit ::
   FilePath ->
   IO CompilationUnit
 deserializeCompilationUnit path =
   either (throwIO . userError . show) pure
-    =<< ( runExceptT $ do
+    =<< runExceptT (do
             rawCU@(CompilationUnit datatypes _ version) <- readJSON @CompilationUnit path
             case validateCompilationUnit rawCU of
               Left err' -> throwError . ASGValidationFail $ err'
-              Right (ASG asg) -> pure $ CompilationUnit datatypes asg version
-        )
+              Right (ASG (_,asg)) -> pure $ CompilationUnit datatypes asg version)
 
 -- | Like 'deserializeAndValidate' but runs directly in 'IO'.
 --
@@ -395,6 +394,9 @@ data Version = Version {_major :: Int, _minor :: Int}
       Ord
     )
 
+-- TODO: the asg field should actually contain an ASG (so that we persist the pointer to the top level node,
+--       so that users don't have to maintain our "the node with the highest Id must be the entry point")
+-- @since wip
 data CompilationUnit
   = CompilationUnit
   { _datatypes :: Vector (DataDeclaration AbstractTy),

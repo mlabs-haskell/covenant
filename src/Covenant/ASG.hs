@@ -21,7 +21,7 @@ module Covenant.ASG
   ( -- * The ASG itself
 
     -- ** Types
-    ASG (ASG, ASGInternal),
+    ASG (ASG),
 
     -- ** Functions
     topLevelId,
@@ -324,20 +324,16 @@ pattern Arg db i t <- UnsafeMkArg db i t
 --
 -- = Note: You should not construct this by hand unless you really know what you are doing!
 --   Prefer the use of helper functions from this module if at all possible.
--- @since wip
-newtype ASG = ASGInternal (Id, Map Id ASGNode)
+-- @since 1.0.0
+newtype ASG =
+  -- | @since wip
+  ASG (Id, Map Id ASGNode)
   deriving stock
     ( -- | @since 1.0.0
       Eq,
       -- | @since 1.0.0
       Show
     )
-
-{-# COMPLETE ASG #-}
-
--- | @since 1.3.0
-pattern ASG :: Map Id ASGNode -> ASG
-pattern ASG m <- ASGInternal (_, m)
 
 -- Note (Koz, 24/04/25): The `topLevelNode` and `nodeAt` functions use `fromJust`,
 -- because we can guarantee it's impossible to miss. For an end user, the only
@@ -353,13 +349,13 @@ pattern ASG m <- ASGInternal (_, m)
 --
 -- @since 1.3.0
 topLevelId :: ASG -> Id
-topLevelId (ASGInternal (i, _)) = i
+topLevelId (ASG (i, _)) = i
 
 -- | Retrieves the top-level node of an ASG.
 --
 -- @since 1.0.0
 topLevelNode :: ASG -> ASGNode
-topLevelNode asg@(ASGInternal (rootId, _)) = nodeAt rootId asg
+topLevelNode asg@(ASG (rootId, _)) = nodeAt rootId asg
 
 -- | Given an 'Id' and an ASG, produces the node corresponding to that 'Id'.
 --
@@ -372,7 +368,7 @@ topLevelNode asg@(ASGInternal (rootId, _)) = nodeAt rootId asg
 --
 -- @since 1.0.0
 nodeAt :: Id -> ASG -> ASGNode
-nodeAt i (ASG mappings) = fromJust . Map.lookup i $ mappings
+nodeAt i (ASG (_,mappings)) = fromJust . Map.lookup i $ mappings
 
 -- | The environment used when \'building up\' an 'ASG'. This type is exposed
 -- only for testing, or debugging, and should /not/ be used in general by those
@@ -609,7 +605,7 @@ runASGBuilder tyDict (ASGBuilder comp) =
           let (i, rootNode') = Bimap.findMax bm
           case rootNode' of
             AnError -> Left TopLevelError
-            ACompNode _ _ -> pure . ASGInternal $ (i, Bimap.toMap bm)
+            ACompNode _ _ -> pure . ASG $ (i, Bimap.toMap bm)
             AValNode t info -> Left . TopLevelValue bm t $ info
 
 -- | Given a scope and a positional argument index, construct that argument.
