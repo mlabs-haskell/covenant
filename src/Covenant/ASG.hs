@@ -887,7 +887,7 @@ dataConstructor tyName ctorName fields = do
   case thisTyDecl of
     OpaqueData _ opaqueCtorSet -> do
       checkOpaqueArgs opaqueCtorSet renamedFieldTypes
-      refTo $ AValNode (Datatype tyName mempty) (DataConstructorInternal tyName ctorName fields)
+      refTo $ AValNode (ThunkT . Comp0 . ReturnT $ Datatype tyName mempty) (DataConstructorInternal tyName ctorName fields)
     DataDeclaration _ count ctors _ -> do
       -- First we check that the arity of the constructor is equal to the number of fields in the decl.
       checkFieldArity (Vector.length fields) thisTyInfo
