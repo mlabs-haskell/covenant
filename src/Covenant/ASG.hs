@@ -861,6 +861,11 @@ app fId argRefs instTys = do
 -- We resolve this problem by returning a thunk. In the case of our example,
 -- @Nothing@ would produce @\<forall a . !Maybe a\>@.
 --
+-- IMPORTANT NOTE: Due a limitation in c2uplc, calling this function to construct an opaque
+--                 type will return the datatype directly, not a thunk wrapping the datatype.
+--                 Consequently you must use this, and not the helpers (@ctor@, @ctor'@) to
+--                 construct a value of an opaque datatype.
+--
 -- @since 1.2.0
 dataConstructor ::
   forall (m :: Type -> Type).
@@ -1157,6 +1162,10 @@ cata algT handlers rVal =
 -- All return the same (concrete) result type.
 -- Polymorphic \'handlers\' (that is, thunks with computation types that bind type
 -- variables, i.e. thunks with an underlying CompT that is NOT a Comp0) will fail to compile.
+--
+-- IMPORTANT: You must ensure that the scrutinee is not an ERROR, and that it is not the case
+--            that ALL of the handlers are ERROR. The former will cause an exception in c2uplc,
+--            the latter should be checked here but does not appear to be (TODO: implement that check).
 --
 -- = Note
 --
