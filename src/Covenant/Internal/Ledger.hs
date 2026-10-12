@@ -350,7 +350,7 @@ outputDatum =
       count0
       [ Ctor "NoOutputDatum" [],
         Ctor "OutputDatumHash" [tycon "DatumHash" []],
-        Ctor "OutputDatum" [tycon "OutputDatum" []]
+        Ctor "OutputDatum" [tycon "Datum" []]
       ]
       (PlutusData ConstrData)
 
@@ -395,7 +395,7 @@ delegatee =
       count0
       [ Ctor "DelegStake" [tycon "PubKeyHash" []],
         Ctor "DelegVote" [tycon "DRep" []],
-        Ctor "DelegStakeVoke" [tycon "PubKeyHash" [], tycon "DRep" []]
+        Ctor "DelegStakeVote" [tycon "PubKeyHash" [], tycon "DRep" []]
       ]
       (PlutusData ConstrData)
 
